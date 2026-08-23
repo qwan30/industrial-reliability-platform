@@ -48,6 +48,29 @@ class Phase1Contract:
     calibration: Split
     holdout: Split
     events: tuple[Event, ...]
+    dataset_path: str = "data/raw/metropt/dataset_train.csv"
+    dataset_release_status: str = (
+        "local dataset and checksum are unofficial; official-release equivalence is unknown"
+    )
+    dataset_use_status: str = "approved for private feasibility analysis only"
+    timestamp_policy: str = "naive_unspecified"
+    split_window_policy: str = "complete_raw_lookback_inside_split"
+    window_lookback_seconds: int = 1800
+    boundary_purge_policy: str = "purge_full_lookback"
+    window_validity_policy: str = "exactly_1800_consecutive_one_second_observations"
+    gap_max_delta_seconds: int = 1
+    gap_policy: str = "reject_window_crossing_delta_greater_than_one_second"
+    random_split_policy: str = "forbidden_chronological_train_calibration_holdout"
+    fit_data_policy: str = "train_only"
+    threshold_data_policy: str = "calibration_only"
+    holdout_policy: str = "evaluate_once_no_retuning"
+    evaluation_policy: str = "event_level_and_window_metrics"
+    reporting_policy: str = (
+        "absolute_event_detections_per_event_lead_false_episodes_per_day_window_pr_auc_time_in_alert"
+    )
+    model_selection_policy: str = (
+        "simplest_model_meeting_gate_ties_statistical_then_isolation_forest_then_autoencoder"
+    )
     window_seconds: int = 1800
     stride_seconds: int = 300
     event_horizon_seconds: int = 7200
@@ -138,10 +161,7 @@ PHASE1 = Phase1Contract(
         "user's 2026-08-24 instruction to commit/push the research, plan phase by phase, "
         "then execute continuously"
     ),
-    dataset_license_status=(
-        "approved for private feasibility analysis only; official-release equivalence and "
-        "license remain explicitly unknown"
-    ),
+    dataset_license_status="authoritative license unknown",
     dataset_sha256="3fd0788c1b8fb7753ac0a2047f487c87f59b8b36af2f5553e4990354ed86d168",
     dataset_bytes=1_646_201_046,
     dataset_rows=10_773_588,
@@ -190,6 +210,29 @@ PHASE1 = Phase1Contract(
                 "43,197 absent seconds"
             ),
         ),
+    ),
+    dataset_path="data/raw/metropt/dataset_train.csv",
+    dataset_release_status=(
+        "local dataset and checksum are unofficial; official-release equivalence is unknown"
+    ),
+    dataset_use_status="approved for private feasibility analysis only",
+    timestamp_policy="naive_unspecified",
+    split_window_policy="complete_raw_lookback_inside_split",
+    window_lookback_seconds=1_800,
+    boundary_purge_policy="purge_full_lookback",
+    window_validity_policy="exactly_1800_consecutive_one_second_observations",
+    gap_max_delta_seconds=1,
+    gap_policy="reject_window_crossing_delta_greater_than_one_second",
+    random_split_policy="forbidden_chronological_train_calibration_holdout",
+    fit_data_policy="train_only",
+    threshold_data_policy="calibration_only",
+    holdout_policy="evaluate_once_no_retuning",
+    evaluation_policy="event_level_and_window_metrics",
+    reporting_policy=(
+        "absolute_event_detections_per_event_lead_false_episodes_per_day_window_pr_auc_time_in_alert"
+    ),
+    model_selection_policy=(
+        "simplest_model_meeting_gate_ties_statistical_then_isolation_forest_then_autoencoder"
     ),
 )
 

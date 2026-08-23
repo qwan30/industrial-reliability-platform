@@ -134,8 +134,13 @@ from industrial_reliability.contracts import PHASE1, contract_manifest
 def test_contract_excludes_leakage_columns() -> None:
     assert "LPS" not in PHASE1.predictor_columns
     assert not set(PHASE1.predictor_columns) & {
-        "timestamp", "Pressure_switch", "Oil_level",
-        "gpsLong", "gpsLat", "gpsSpeed", "gpsQuality",
+        "timestamp",
+        "Pressure_switch",
+        "Oil_level",
+        "gpsLong",
+        "gpsLat",
+        "gpsSpeed",
+        "gpsQuality",
     }
 
 

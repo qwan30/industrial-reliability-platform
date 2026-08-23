@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -177,6 +178,10 @@ def _feature_manifest_payload(
     }
 
 
+def _claim_artifact(temporary_path: Path, destination: Path) -> None:
+    os.link(temporary_path, destination)
+
+
 def build_features(
     prepared_dir: Path,
     output_path: Path,
@@ -195,17 +200,20 @@ def build_features(
         raise DataContractError("prepared data manifest segments must be a list")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        prefix=f".{output_path.name}.tmp-",
-        dir=output_path.parent,
-        delete=False,
-    ) as temporary_handle:
-        temporary_path = Path(temporary_handle.name)
     windows_by_split = {split.name: 0 for split in (contract.train, contract.calibration, contract.holdout)}
     rejected = {"split_boundary": 0, "timestamp_gap": 0}
     writer: pq.ParquetWriter | None = None
+    temporary_path: Path | None = None
+    temporary_manifest_path: Path | None = None
+    claimed_paths: list[Path] = []
 
     try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{output_path.name}.tmp-",
+            dir=output_path.parent,
+            delete=False,
+        ) as temporary_handle:
+            temporary_path = Path(temporary_handle.name)
         schema = _feature_schema(contract)
         writer = pq.ParquetWriter(temporary_path, schema)
         prepared_root = prepared_dir.resolve()
@@ -244,11 +252,7 @@ def build_features(
             output_sha256=output_sha256,
         )
         manifest_sha256 = hashlib.sha256(_canonical_json(payload)).hexdigest()
-        manifest_path.write_bytes(
-            _canonical_json({**payload, "manifest_sha256": manifest_sha256}) + b"\n"
-        )
-        temporary_path.replace(output_path)
-        return FeatureManifest(
+        feature_manifest = FeatureManifest(
             contract_sha256=contract_sha256,
             data_manifest_sha256=data_manifest_sha256,
             feature_columns=contract.feature_columns,
@@ -259,7 +263,28 @@ def build_features(
             output_sha256=output_sha256,
             manifest_sha256=manifest_sha256,
         )
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{manifest_path.name}.tmp-",
+            dir=manifest_path.parent,
+            delete=False,
+        ) as temporary_manifest:
+            temporary_manifest_path = Path(temporary_manifest.name)
+            temporary_manifest.write(
+                _canonical_json({**payload, "manifest_sha256": manifest_sha256}) + b"\n"
+            )
+
+        _claim_artifact(temporary_path, output_path)
+        claimed_paths.append(output_path)
+        _claim_artifact(temporary_manifest_path, manifest_path)
+        claimed_paths.append(manifest_path)
+        return feature_manifest
+    except BaseException:
+        for claimed_path in reversed(claimed_paths):
+            claimed_path.unlink(missing_ok=True)
+        raise
     finally:
         if writer is not None:
             writer.close()
-        temporary_path.unlink(missing_ok=True)
+        for owned_temporary in (temporary_path, temporary_manifest_path):
+            if owned_temporary is not None:
+                owned_temporary.unlink(missing_ok=True)

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import fields, replace
 from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
 import pyarrow.parquet as pq
+import pytest
 from tests.helpers import (
     make_segment,
     make_segment_around_split_boundary,
@@ -18,8 +20,9 @@ from tests.helpers import (
     write_sample_csv,
 )
 
-from industrial_reliability.contracts import PHASE1, Split, contract_manifest
-from industrial_reliability.data import prepare_dataset, sha256_file
+import industrial_reliability.features as features_module
+from industrial_reliability.contracts import PHASE1, Phase1Contract, Split, contract_manifest
+from industrial_reliability.data import DataContractError, prepare_dataset, sha256_file
 from industrial_reliability.features import (
     FeatureManifest,
     build_features,
@@ -35,6 +38,19 @@ def _canonical_json(value: object) -> bytes:
         allow_nan=False,
         separators=(",", ":"),
     ).encode("utf-8")
+
+
+def _prepared_feature_inputs(tmp_path: Path) -> tuple[Path, Path, Phase1Contract]:
+    start = pd.Timestamp("2022-01-01 06:00:00").to_pydatetime()
+    source = tmp_path / "source.csv"
+    write_sample_csv(
+        source,
+        [start + timedelta(seconds=offset) for offset in range(80)],
+    )
+    contract = sample_contract(source)
+    prepared = tmp_path / "prepared"
+    prepare_dataset(source, prepared, contract)
+    return prepared, tmp_path / "features.parquet", contract
 
 
 def test_future_change_does_not_change_prior_feature() -> None:
@@ -190,3 +206,92 @@ def test_feature_manifest_has_exact_fields_counts_and_hashes(tmp_path: Path) -> 
     manifest_hash = sidecar.pop("manifest_sha256")
     assert manifest_hash == hashlib.sha256(_canonical_json(sidecar)).hexdigest()
     assert manifest.manifest_sha256 == manifest_hash
+
+
+def test_build_features_rejects_tampered_data_manifest(tmp_path: Path) -> None:
+    prepared, output, contract = _prepared_feature_inputs(tmp_path)
+    manifest_path = prepared / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["total_rows"] += 1
+    manifest_path.write_bytes(_canonical_json(manifest) + b"\n")
+
+    with pytest.raises(DataContractError, match="data manifest SHA-256"):
+        build_features(prepared, output, contract)
+
+    assert not output.exists()
+    assert not output.with_suffix(".manifest.json").exists()
+
+
+def test_build_features_rejects_tampered_segment(tmp_path: Path) -> None:
+    prepared, output, contract = _prepared_feature_inputs(tmp_path)
+    data_manifest = json.loads((prepared / "manifest.json").read_text(encoding="utf-8"))
+    segment = prepared / data_manifest["segments"][0]["path"]
+    with segment.open("ab") as handle:
+        handle.write(b"tampered")
+
+    with pytest.raises(DataContractError, match="segment SHA-256 mismatch"):
+        build_features(prepared, output, contract)
+
+    assert not output.exists()
+    assert not output.with_suffix(".manifest.json").exists()
+
+
+@pytest.mark.parametrize("existing", ["output", "manifest"])
+def test_build_features_preserves_preexisting_destination_bytes(
+    tmp_path: Path,
+    existing: str,
+) -> None:
+    prepared, output, contract = _prepared_feature_inputs(tmp_path)
+    manifest_path = output.with_suffix(".manifest.json")
+    destination = output if existing == "output" else manifest_path
+    destination.write_bytes(b"owner-controlled bytes")
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        build_features(prepared, output, contract)
+
+    assert destination.read_bytes() == b"owner-controlled bytes"
+    assert not (manifest_path if existing == "output" else output).exists()
+
+
+def test_build_features_does_not_overwrite_destination_created_after_precheck(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepared, output, contract = _prepared_feature_inputs(tmp_path)
+    real_load_manifest = features_module._load_data_manifest
+
+    def load_manifest_then_create_destination(*args, **kwargs):
+        manifest = real_load_manifest(*args, **kwargs)
+        output.write_bytes(b"racing owner bytes")
+        return manifest
+
+    monkeypatch.setattr(features_module, "_load_data_manifest", load_manifest_then_create_destination)
+
+    with pytest.raises(FileExistsError):
+        build_features(prepared, output, contract)
+
+    assert output.read_bytes() == b"racing owner bytes"
+    assert not output.with_suffix(".manifest.json").exists()
+
+
+def test_build_features_removes_claimed_output_when_manifest_claim_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepared, output, contract = _prepared_feature_inputs(tmp_path)
+    manifest_path = output.with_suffix(".manifest.json")
+    real_link = os.link
+
+    def fail_manifest_claim(source, destination, *args, **kwargs):
+        if Path(destination) == manifest_path:
+            raise OSError("simulated manifest claim failure")
+        return real_link(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(os, "link", fail_manifest_claim)
+
+    with pytest.raises(OSError, match="simulated manifest claim failure"):
+        build_features(prepared, output, contract)
+
+    assert not output.exists()
+    assert not manifest_path.exists()
+    assert not list(tmp_path.glob(".features*.tmp-*"))

@@ -182,6 +182,16 @@ def _claim_artifact(temporary_path: Path, destination: Path) -> None:
     os.link(temporary_path, destination)
 
 
+def _unlink_if_owned(destination: Path, temporary_path: Path) -> None:
+    try:
+        destination_stat = destination.stat(follow_symlinks=False)
+        temporary_stat = temporary_path.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if os.path.samestat(destination_stat, temporary_stat):
+        destination.unlink(missing_ok=True)
+
+
 def build_features(
     prepared_dir: Path,
     output_path: Path,
@@ -205,7 +215,7 @@ def build_features(
     writer: pq.ParquetWriter | None = None
     temporary_path: Path | None = None
     temporary_manifest_path: Path | None = None
-    claimed_paths: list[Path] = []
+    claimed_paths: list[tuple[Path, Path]] = []
 
     try:
         with tempfile.NamedTemporaryFile(
@@ -274,17 +284,17 @@ def build_features(
             )
 
         _claim_artifact(temporary_path, output_path)
-        claimed_paths.append(output_path)
+        claimed_paths.append((output_path, temporary_path))
         _claim_artifact(temporary_manifest_path, manifest_path)
-        claimed_paths.append(manifest_path)
+        claimed_paths.append((manifest_path, temporary_manifest_path))
         return feature_manifest
     except BaseException:
-        for claimed_path in reversed(claimed_paths):
-            claimed_path.unlink(missing_ok=True)
+        for claimed_path, owned_temporary in reversed(claimed_paths):
+            _unlink_if_owned(claimed_path, owned_temporary)
         raise
     finally:
         if writer is not None:
             writer.close()
-        for owned_temporary in (temporary_path, temporary_manifest_path):
-            if owned_temporary is not None:
-                owned_temporary.unlink(missing_ok=True)
+        for temporary_to_remove in (temporary_path, temporary_manifest_path):
+            if temporary_to_remove is not None:
+                temporary_to_remove.unlink(missing_ok=True)

@@ -295,3 +295,29 @@ def test_build_features_removes_claimed_output_when_manifest_claim_fails(
     assert not output.exists()
     assert not manifest_path.exists()
     assert not list(tmp_path.glob(".features*.tmp-*"))
+
+
+def test_build_features_preserves_output_replaced_before_manifest_claim_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepared, output, contract = _prepared_feature_inputs(tmp_path)
+    manifest_path = output.with_suffix(".manifest.json")
+    replacement = b"replacement owner bytes"
+    real_link = os.link
+
+    def replace_output_then_fail_manifest(source, destination, *args, **kwargs):
+        if Path(destination) == manifest_path:
+            output.unlink()
+            output.write_bytes(replacement)
+            raise OSError("simulated failure after output replacement")
+        return real_link(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(os, "link", replace_output_then_fail_manifest)
+
+    with pytest.raises(OSError, match="simulated failure after output replacement"):
+        build_features(prepared, output, contract)
+
+    assert output.read_bytes() == replacement
+    assert not manifest_path.exists()
+    assert not list(tmp_path.glob(".features*.tmp-*"))

@@ -89,15 +89,15 @@ def sample_contract(source: Path) -> Phase1Contract:
 
 def sample_policy(**overrides: Any) -> Phase1Contract:
     """Return the small-window policy used by synthetic tests."""
-    return replace(
+    defaults = replace(
         PHASE1,
         window_seconds=60,
         window_lookback_seconds=60,
         window_validity_policy="exactly_60_consecutive_one_second_observations",
         stride_seconds=10,
         event_horizon_seconds=120,
-        **overrides,
     )
+    return replace(defaults, **overrides)
 
 
 def make_segment(seconds: int) -> pd.DataFrame:

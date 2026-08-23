@@ -7,10 +7,12 @@ from dataclasses import asdict, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
 import pytest
-from tests.helpers import sample_contract, write_sample_csv
+from tests.helpers import sample_contract, sample_policy, write_sample_csv
 
+import industrial_reliability.data as data_module
 from industrial_reliability.contracts import PHASE1
 from industrial_reliability.data import DataContractError, prepare_dataset, sha256_file
 
@@ -29,6 +31,46 @@ def _contract_after_edit(path: Path):
         dataset_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
         dataset_bytes=path.stat().st_size,
     )
+
+
+def _write_source_with_cross_batch_delta(
+    path: Path,
+    delta_seconds: int,
+) -> tuple[Path, int]:
+    start = datetime(2022, 1, 1, 6)
+    row_count = 12_000
+    write_sample_csv(
+        path,
+        [start + timedelta(seconds=index) for index in range(row_count)],
+    )
+    assert path.stat().st_size > 1 << 20
+    reader = pacsv.open_csv(
+        path,
+        read_options=pacsv.ReadOptions(block_size=1 << 20, use_threads=False),
+    )
+    try:
+        boundary = reader.read_next_batch().num_rows
+    finally:
+        reader.close()
+    assert 0 < boundary < row_count
+    write_sample_csv(
+        path,
+        [
+            start
+            + timedelta(
+                seconds=index if index < boundary else index + delta_seconds - 1
+            )
+            for index in range(row_count)
+        ],
+    )
+    return path, boundary
+
+
+def test_sample_policy_allows_preset_overrides() -> None:
+    policy = sample_policy(window_seconds=30, stride_seconds=5)
+
+    assert policy.window_seconds == 30
+    assert policy.stride_seconds == 5
 
 
 def test_sha256_file_hashes_file_bytes(tmp_path: Path) -> None:
@@ -53,6 +95,22 @@ def test_prepare_dataset_splits_at_gap(tmp_path: Path, sample_csv: Path) -> None
         "segments/segment-0001.parquet",
     ]
     assert [pq.read_table(output / segment.path).num_rows for segment in manifest.segments] == [3, 3]
+
+
+def test_prepare_dataset_splits_at_gap_between_real_arrow_batches(tmp_path: Path) -> None:
+    source, boundary = _write_source_with_cross_batch_delta(
+        tmp_path / "large.csv",
+        delta_seconds=2,
+    )
+
+    manifest = prepare_dataset(
+        source,
+        tmp_path / "prepared",
+        contract=sample_contract(source),
+    )
+
+    assert [segment.rows for segment in manifest.segments] == [boundary, 12_000 - boundary]
+    assert manifest.gap_count == 1
 
 
 def test_prepare_dataset_records_source_faithful_manifest(
@@ -217,6 +275,75 @@ def test_prepare_dataset_cleans_temporary_directory_after_parse_error(tmp_path: 
 
     with pytest.raises(DataContractError):
         prepare_dataset(source, tmp_path / "prepared", contract=_contract_after_edit(source))
+
+    assert not (tmp_path / "prepared").exists()
+    assert not list(tmp_path.glob(".prepared.tmp-*"))
+
+
+def test_prepare_dataset_preserves_validation_error_when_reader_close_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, _ = _write_source_with_cross_batch_delta(
+        tmp_path / "nonmonotonic.csv",
+        delta_seconds=0,
+    )
+    real_open_csv = data_module.pacsv.open_csv
+
+    class CloseFailingReader:
+        def __init__(self, reader):
+            self._reader = reader
+            self.schema = reader.schema
+
+        def __iter__(self):
+            return iter(self._reader)
+
+        def close(self) -> None:
+            self._reader.close()
+            raise RuntimeError("reader close failed")
+
+    def open_csv(*args, **kwargs):
+        return CloseFailingReader(real_open_csv(*args, **kwargs))
+
+    monkeypatch.setattr(data_module.pacsv, "open_csv", open_csv)
+
+    with pytest.raises(DataContractError, match="strictly increasing"):
+        prepare_dataset(
+            source,
+            tmp_path / "prepared",
+            contract=sample_contract(source),
+        )
+
+    assert not (tmp_path / "prepared").exists()
+    assert not list(tmp_path.glob(".prepared.tmp-*"))
+
+
+def test_prepare_dataset_cleans_temporary_directory_when_writer_close_fails(
+    tmp_path: Path,
+    sample_csv: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_parquet_writer = data_module.pq.ParquetWriter
+
+    class CloseFailingWriter:
+        def __init__(self, *args, **kwargs):
+            self._writer = real_parquet_writer(*args, **kwargs)
+
+        def write_batch(self, batch) -> None:
+            self._writer.write_batch(batch)
+
+        def close(self) -> None:
+            self._writer.close()
+            raise RuntimeError("writer close failed")
+
+    monkeypatch.setattr(data_module.pq, "ParquetWriter", CloseFailingWriter)
+
+    with pytest.raises(RuntimeError, match="writer close failed"):
+        prepare_dataset(
+            sample_csv,
+            tmp_path / "prepared",
+            contract=sample_contract(sample_csv),
+        )
 
     assert not (tmp_path / "prepared").exists()
     assert not list(tmp_path.glob(".prepared.tmp-*"))

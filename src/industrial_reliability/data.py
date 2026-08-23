@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import sys
 import tempfile
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -325,9 +327,21 @@ def prepare_dataset(
     except (pa.ArrowInvalid, pa.ArrowKeyError) as error:
         raise DataContractError(f"source timestamp or value is malformed: {error}") from error
     finally:
-        if reader is not None:
-            reader.close()
-        if writer is not None:
-            writer.close()
-        if temporary.exists():
-            shutil.rmtree(temporary)
+        primary_error = sys.exception()
+        cleanup_error: BaseException | None = None
+        for resource in (reader, writer):
+            if resource is None:
+                continue
+            try:
+                resource.close()
+            except BaseException as error:
+                cleanup_error = cleanup_error or error
+                with suppress(BaseException):
+                    resource.close()
+        try:
+            if temporary.exists():
+                shutil.rmtree(temporary)
+        except BaseException as error:
+            cleanup_error = cleanup_error or error
+        if primary_error is None and cleanup_error is not None:
+            raise cleanup_error

@@ -1,0 +1,1342 @@
+{
+  "profile_version": 1,
+  "generated_at_utc": "2026-08-23T17:35:45.097385+00:00",
+  "processing": {
+    "source_label": "Inference",
+    "method": "Python standard-library streaming CSV pass with constant-size numeric accumulators, bounded deterministic quantile samples, and timestamp-group-local duplicate tracking; separate streaming SHA-256 pass; targeted filtered read for exact LPS transitions inside the three documented failure intervals",
+    "peak_design_memory": "bounded by one CSV row, one duplicate-timestamp group, counters, 20 largest gaps, and at most 100000 sampled rows across continuous columns",
+    "elapsed_seconds": 664.2842414,
+    "sampled_row_count": 84168
+  },
+  "provenance": {
+    "dataset": {
+      "source_label": "Raw dataset",
+      "path": "D:\\projects\\industrial-reliability-platform\\data\\raw\\metropt\\dataset_train.csv",
+      "filename": "dataset_train.csv",
+      "byte_size": 1646201046,
+      "modified_time_utc": "2026-08-23T17:23:53.582441+00:00",
+      "sha256": "3fd0788c1b8fb7753ac0a2047f487c87f59b8b36af2f5553e4990354ed86d168",
+      "checksum_status": "locally computed; no official checksum found in supplied local evidence"
+    },
+    "supplied_papers": [
+      {
+        "source_label": "Supplied paper",
+        "filename": "metropt-scientific-data-2022.pdf",
+        "title": "The MetroPT dataset for predictive maintenance",
+        "doi": "10.1038/s41597-022-01877-3"
+      },
+      {
+        "source_label": "Supplied paper",
+        "filename": "interpretable-online-failure-prediction-2026.pdf",
+        "title": "Interpretable rules for online failure prediction: a case study on metro do porto datasets",
+        "doi": "10.1007/s41060-026-01039-3"
+      }
+    ],
+    "project_source": {
+      "source_label": "Project source",
+      "filename": "2026-08-23-industrial-reliability-intelligence-platform-design.md"
+    }
+  },
+  "schema": {
+    "source_labels": [
+      "Raw dataset",
+      "Supplied paper"
+    ],
+    "column_count": 21,
+    "columns_in_file_order": [
+      "timestamp",
+      "TP2",
+      "TP3",
+      "H1",
+      "DV_pressure",
+      "Reservoirs",
+      "Oil_temperature",
+      "Flowmeter",
+      "Motor_current",
+      "COMP",
+      "DV_eletric",
+      "Towers",
+      "MPG",
+      "LPS",
+      "Pressure_switch",
+      "Oil_level",
+      "Caudal_impulses",
+      "gpsLong",
+      "gpsLat",
+      "gpsSpeed",
+      "gpsQuality"
+    ],
+    "signal_count_excluding_timestamp": 20,
+    "groups": {
+      "analog": [
+        "TP2",
+        "TP3",
+        "H1",
+        "DV_pressure",
+        "Reservoirs",
+        "Oil_temperature",
+        "Flowmeter",
+        "Motor_current"
+      ],
+      "digital": [
+        "COMP",
+        "DV_eletric",
+        "Towers",
+        "MPG",
+        "LPS",
+        "Pressure_switch",
+        "Oil_level",
+        "Caudal_impulses"
+      ],
+      "metadata_gps": [
+        "gpsLong",
+        "gpsLat",
+        "gpsSpeed",
+        "gpsQuality"
+      ]
+    },
+    "columns": [
+      {
+        "name": "timestamp",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "datetime-like string parsed as second-resolution local/unspecified time",
+        "semantic_type": "timestamp",
+        "unit": null,
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "parse_error_count": 0
+      },
+      {
+        "name": "TP2",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "floating-point-compatible numeric",
+        "semantic_type": "analog continuous",
+        "paper_semantics": "Pressure on the compressor",
+        "unit": "bar",
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": -0.0300000000000011,
+        "maximum": 10.876,
+        "mean": 1.1521836011404192,
+        "population_standard_deviation": 3.0752955267801436,
+        "zero_count": 10203,
+        "negative_count": 9350886,
+        "non_integral_value_count": 10760810,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 10773588,
+          "integer": 0
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "approximate_quantiles": {
+          "p01": -0.0199999999999995,
+          "p25": -0.0079999999999991,
+          "p50": -0.0079999999999991,
+          "p75": -0.0060000000000002,
+          "p99": 10.436,
+          "sample_count": 84168,
+          "method": "deterministic approximately 1-in-128 row sample using an LCG hash of one-based CSV data-row position; linear interpolation"
+        }
+      },
+      {
+        "name": "TP3",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "floating-point-compatible numeric",
+        "semantic_type": "analog continuous",
+        "paper_semantics": "Pressure generated at the pneumatic panel",
+        "unit": "bar",
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 0.0060000000000002,
+        "maximum": 10.408,
+        "mean": 8.974607733280084,
+        "population_standard_deviation": 0.7006960031570946,
+        "zero_count": 0,
+        "negative_count": 0,
+        "non_integral_value_count": 10752673,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 10773588,
+          "integer": 0
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "approximate_quantiles": {
+          "p01": 7.994,
+          "p25": 8.484,
+          "p50": 8.986,
+          "p75": 9.492,
+          "p99": 10.114,
+          "sample_count": 84168,
+          "method": "deterministic approximately 1-in-128 row sample using an LCG hash of one-based CSV data-row position; linear interpolation"
+        }
+      },
+      {
+        "name": "H1",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "floating-point-compatible numeric",
+        "semantic_type": "analog continuous",
+        "paper_semantics": "Pressure associated with the command pressure switch above its operating pressure",
+        "unit": "bar",
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": -0.0339999999999989,
+        "maximum": 10.414,
+        "mean": 7.751420902496082,
+        "population_standard_deviation": 3.0514472166178974,
+        "zero_count": 5977,
+        "negative_count": 1353281,
+        "non_integral_value_count": 10751055,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 10773588,
+          "integer": 0
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "approximate_quantiles": {
+          "p01": -0.0219999999999984,
+          "p25": 8.236,
+          "p50": 8.748,
+          "p75": 9.292,
+          "p99": 10.072,
+          "sample_count": 84168,
+          "method": "deterministic approximately 1-in-128 row sample using an LCG hash of one-based CSV data-row position; linear interpolation"
+        }
+      },
+      {
+        "name": "DV_pressure",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "floating-point-compatible numeric",
+        "semantic_type": "analog continuous",
+        "paper_semantics": "Pressure drop associated with air-dryer tower water discharge",
+        "unit": "bar",
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": -0.0380000000000002,
+        "maximum": 8.326,
+        "mean": -0.024540945879665613,
+        "population_standard_deviation": 0.148656867432679,
+        "zero_count": 207,
+        "negative_count": 10750415,
+        "non_integral_value_count": 10773352,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 10773588,
+          "integer": 0
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "approximate_quantiles": {
+          "p01": -0.0339999999999989,
+          "p25": -0.032,
+          "p50": -0.0279999999999986,
+          "p75": -0.0259999999999998,
+          "p99": -0.0159999999999982,
+          "sample_count": 84168,
+          "method": "deterministic approximately 1-in-128 row sample using an LCG hash of one-based CSV data-row position; linear interpolation"
+        }
+      },
+      {
+        "name": "Reservoirs",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "floating-point-compatible numeric",
+        "semantic_type": "analog continuous",
+        "paper_semantics": "Pressure inside train air tanks",
+        "unit": "bar",
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 1.3499999999999996,
+        "maximum": 2.0540000000000003,
+        "mean": 1.5650513199314762,
+        "population_standard_deviation": 0.0901633835193891,
+        "zero_count": 0,
+        "negative_count": 0,
+        "non_integral_value_count": 10773587,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 10773588,
+          "integer": 0
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "approximate_quantiles": {
+          "p01": 1.4619999999999995,
+          "p25": 1.4699999999999989,
+          "p50": 1.59,
+          "p75": 1.638,
+          "p99": 1.7460000000000004,
+          "sample_count": 84168,
+          "method": "deterministic approximately 1-in-128 row sample using an LCG hash of one-based CSV data-row position; linear interpolation"
+        }
+      },
+      {
+        "name": "Oil_temperature",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "floating-point-compatible numeric",
+        "semantic_type": "analog continuous",
+        "paper_semantics": "Compressor oil temperature",
+        "unit": "degrees Celsius",
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 13.875000000000009,
+        "maximum": 97.9,
+        "mean": 67.30720466122582,
+        "population_standard_deviation": 5.383851370819512,
+        "zero_count": 0,
+        "negative_count": 0,
+        "non_integral_value_count": 10569399,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 10773588,
+          "integer": 0
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "approximate_quantiles": {
+          "p01": 52.64999999999999,
+          "p25": 63.650000000000006,
+          "p50": 68.30000000000001,
+          "p75": 71.05,
+          "p99": 76.89999999999999,
+          "sample_count": 84168,
+          "method": "deterministic approximately 1-in-128 row sample using an LCG hash of one-based CSV data-row position; linear interpolation"
+        }
+      },
+      {
+        "name": "Flowmeter",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "floating-point-compatible numeric",
+        "semantic_type": "analog continuous",
+        "paper_semantics": "Airflow at the pneumatic control panel",
+        "unit": "cubic metres per hour",
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 18.83471875,
+        "maximum": 43.07240625,
+        "mean": 20.395152766037782,
+        "population_standard_deviation": 3.7436072182436875,
+        "zero_count": 0,
+        "negative_count": 0,
+        "non_integral_value_count": 10773588,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 10773588,
+          "integer": 0
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "approximate_quantiles": {
+          "p01": 18.8440625,
+          "p25": 19.01225,
+          "p50": 19.04028125,
+          "p75": 19.2551875,
+          "p99": 31.906625,
+          "sample_count": 84168,
+          "method": "deterministic approximately 1-in-128 row sample using an LCG hash of one-based CSV data-row position; linear interpolation"
+        }
+      },
+      {
+        "name": "Motor_current",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "floating-point-compatible numeric",
+        "semantic_type": "analog continuous",
+        "paper_semantics": "Compressor motor current",
+        "unit": "ampere",
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": -0.0124999999999992,
+        "maximum": 9.685,
+        "mean": 2.3831787297629408,
+        "population_standard_deviation": 2.1933813165625877,
+        "zero_count": 1080894,
+        "negative_count": 426515,
+        "non_integral_value_count": 9684797,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 10773588,
+          "integer": 0
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "approximate_quantiles": {
+          "p01": -0.0024999999999995,
+          "p25": 0.0024999999999995,
+          "p50": 3.705,
+          "p75": 3.8375,
+          "p99": 6.045,
+          "sample_count": 84168,
+          "method": "deterministic approximately 1-in-128 row sample using an LCG hash of one-based CSV data-row position; linear interpolation"
+        }
+      },
+      {
+        "name": "COMP",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "integer-compatible numeric",
+        "semantic_type": "digital binary",
+        "paper_semantics": "Compressor air-intake valve electrical signal",
+        "unit": null,
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "mean": 0.8698926485772428,
+        "population_standard_deviation": 0.33642150425992745,
+        "zero_count": 1401723,
+        "negative_count": 0,
+        "non_integral_value_count": 0,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 0,
+          "integer": 10773588
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "value_counts": {
+          "0": 1401723,
+          "1": 9371865
+        },
+        "distinct_value_count": 2
+      },
+      {
+        "name": "DV_eletric",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "integer-compatible numeric",
+        "semantic_type": "digital binary",
+        "paper_semantics": "Compressor outlet-valve command signal",
+        "unit": null,
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "mean": 0.13011366315474474,
+        "population_standard_deviation": 0.3364284438260213,
+        "zero_count": 9371797,
+        "negative_count": 0,
+        "non_integral_value_count": 0,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 0,
+          "integer": 10773588
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "value_counts": {
+          "0": 9371797,
+          "1": 1401791
+        },
+        "distinct_value_count": 2
+      },
+      {
+        "name": "Towers",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "integer-compatible numeric",
+        "semantic_type": "digital binary",
+        "paper_semantics": "Active air-dryer tower selector",
+        "unit": null,
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "mean": 0.9347703847594692,
+        "population_standard_deviation": 0.24693058242369068,
+        "zero_count": 702757,
+        "negative_count": 0,
+        "non_integral_value_count": 0,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 0,
+          "integer": 10773588
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "value_counts": {
+          "0": 702757,
+          "1": 10070831
+        },
+        "distinct_value_count": 2
+      },
+      {
+        "name": "MPG",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "integer-compatible numeric",
+        "semantic_type": "digital binary",
+        "paper_semantics": "Command that starts the compressor under load below the APU pressure threshold",
+        "unit": null,
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "mean": 0.8698920916597145,
+        "population_standard_deviation": 0.336422116585104,
+        "zero_count": 1401729,
+        "negative_count": 0,
+        "non_integral_value_count": 0,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 0,
+          "integer": 10773588
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "value_counts": {
+          "0": 1401729,
+          "1": 9371859
+        },
+        "distinct_value_count": 2
+      },
+      {
+        "name": "LPS",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "integer-compatible numeric",
+        "semantic_type": "digital binary",
+        "paper_semantics": "Low-pressure signal",
+        "unit": null,
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "mean": 0.006281379982230618,
+        "population_standard_deviation": 0.07900584945274274,
+        "zero_count": 10705915,
+        "negative_count": 0,
+        "non_integral_value_count": 0,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 0,
+          "integer": 10773588
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "value_counts": {
+          "0": 10705915,
+          "1": 67673
+        },
+        "distinct_value_count": 2
+      },
+      {
+        "name": "Pressure_switch",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "integer-compatible numeric",
+        "semantic_type": "digital binary",
+        "paper_semantics": "Pilot control-valve pressure-detection signal",
+        "unit": null,
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 0.0,
+        "maximum": 0.0,
+        "mean": 0.0,
+        "population_standard_deviation": 0.0,
+        "zero_count": 10773588,
+        "negative_count": 0,
+        "non_integral_value_count": 0,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 0,
+          "integer": 10773588
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "value_counts": {
+          "0": 10773588
+        },
+        "distinct_value_count": 1
+      },
+      {
+        "name": "Oil_level",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "integer-compatible numeric",
+        "semantic_type": "digital binary",
+        "paper_semantics": "Low compressor-oil-level signal",
+        "unit": null,
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "mean": 2.784587641554513e-07,
+        "population_standard_deviation": 0.0005276918481615648,
+        "zero_count": 10773585,
+        "negative_count": 0,
+        "non_integral_value_count": 0,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 0,
+          "integer": 10773588
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "value_counts": {
+          "0": 10773585,
+          "1": 3
+        },
+        "distinct_value_count": 2
+      },
+      {
+        "name": "Caudal_impulses",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "integer-compatible numeric",
+        "semantic_type": "digital binary",
+        "paper_semantics": "Flowmeter pulse indicating airflow",
+        "unit": null,
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "mean": 0.001488919011939198,
+        "population_standard_deviation": 0.038557776545271434,
+        "zero_count": 10757547,
+        "negative_count": 0,
+        "non_integral_value_count": 0,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 0,
+          "integer": 10773588
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "value_counts": {
+          "0": 10757547,
+          "1": 16041
+        },
+        "distinct_value_count": 2
+      },
+      {
+        "name": "gpsLong",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "floating-point-compatible numeric",
+        "semantic_type": "metadata/GPS continuous",
+        "paper_semantics": "Longitude",
+        "unit": "degree",
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": -9.13004,
+        "maximum": 0.0,
+        "mean": -4.38453416498509,
+        "population_standard_deviation": 4.317794025093625,
+        "zero_count": 5304018,
+        "negative_count": 5469570,
+        "non_integral_value_count": 5469570,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 10773588,
+          "integer": 0
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "approximate_quantiles": {
+          "p01": -8.692123299999999,
+          "p25": -8.65893,
+          "p50": -8.54266,
+          "p75": 0.0,
+          "p99": 0.0,
+          "sample_count": 84168,
+          "method": "deterministic approximately 1-in-128 row sample using an LCG hash of one-based CSV data-row position; linear interpolation"
+        }
+      },
+      {
+        "name": "gpsLat",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "floating-point-compatible numeric",
+        "semantic_type": "metadata/GPS continuous",
+        "paper_semantics": "Latitude",
+        "unit": "degree",
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 0.0,
+        "maximum": 41.949,
+        "mean": 20.911440084333012,
+        "population_standard_deviation": 20.592542155485575,
+        "zero_count": 5304018,
+        "negative_count": 0,
+        "non_integral_value_count": 5469570,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 10773588,
+          "integer": 0
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "approximate_quantiles": {
+          "p01": 0.0,
+          "p25": 0.0,
+          "p50": 41.1518,
+          "p75": 41.1882,
+          "p99": 41.2138,
+          "sample_count": 84168,
+          "method": "deterministic approximately 1-in-128 row sample using an LCG hash of one-based CSV data-row position; linear interpolation"
+        }
+      },
+      {
+        "name": "gpsSpeed",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "integer-compatible numeric",
+        "semantic_type": "metadata/GPS continuous",
+        "paper_semantics": "Train speed",
+        "unit": "kilometres per hour",
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 0.0,
+        "maximum": 323.0,
+        "mean": 4.913656898704499,
+        "population_standard_deviation": 11.518219416607005,
+        "zero_count": 8505390,
+        "negative_count": 0,
+        "non_integral_value_count": 0,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 0,
+          "integer": 10773588
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "approximate_quantiles": {
+          "p01": 0.0,
+          "p25": 0.0,
+          "p50": 0.0,
+          "p75": 0.0,
+          "p99": 47.0,
+          "sample_count": 84168,
+          "method": "deterministic approximately 1-in-128 row sample using an LCG hash of one-based CSV data-row position; linear interpolation"
+        }
+      },
+      {
+        "name": "gpsQuality",
+        "csv_storage_type": "text token",
+        "parser_inferred_type": "integer-compatible numeric",
+        "semantic_type": "metadata/GPS categorical",
+        "paper_semantics": "GPS signal quality",
+        "unit": null,
+        "non_missing_count": 10773588,
+        "missing_count": 0,
+        "missing_empty_count": 0,
+        "missing_token_count": 0,
+        "parse_error_count": 0,
+        "non_finite_count": 0,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "mean": 0.5076832342205773,
+        "population_standard_deviation": 0.4999409644267128,
+        "zero_count": 5304018,
+        "negative_count": 0,
+        "non_integral_value_count": 0,
+        "observed_lexeme_counts": {
+          "scientific": 0,
+          "decimal": 0,
+          "integer": 10773588
+        },
+        "source_labels": [
+          "Raw dataset",
+          "Supplied paper"
+        ],
+        "value_counts": {
+          "0": 5304018,
+          "1": 5469570
+        },
+        "distinct_value_count": 2
+      }
+    ]
+  },
+  "rows": {
+    "source_labels": [
+      "Raw dataset",
+      "Supplied paper"
+    ],
+    "data_row_count": 10773588,
+    "well_formed_row_count": 10773588,
+    "malformed_row_count": 0,
+    "malformed_width_counts": {},
+    "paper_reported_data_point_count": 10979547,
+    "paper_count_matches_raw_row_count": false,
+    "paper_reported_minus_raw_row_count": 205959
+  },
+  "time": {
+    "source_label": "Raw dataset",
+    "timestamp_column": "timestamp",
+    "resolution": "one second in observed text representation",
+    "timezone": "unknown/unsupported: absent from CSV and supplied papers",
+    "valid_timestamp_count": 10773588,
+    "missing_timestamp_count": 0,
+    "parse_error_count": 0,
+    "first_timestamp_in_file_order": "2022-01-01 06:00:00",
+    "last_timestamp_in_file_order": "2022-06-02 15:49:53",
+    "minimum_timestamp": "2022-01-01 06:00:00",
+    "maximum_timestamp": "2022-06-02 15:49:53",
+    "inclusive_min_to_max_span_seconds": 13168194,
+    "nondecreasing_in_file_order": true,
+    "strictly_increasing_in_file_order": true,
+    "negative_delta_count": 0,
+    "duplicate_timestamps": {
+      "duplicate_timestamp_group_count": 0,
+      "duplicate_timestamp_extra_record_count": 0,
+      "maximum_timestamp_multiplicity": 1,
+      "method": "exact because timestamps are nondecreasing, so equal timestamps are contiguous"
+    },
+    "sampling_cadence": {
+      "observed_modal_delta_seconds": 1,
+      "modal_delta_count": 10773435,
+      "modal_delta_share_of_consecutive_valid_rows": 0.9999858914213066,
+      "mean_positive_delta_seconds": 1.2222663630970818,
+      "consecutive_delta_counts_top_20": [
+        {
+          "delta_seconds": 1,
+          "count": 10773435
+        },
+        {
+          "delta_seconds": 14400,
+          "count": 147
+        },
+        {
+          "delta_seconds": 1055,
+          "count": 1
+        },
+        {
+          "delta_seconds": 19839,
+          "count": 1
+        },
+        {
+          "delta_seconds": 56695,
+          "count": 1
+        },
+        {
+          "delta_seconds": 63369,
+          "count": 1
+        },
+        {
+          "delta_seconds": 137000,
+          "count": 1
+        }
+      ],
+      "gap_bins": {
+        "1_second": 10773435,
+        "over_3600_seconds": 151,
+        "301_to_3600_seconds": 1
+      },
+      "count_of_deltas_over_one_second": 152,
+      "implied_missing_seconds_over_one_second": 2394606,
+      "largest_gaps": [
+        {
+          "delta_seconds": 137000,
+          "from_timestamp": "2022-03-04 01:32:01",
+          "to_timestamp": "2022-03-05 15:35:21"
+        },
+        {
+          "delta_seconds": 63369,
+          "from_timestamp": "2022-03-13 21:42:47",
+          "to_timestamp": "2022-03-14 15:18:56"
+        },
+        {
+          "delta_seconds": 56695,
+          "from_timestamp": "2022-03-23 19:30:25",
+          "to_timestamp": "2022-03-24 11:15:20"
+        },
+        {
+          "delta_seconds": 19839,
+          "from_timestamp": "2022-03-26 00:43:29",
+          "to_timestamp": "2022-03-26 06:14:08"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-06-02 02:00:00",
+          "to_timestamp": "2022-06-02 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-06-01 02:00:00",
+          "to_timestamp": "2022-06-01 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-31 02:00:00",
+          "to_timestamp": "2022-05-31 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-30 02:00:00",
+          "to_timestamp": "2022-05-30 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-29 02:00:00",
+          "to_timestamp": "2022-05-29 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-28 02:00:00",
+          "to_timestamp": "2022-05-28 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-27 02:00:00",
+          "to_timestamp": "2022-05-27 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-26 02:00:00",
+          "to_timestamp": "2022-05-26 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-25 02:00:00",
+          "to_timestamp": "2022-05-25 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-24 02:00:00",
+          "to_timestamp": "2022-05-24 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-23 02:00:00",
+          "to_timestamp": "2022-05-23 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-22 02:00:00",
+          "to_timestamp": "2022-05-22 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-21 02:00:00",
+          "to_timestamp": "2022-05-21 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-20 02:00:00",
+          "to_timestamp": "2022-05-20 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-19 02:00:00",
+          "to_timestamp": "2022-05-19 06:00:00"
+        },
+        {
+          "delta_seconds": 14400,
+          "from_timestamp": "2022-05-18 02:00:00",
+          "to_timestamp": "2022-05-18 06:00:00"
+        }
+      ]
+    }
+  },
+  "quality": {
+    "source_labels": [
+      "Raw dataset",
+      "Supplied paper",
+      "Inference"
+    ],
+    "missing_value_detection": {
+      "method": "empty fields plus case-insensitive tokens NA, N/A, NaN, null, and none",
+      "total_missing_cells": 0
+    },
+    "duplicate_full_rows": {
+      "duplicate_full_row_group_count": 0,
+      "duplicate_full_row_extra_record_count": 0,
+      "maximum_full_row_multiplicity": 1,
+      "method": "exact full-token row comparison within contiguous equal-timestamp groups; correctness follows from nondecreasing timestamp order and inclusion of timestamp in every full row"
+    },
+    "hard_invalid_counts": {
+      "malformed_csv_rows": 0,
+      "unparseable_timestamps": 0,
+      "unparseable_numeric_cells": 0,
+      "non_finite_numeric_cells": 0,
+      "digital_values_outside_zero_one": {
+        "COMP": 0,
+        "DV_eletric": 0,
+        "Towers": 0,
+        "MPG": 0,
+        "LPS": 0,
+        "Pressure_switch": 0,
+        "Oil_level": 0,
+        "Caudal_impulses": 0
+      },
+      "longitude_outside_physical_range": 0,
+      "latitude_outside_physical_range": 0
+    },
+    "convention_dependent_or_suspicious_counts": {
+      "gps_longitude_zero": 5304018,
+      "gps_latitude_zero": 5304018,
+      "gps_both_coordinates_zero": 5304018,
+      "gps_only_one_coordinate_zero": 0,
+      "gps_speed_negative": 0,
+      "analog_negative_values": {
+        "TP2": 9350886,
+        "TP3": 0,
+        "H1": 1353281,
+        "DV_pressure": 10750415,
+        "Reservoirs": 0,
+        "Oil_temperature": 0,
+        "Flowmeter": 0,
+        "Motor_current": 426515
+      },
+      "note": "The supplied 2022 paper defines zero GPS coordinates as loss of satellite information. Negative analog readings are reported as observed and are not classified as invalid without sensor-range/calibration evidence."
+    }
+  },
+  "failure_window_cross_reference": [
+    {
+      "id": "failure_1",
+      "type": "Air Leak",
+      "component": "Clients",
+      "start": "2022-02-28 21:53:00",
+      "end": "2022-03-01 02:00:00",
+      "paper_example_count": 14820,
+      "paper_example_count_matches_half_open_record_count": true,
+      "paper_example_count_minus_half_open_record_count": 0,
+      "lps_activation": "2022-02-28 22:50:00",
+      "timezone": "not specified in supplied papers or CSV",
+      "dataset_interval_overlap": true,
+      "closed_interval_expected_second_timestamps": 14821,
+      "closed_interval_record_count": 14821,
+      "closed_interval_unique_timestamp_count": 14821,
+      "closed_interval_missing_second_timestamps": 0,
+      "half_open_interval_expected_second_timestamps": 14820,
+      "half_open_interval_record_count": 14820,
+      "first_observed_timestamp_in_closed_interval": "2022-02-28 21:53:00",
+      "last_observed_timestamp_in_closed_interval": "2022-03-01 02:00:00",
+      "lps_value_counts_in_closed_interval": {
+        "0": 3463,
+        "1": 11358
+      },
+      "first_observed_lps_one_timestamp": "2022-02-28 22:50:43",
+      "last_observed_lps_one_timestamp": "2022-03-01 02:00:00",
+      "observed_lps_transitions_in_closed_interval": [
+        {
+          "timestamp": "2022-02-28 21:53:00",
+          "value": 0
+        },
+        {
+          "timestamp": "2022-02-28 22:50:43",
+          "value": 1
+        }
+      ],
+      "exact_timestamp_checks": {
+        "start": {
+          "timestamp": "2022-02-28 21:53:00",
+          "source_timestamp_precision": "minute",
+          "exact_timestamp_record_count": 1,
+          "documented_minute_bucket_record_count": 60,
+          "lps_value_counts_in_documented_minute": {
+            "0": 60
+          },
+          "first_lps_one_in_documented_minute": null,
+          "lps_value_counts_at_exact_timestamp": {
+            "0": 1
+          }
+        },
+        "end": {
+          "timestamp": "2022-03-01 02:00:00",
+          "source_timestamp_precision": "minute",
+          "exact_timestamp_record_count": 1,
+          "documented_minute_bucket_record_count": 1,
+          "lps_value_counts_in_documented_minute": {
+            "1": 1
+          },
+          "first_lps_one_in_documented_minute": "2022-03-01 02:00:00",
+          "lps_value_counts_at_exact_timestamp": {
+            "1": 1
+          }
+        },
+        "lps_activation": {
+          "timestamp": "2022-02-28 22:50:00",
+          "source_timestamp_precision": "minute",
+          "exact_timestamp_record_count": 1,
+          "documented_minute_bucket_record_count": 60,
+          "lps_value_counts_in_documented_minute": {
+            "0": 43,
+            "1": 17
+          },
+          "first_lps_one_in_documented_minute": "2022-02-28 22:50:43",
+          "lps_value_counts_at_exact_timestamp": {
+            "0": 1
+          }
+        }
+      },
+      "comparison_method": "Supplied paper times have minute precision. Exact hits normalize each documented minute to second :00 and use equality on parsed timestamps; minute-bucket checks cover :00 through :59. Interval counts use both closed [start,end] and half-open [start,end) after :00 normalization. Overlap compares the normalized documented closed interval with observed dataset min/max timestamps.",
+      "source_labels": [
+        "Raw dataset",
+        "Supplied paper"
+      ]
+    },
+    {
+      "id": "failure_2",
+      "type": "Air Leak",
+      "component": "Air Dryer",
+      "start": "2022-03-23 14:54:00",
+      "end": "2022-03-23 15:24:00",
+      "paper_example_count": 1800,
+      "paper_example_count_matches_half_open_record_count": true,
+      "paper_example_count_minus_half_open_record_count": 0,
+      "lps_activation": null,
+      "timezone": "not specified in supplied papers or CSV",
+      "dataset_interval_overlap": true,
+      "closed_interval_expected_second_timestamps": 1801,
+      "closed_interval_record_count": 1801,
+      "closed_interval_unique_timestamp_count": 1801,
+      "closed_interval_missing_second_timestamps": 0,
+      "half_open_interval_expected_second_timestamps": 1800,
+      "half_open_interval_record_count": 1800,
+      "first_observed_timestamp_in_closed_interval": "2022-03-23 14:54:00",
+      "last_observed_timestamp_in_closed_interval": "2022-03-23 15:24:00",
+      "lps_value_counts_in_closed_interval": {
+        "0": 1801
+      },
+      "first_observed_lps_one_timestamp": null,
+      "last_observed_lps_one_timestamp": null,
+      "observed_lps_transitions_in_closed_interval": [
+        {
+          "timestamp": "2022-03-23 14:54:00",
+          "value": 0
+        }
+      ],
+      "exact_timestamp_checks": {
+        "start": {
+          "timestamp": "2022-03-23 14:54:00",
+          "source_timestamp_precision": "minute",
+          "exact_timestamp_record_count": 1,
+          "documented_minute_bucket_record_count": 60,
+          "lps_value_counts_in_documented_minute": {
+            "0": 60
+          },
+          "first_lps_one_in_documented_minute": null,
+          "lps_value_counts_at_exact_timestamp": {
+            "0": 1
+          }
+        },
+        "end": {
+          "timestamp": "2022-03-23 15:24:00",
+          "source_timestamp_precision": "minute",
+          "exact_timestamp_record_count": 1,
+          "documented_minute_bucket_record_count": 60,
+          "lps_value_counts_in_documented_minute": {
+            "0": 60
+          },
+          "first_lps_one_in_documented_minute": null,
+          "lps_value_counts_at_exact_timestamp": {
+            "0": 1
+          }
+        }
+      },
+      "comparison_method": "Supplied paper times have minute precision. Exact hits normalize each documented minute to second :00 and use equality on parsed timestamps; minute-bucket checks cover :00 through :59. Interval counts use both closed [start,end] and half-open [start,end) after :00 normalization. Overlap compares the normalized documented closed interval with observed dataset min/max timestamps.",
+      "source_labels": [
+        "Raw dataset",
+        "Supplied paper"
+      ]
+    },
+    {
+      "id": "failure_3",
+      "type": "Oil Leak",
+      "component": "Compressor",
+      "start": "2022-05-30 12:00:00",
+      "end": "2022-06-02 06:18:00",
+      "paper_example_count": 281800,
+      "paper_example_count_matches_half_open_record_count": false,
+      "paper_example_count_minus_half_open_record_count": 86317,
+      "paper_example_count_minus_gap_free_half_open_seconds": 43120,
+      "lps_activation": "2022-06-02 06:18:00",
+      "timezone": "not specified in supplied papers or CSV",
+      "dataset_interval_overlap": true,
+      "closed_interval_expected_second_timestamps": 238681,
+      "closed_interval_record_count": 195484,
+      "closed_interval_unique_timestamp_count": 195484,
+      "closed_interval_missing_second_timestamps": 43197,
+      "half_open_interval_expected_second_timestamps": 238680,
+      "half_open_interval_record_count": 195483,
+      "first_observed_timestamp_in_closed_interval": "2022-05-30 12:00:00",
+      "last_observed_timestamp_in_closed_interval": "2022-06-02 06:18:00",
+      "lps_value_counts_in_closed_interval": {
+        "0": 195484
+      },
+      "first_observed_lps_one_timestamp": null,
+      "last_observed_lps_one_timestamp": null,
+      "observed_lps_transitions_in_closed_interval": [
+        {
+          "timestamp": "2022-05-30 12:00:00",
+          "value": 0
+        }
+      ],
+      "exact_timestamp_checks": {
+        "start": {
+          "timestamp": "2022-05-30 12:00:00",
+          "source_timestamp_precision": "minute",
+          "exact_timestamp_record_count": 1,
+          "documented_minute_bucket_record_count": 60,
+          "lps_value_counts_in_documented_minute": {
+            "0": 60
+          },
+          "first_lps_one_in_documented_minute": null,
+          "lps_value_counts_at_exact_timestamp": {
+            "0": 1
+          }
+        },
+        "end": {
+          "timestamp": "2022-06-02 06:18:00",
+          "source_timestamp_precision": "minute",
+          "exact_timestamp_record_count": 1,
+          "documented_minute_bucket_record_count": 60,
+          "lps_value_counts_in_documented_minute": {
+            "0": 33,
+            "1": 27
+          },
+          "first_lps_one_in_documented_minute": "2022-06-02 06:18:33",
+          "lps_value_counts_at_exact_timestamp": {
+            "0": 1
+          }
+        },
+        "lps_activation": {
+          "timestamp": "2022-06-02 06:18:00",
+          "source_timestamp_precision": "minute",
+          "exact_timestamp_record_count": 1,
+          "documented_minute_bucket_record_count": 60,
+          "lps_value_counts_in_documented_minute": {
+            "0": 33,
+            "1": 27
+          },
+          "first_lps_one_in_documented_minute": "2022-06-02 06:18:33",
+          "lps_value_counts_at_exact_timestamp": {
+            "0": 1
+          }
+        }
+      },
+      "comparison_method": "Supplied paper times have minute precision. Exact hits normalize each documented minute to second :00 and use equality on parsed timestamps; minute-bucket checks cover :00 through :59. Interval counts use both closed [start,end] and half-open [start,end) after :00 normalization. Overlap compares the normalized documented closed interval with observed dataset min/max timestamps.",
+      "source_labels": [
+        "Raw dataset",
+        "Supplied paper"
+      ]
+    }
+  ],
+  "uncertainty_notes": [
+    {
+      "source_label": "Unknown/unsupported",
+      "note": "No official dataset checksum appears in the supplied local papers or project specification; SHA-256 is locally computed only."
+    },
+    {
+      "source_label": "Unknown/unsupported",
+      "note": "CSV has no timezone or offset. CSV timestamps have second resolution; paper event times have minute resolution and are normalized to :00 for exact equality while also checked across their full minute buckets."
+    },
+    {
+      "source_label": "Inference",
+      "note": "Approximate quantiles use a bounded deterministic row sample; counts, extrema, means, population standard deviations, missingness, duplicate counts, and event comparisons are exact for the analyzed file."
+    },
+    {
+      "source_label": "Supplied paper",
+      "note": "Paper semantics and units are source descriptions, not inferred from observed numeric ranges."
+    },
+    {
+      "source_label": "Unknown/unsupported",
+      "note": "Unusual analog values are not automatically invalid because no authoritative valid operating ranges were supplied."
+    }
+  ]
+}

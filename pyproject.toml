@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "industrial-reliability-platform"
+version = "0.1.0"
+description = "Production-oriented industrial anomaly detection and reliability intelligence platform."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["predictive-maintenance", "time-series", "anomaly-detection", "data-science"]
+dependencies = [
+  "numpy>=2.2,<3",
+  "pandas>=2.2,<3",
+  "pyarrow>=19,<24",
+  "scikit-learn>=1.6,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2,<2",
+  "mypy>=1.15,<2",
+  "pandas-stubs>=2.2,<3",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<8",
+  "ruff>=0.11,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --cov=industrial_reliability --cov-report=term-missing --cov-fail-under=80"
+markers = ["integration: integration tests", "slow: full-data or training tests"]
+
+[tool.coverage.run]
+branch = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src"]
+extend-exclude = ["references", "data", ".codex"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+exclude = ["notebooks/", "tests/"]

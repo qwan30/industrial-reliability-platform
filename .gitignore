@@ -1,0 +1,68 @@
+# =========================
+# Raw / generated datasets
+# =========================
+data/raw/
+data/processed/
+data/interim/
+data/features/
+data/**/*.csv
+data/**/*.parquet
+
+# =========================
+# External reference repos
+# Local research only
+# =========================
+references/
+
+# =========================
+# Research papers
+# Keep citations/links in Git,
+# PDFs locally only
+# =========================
+docs/references/*.pdf
+
+# =========================
+# Environment / secrets
+# =========================
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# =========================
+# ML artifacts
+# =========================
+mlruns/
+artifacts/
+checkpoints/
+*.pt
+*.pth
+*.onnx
+
+# =========================
+# IDE / OS
+# =========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# =========================
+# Python build & coverage artifacts
+# =========================
+build/
+dist/
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/

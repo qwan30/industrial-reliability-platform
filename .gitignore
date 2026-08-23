@@ -52,6 +52,7 @@ checkpoints/
 # =========================
 # IDE / OS
 # =========================
+.worktrees/
 .vscode/
 .idea/
 .DS_Store

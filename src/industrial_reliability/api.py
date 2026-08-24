@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from industrial_reliability.champion import (
+    ChampionProvenanceVerifier,
     ChampionScorer,
     ScoringContractError,
     load_champion,
@@ -141,6 +142,7 @@ def create_app(
     store: RuntimeStore | None = None,
     producer: Any = None,
     broker: ConsoleEventBroker | None = None,
+    provenance_verifier: ChampionProvenanceVerifier | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Industrial Reliability Scoring and Alert API", version="1.0")
 
@@ -167,8 +169,58 @@ def create_app(
         return {"success": True, "data": {"status": "ok"}, "error": None}
 
     @app.get("/readyz")
-    def readyz() -> dict[str, Any]:
-        return {"success": True, "data": {"status": "ready"}, "error": None}
+    def readyz() -> JSONResponse:
+        if provenance_verifier is not None:
+            ok, reason = provenance_verifier.verify()
+            if not ok:
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "success": False,
+                        "data": None,
+                        "error": {
+                            "code": "CHAMPION_PROVENANCE_MISMATCH",
+                            "message": reason or "Champion provenance verification failed",
+                        },
+                    },
+                )
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "data": {"status": "ready"}, "error": None},
+        )
+
+    @app.get("/v1/models/{model_version}/provenance")
+    def get_model_provenance(model_version: str) -> JSONResponse:
+        if model_version != scorer.model_version:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {
+                        "code": "MODEL_VERSION_NOT_FOUND",
+                        "message": f"Model version {model_version} not found",
+                    },
+                },
+            )
+        if provenance_verifier is not None:
+            prov_data = provenance_verifier.get_provenance_data()
+            return JSONResponse(
+                status_code=200,
+                content={"success": True, "data": prov_data, "error": None},
+            )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "data": {
+                    "model_version": scorer.model_version,
+                    "active_feature_names": list(scorer.feature_names),
+                    "threshold": scorer.threshold,
+                },
+                "error": None,
+            },
+        )
 
     @app.post("/v1/score")
     def score(request: ScoreRequestV1) -> ScoreResponseV1:

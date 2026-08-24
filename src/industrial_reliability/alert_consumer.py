@@ -1,0 +1,152 @@
+"""Kafka consumer for score decisions and transactional outbox dispatcher for alerts."""
+
+from __future__ import annotations
+
+import asyncio
+import enum
+import json
+import logging
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
+
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+
+from industrial_reliability.alert_policy import LockedAlertPolicyV1
+from industrial_reliability.alert_state import transition
+from industrial_reliability.kafka_io import decode_message, encode_message
+from industrial_reliability.persistence import RuntimeStore
+from industrial_reliability.runtime_messages import (
+    REPLAY_STATUS_TOPIC,
+    ReplayStatusV1,
+    ScoreDecisionV1,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class ProcessOutcome(enum.StrEnum):
+    COMMITTED = "COMMITTED"
+    SESSION_FAILED = "SESSION_FAILED"
+    QUARANTINED = "QUARANTINED"
+    SKIPPED = "SKIPPED"
+
+
+class AlertConsumer:
+    def __init__(
+        self,
+        store: RuntimeStore,
+        policy: LockedAlertPolicyV1,
+        producer: AIOKafkaProducer | None = None,
+        consumer: AIOKafkaConsumer | None = None,
+        machine_id: str = "metropt3",
+    ) -> None:
+        self.store = store
+        self.policy = policy
+        self.producer = producer
+        self.consumer = consumer
+        self.machine_id = machine_id
+        self._failed_sessions: set[UUID] = set()
+
+    def _assert_identity(self, decision: ScoreDecisionV1) -> None:
+        if decision.source_dataset_sha256 != self.policy.source_dataset_sha256:
+            raise ValueError(
+                f"Source dataset SHA mismatch: expected {self.policy.source_dataset_sha256}, got {decision.source_dataset_sha256}"
+            )
+        if decision.contract_sha256 != self.policy.contract_sha256:
+            raise ValueError(
+                f"Contract SHA mismatch: expected {self.policy.contract_sha256}, got {decision.contract_sha256}"
+            )
+        if decision.model_version != self.policy.model_version:
+            raise ValueError(
+                f"Model version mismatch: expected {self.policy.model_version}, got {decision.model_version}"
+            )
+
+    async def _fail_session(
+        self,
+        session_id: UUID,
+        source_ts: datetime,
+        error_code: str,
+    ) -> None:
+        self._failed_sessions.add(session_id)
+        status = ReplayStatusV1(
+            message_id=uuid4(),
+            replay_session_id=session_id,
+            source_dataset_sha256=self.policy.source_dataset_sha256,
+            contract_sha256=self.policy.contract_sha256,
+            source_timestamp=source_ts,
+            emitted_at=datetime.now(UTC),
+            state="FAILED",
+            last_sequence=0,
+            error_code=error_code,
+        )
+        self.store.record_replay_status(status)
+        if self.producer:
+            await self.producer.send_and_wait(
+                REPLAY_STATUS_TOPIC,
+                value=encode_message(status),
+                key=str(session_id).encode("ascii"),
+            )
+
+    async def process(self, record: object) -> ProcessOutcome:
+        raw_bytes = getattr(record, "value", b"")
+        try:
+            decision = decode_message(raw_bytes, ScoreDecisionV1)
+        except Exception as err:
+            logger.error("Failed to decode score decision: %s", err)
+            return ProcessOutcome.QUARANTINED
+
+        session_id = decision.replay_session_id
+        if session_id in self._failed_sessions:
+            return ProcessOutcome.SKIPPED
+
+        try:
+            self._assert_identity(decision)
+        except ValueError as val_err:
+            logger.error("Contract mismatch in score decision: %s", val_err)
+            await self._fail_session(session_id, decision.source_timestamp, "CONTRACT_MISMATCH")
+            return ProcessOutcome.SESSION_FAILED
+
+        state = self.store.load_alert_state(session_id, self.machine_id)
+        result = transition(state, decision, self.policy)
+        self.store.record_decision_transition(decision, result)
+
+        return ProcessOutcome.COMMITTED
+
+
+class AlertOutboxDispatcher:
+    def __init__(self, store: RuntimeStore, producer: AIOKafkaProducer) -> None:
+        self.store = store
+        self.producer = producer
+        self._running = False
+
+    async def dispatch_one(self) -> bool:
+        row = self.store.next_unpublished_outbox()
+        if row is None:
+            return False
+
+        payload_bytes = (
+            json.dumps(row.payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            if isinstance(row.payload, dict)
+            else row.payload
+        )
+        await self.producer.send_and_wait(
+            row.topic,
+            value=payload_bytes,
+            key=row.message_key.encode("ascii"),
+        )
+        self.store.mark_outbox_published(row.message_id)
+        return True
+
+    async def run_loop(self, poll_interval: float = 0.5) -> None:
+        self._running = True
+        while self._running:
+            try:
+                dispatched = await self.dispatch_one()
+                if not dispatched:
+                    await asyncio.sleep(poll_interval)
+            except Exception as err:
+                logger.error("Outbox dispatch error: %s", err)
+                await asyncio.sleep(poll_interval)
+
+    def stop(self) -> None:
+        self._running = False

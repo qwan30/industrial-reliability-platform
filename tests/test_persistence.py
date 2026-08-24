@@ -1,0 +1,251 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
+from uuid import UUID, uuid4
+
+import pytest
+
+from industrial_reliability.alert_policy import LockedAlertPolicyV1
+from industrial_reliability.alert_state import (
+    AlertState,
+    transition,
+)
+from industrial_reliability.persistence import (
+    RuntimeStore,
+)
+from industrial_reliability.runtime_messages import (
+    EvidenceValueV1,
+    ReplayStatusV1,
+    ScoreDecisionV1,
+)
+
+
+def _make_policy() -> LockedAlertPolicyV1:
+    return LockedAlertPolicyV1(
+        schema_version="alert-policy-v1",
+        source_split="calibration",
+        source_scores_sha256="a" * 64,
+        source_dataset_sha256="b" * 64,
+        contract_sha256="c" * 64,
+        model_id="statistical",
+        model_version="champion-statistical-v1",
+        threshold=1.0,
+        stride_seconds=300,
+        persistence_decisions=1,
+        cooldown_decisions=1,
+        merge_gap_seconds=300,
+        calibration_false_episodes_per_day=0.1,
+        calibration_time_in_alert=0.01,
+        policy_sha256="d" * 64,
+    )
+
+
+def _make_decision(session_id: UUID, is_anomaly: bool = True) -> ScoreDecisionV1:
+    decision_id = uuid4()
+    window_id = uuid4()
+    return ScoreDecisionV1(
+        message_id=uuid4(),
+        replay_session_id=session_id,
+        source_dataset_sha256="b" * 64,
+        contract_sha256="c" * 64,
+        source_timestamp=datetime(2020, 4, 18, 0, 5),
+        emitted_at=datetime.now(UTC),
+        decision_id=decision_id,
+        window_id=window_id,
+        model_version="champion-statistical-v1",
+        score=1.5 if is_anomaly else 0.4,
+        threshold=1.0,
+        is_anomaly=is_anomaly,
+        evidence_vector=(
+            EvidenceValueV1(
+                feature_name="tp2_mean",
+                feature_value=1.5,
+                robust_deviation=0.5,
+            ),
+        ),
+    )
+
+
+def test_store_record_replay_status() -> None:
+    store = RuntimeStore("postgresql://test:test@localhost:5432/test")
+    status = ReplayStatusV1(
+        message_id=uuid4(),
+        replay_session_id=uuid4(),
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+        source_timestamp=datetime(2020, 3, 1, 0, 0),
+        emitted_at=datetime.now(UTC),
+        state="COMPLETED",
+        last_sequence=100,
+    )
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+    with patch("psycopg.connect", return_value=mock_conn):
+        store.record_replay_status(status)
+        assert mock_cur.execute.called
+        assert mock_conn.commit.called
+
+
+def test_store_record_decision_transition() -> None:
+    store = RuntimeStore("postgresql://test:test@localhost:5432/test")
+    session_id = uuid4()
+    policy = _make_policy()
+    decision = _make_decision(session_id, is_anomaly=True)
+    state = AlertState.empty(session_id, "metropt3")
+    res = transition(state, decision, policy)
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+    with patch("psycopg.connect", return_value=mock_conn):
+        store.record_decision_transition(decision, res)
+        assert mock_cur.execute.call_count >= 4
+        assert mock_conn.commit.called
+
+
+def test_store_load_alert_state_empty() -> None:
+    store = RuntimeStore("postgresql://test:test@localhost:5432/test")
+    session_id = uuid4()
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_cur.fetchone.return_value = None
+
+    with patch("psycopg.connect", return_value=mock_conn):
+        state = store.load_alert_state(session_id, "metropt3")
+        assert state.active_alert_id is None
+        assert state.replay_session_id == session_id
+
+
+def test_store_outbox_operations() -> None:
+    store = RuntimeStore("postgresql://test:test@localhost:5432/test")
+    msg_id = uuid4()
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_cur.fetchone.return_value = {
+        "message_id": str(msg_id),
+        "topic": "irp.alerts.v1",
+        "message_key": "metropt3",
+        "payload": {"action": "OPENED"},
+    }
+
+    with patch("psycopg.connect", return_value=mock_conn):
+        row = store.next_unpublished_outbox()
+        assert row is not None
+        assert row.message_id == msg_id
+        assert row.topic == "irp.alerts.v1"
+
+        store.mark_outbox_published(msg_id)
+        assert mock_cur.execute.called
+
+
+def test_store_read_apis() -> None:
+    store = RuntimeStore("postgresql://test:test@localhost:5432/test")
+    session_id = uuid4()
+    alert_id = uuid4()
+    dec_id = uuid4()
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+    # 1. get_replay
+    mock_cur.fetchone.return_value = {
+        "replay_session_id": str(session_id),
+        "source_dataset_sha256": "a" * 64,
+        "contract_sha256": "b" * 64,
+        "model_version": "champion-statistical-v1",
+        "state": "COMPLETED",
+        "last_sequence": 100,
+        "source_timestamp": datetime(2020, 3, 1, 0, 0),
+        "error_code": None,
+        "updated_at": datetime.now(UTC),
+    }
+
+    with patch("psycopg.connect", return_value=mock_conn):
+        replay = store.get_replay(session_id)
+        assert replay is not None
+        assert replay.replay_session_id == session_id
+
+    # 2. list_alerts
+    mock_cur.fetchall.return_value = [
+        {
+            "alert_id": str(alert_id),
+            "replay_session_id": str(session_id),
+            "machine_id": "metropt3",
+            "state": "OPEN",
+            "first_detection": datetime(2020, 4, 18, 0, 0),
+            "last_detection": datetime(2020, 4, 18, 0, 5),
+            "resolved_at": None,
+            "latest_decision_id": str(dec_id),
+            "policy_sha256": "d" * 64,
+        }
+    ]
+    with patch("psycopg.connect", return_value=mock_conn):
+        alerts = store.list_alerts(session_id)
+        assert len(alerts) == 1
+        assert alerts[0].alert_id == alert_id
+
+    # 3. count
+    mock_cur.fetchone.return_value = (5,)
+    with patch("psycopg.connect", return_value=mock_conn):
+        cnt = store.count("alerts", "replay_session_id", str(session_id))
+        assert cnt == 5
+
+    # 4. Invalid count table
+    with pytest.raises(ValueError, match="Invalid table"):
+        store.count("invalid_table")
+
+
+def test_store_get_alert_detail() -> None:
+    store = RuntimeStore("postgresql://test:test@localhost:5432/test")
+    session_id = uuid4()
+    alert_id = uuid4()
+    dec_id = uuid4()
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+    mock_cur.fetchone.return_value = {
+        "alert_id": str(alert_id),
+        "replay_session_id": str(session_id),
+        "machine_id": "metropt3",
+        "state": "OPEN",
+        "first_detection": datetime(2020, 4, 18, 0, 0),
+        "last_detection": datetime(2020, 4, 18, 0, 5),
+        "resolved_at": None,
+        "latest_decision_id": str(dec_id),
+        "policy_sha256": "d" * 64,
+    }
+    mock_cur.fetchall.side_effect = [
+        [{"payload": {"action": "OPENED"}}],
+        [{"payload": {"evidence_id": str(uuid4())}}],
+        [{"payload": {"decision_id": str(dec_id)}}],
+    ]
+
+    with patch("psycopg.connect", return_value=mock_conn):
+        detail = store.get_alert_detail(alert_id)
+        assert detail is not None
+        assert detail.alert.alert_id == alert_id
+        assert len(detail.events) == 1
+        assert len(detail.evidence) == 1
+        assert len(detail.decisions) == 1
+
+        # Missing alert
+        mock_cur.fetchone.return_value = None
+        assert store.get_alert_detail(uuid4()) is None

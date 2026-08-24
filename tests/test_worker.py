@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -311,3 +311,29 @@ def test_worker_settings_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS")
     with pytest.raises(ValueError, match="KAFKA_BOOTSTRAP_SERVERS"):
         WorkerSettings.from_env()
+
+
+@pytest.mark.asyncio
+async def test_streaming_worker_run_lifecycle() -> None:
+    settings = WorkerSettings(
+        bootstrap_servers="localhost:9092",
+        scoring_api_url="http://localhost:8000",
+        contract_sha256="a" * 64,
+        source_dataset_sha256="b" * 64,
+        model_version="champion-statistical-v1",
+        feature_names=("tp2_mean",),
+    )
+    worker = StreamingWorker(settings)
+    mock_consumer = AsyncMock()
+    mock_producer = AsyncMock()
+    mock_scoring = AsyncMock()
+
+    with (
+        patch("industrial_reliability.worker.AIOKafkaConsumer", return_value=mock_consumer),
+        patch("industrial_reliability.worker.AIOKafkaProducer", return_value=mock_producer),
+        patch("industrial_reliability.worker.ScoringClient", return_value=mock_scoring),
+    ):
+        await worker.start()
+        assert worker._running is True
+        await worker.stop()
+        assert worker._running is False

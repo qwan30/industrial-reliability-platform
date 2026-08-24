@@ -1,4 +1,4 @@
-"""Calibration-locked, holdout-isolated alert policy evaluation and artifact locking."""
+"""Calibration-locked alert policy module for Phase 5."""
 
 from __future__ import annotations
 
@@ -56,22 +56,16 @@ class LockedAlertPolicyV1:
         return asdict(self)
 
 
-def evaluate_candidate(
-    frame: pd.DataFrame,
+def _simulate_alert_stream(
+    sorted_df: pd.DataFrame,
     persistence: int,
     cooldown: int,
     merge_gap_seconds: int,
-    stride_seconds: int,
-) -> PolicyMetrics:
-    if len(frame) == 0:
-        return PolicyMetrics(false_episodes_per_day=0.0, time_in_alert=0.0)
-
-    sorted_df = frame.sort_values("window_end").reset_index(drop=True)
+) -> tuple[int, int]:
     is_active = False
     anomaly_streak = 0
     normal_streak = 0
     last_resolution: datetime | None = None
-
     episodes = 0
     alert_window_count = 0
 
@@ -85,14 +79,12 @@ def evaluate_candidate(
             normal_streak = 0
             anomaly_streak += 1
             if not is_active and anomaly_streak >= persistence:
-                # Check if merged with previous alert
-                if (
+                is_merged = (
                     last_resolution is not None
                     and merge_gap_seconds > 0
                     and (ts - last_resolution).total_seconds() <= merge_gap_seconds
-                ):
-                    pass  # Merged continuation of previous episode
-                else:
+                )
+                if not is_merged:
                     episodes += 1
                 is_active = True
             if is_active:
@@ -105,6 +97,23 @@ def evaluate_candidate(
                 if normal_streak >= cooldown:
                     is_active = False
                     last_resolution = ts
+
+    return episodes, alert_window_count
+
+
+def evaluate_candidate(
+    frame: pd.DataFrame,
+    persistence: int,
+    cooldown: int,
+    merge_gap_seconds: int,
+) -> PolicyMetrics:
+    if len(frame) == 0:
+        return PolicyMetrics(false_episodes_per_day=0.0, time_in_alert=0.0)
+
+    sorted_df = frame.sort_values("window_end").reset_index(drop=True)
+    episodes, alert_window_count = _simulate_alert_stream(
+        sorted_df, persistence, cooldown, merge_gap_seconds
+    )
 
     start_time = sorted_df["window_start"].min()
     end_time = sorted_df["window_end"].max()
@@ -123,7 +132,7 @@ def evaluate_candidate(
     )
 
 
-def select_policy(frame: pd.DataFrame, *, stride_seconds: int) -> PolicySelection:
+def select_policy(frame: pd.DataFrame, *, stride_seconds: int = 300) -> PolicySelection:
     unique_splits = set(frame["split"].unique())
     if unique_splits != {"calibration"}:
         raise ValueError(
@@ -140,7 +149,6 @@ def select_policy(frame: pd.DataFrame, *, stride_seconds: int) -> PolicySelectio
             persistence=persistence,
             cooldown=cooldown,
             merge_gap_seconds=merge_gap,
-            stride_seconds=stride_seconds,
         )
         if metrics.false_episodes_per_day <= 1.0 and metrics.time_in_alert <= 0.05:
             return PolicySelection(
@@ -154,7 +162,10 @@ def select_policy(frame: pd.DataFrame, *, stride_seconds: int) -> PolicySelectio
 
 
 def lock_alert_policy(manifest_path: Path, output_path: Path) -> LockedAlertPolicyV1:
-    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    resolved_manifest = manifest_path.resolve()
+    resolved_output = output_path.resolve()
+
+    manifest_data = json.loads(resolved_manifest.read_text(encoding="utf-8"))
     model_id = manifest_data["model_id"]
     model_version = manifest_data.get("model_version", f"champion-{model_id}-v1")
     source_dataset_sha256 = manifest_data["source_dataset_sha256"]
@@ -162,7 +173,7 @@ def lock_alert_policy(manifest_path: Path, output_path: Path) -> LockedAlertPoli
     threshold = float(manifest_data["threshold"])
     stride_seconds = int(manifest_data.get("stride_seconds", 300))
 
-    scores_file = manifest_path.parent / "scores.parquet"
+    scores_file = resolved_manifest.parent / "scores.parquet"
     if not scores_file.is_file():
         raise ValueError(f"Scores file not found at {scores_file}")
 
@@ -205,13 +216,13 @@ def lock_alert_policy(manifest_path: Path, output_path: Path) -> LockedAlertPoli
     policy_sha256 = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
     payload["policy_sha256"] = policy_sha256
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_output = output_path.with_suffix(".tmp")
+    resolved_output.parent.mkdir(parents=True, exist_ok=True)
+    temp_output = resolved_output.with_suffix(".tmp")
     temp_output.write_text(
         json.dumps(payload, indent=2, sort_keys=True, allow_nan=False),
         encoding="utf-8",
     )
-    temp_output.replace(output_path)
+    temp_output.replace(resolved_output)
 
     return LockedAlertPolicyV1(**payload)
 
@@ -223,16 +234,25 @@ def main() -> None:
         "lock", help="Lock alert policy from champion calibration data"
     )
     lock_parser.add_argument(
-        "--champion-manifest", type=Path, required=True, help="Path to champion manifest JSON"
+        "--manifest",
+        type=Path,
+        required=True,
+        help="Path to champion manifest.json",
     )
     lock_parser.add_argument(
-        "--output", type=Path, required=True, help="Output path for alert-policy.json"
+        "--output",
+        type=Path,
+        required=True,
+        help="Output path for alert-policy.json",
     )
 
     args = parser.parse_args()
     if args.command == "lock":
-        policy = lock_alert_policy(args.champion_manifest, args.output)
-        print(f"Locked alert policy {policy.policy_sha256} written to {args.output}")
+        policy = lock_alert_policy(args.manifest.resolve(), args.output.resolve())
+        print(
+            f"Locked alert policy {policy.policy_sha256}: "
+            f"persistence={policy.persistence_decisions}, cooldown={policy.cooldown_decisions}, merge_gap={policy.merge_gap_seconds}"
+        )
 
 
 if __name__ == "__main__":

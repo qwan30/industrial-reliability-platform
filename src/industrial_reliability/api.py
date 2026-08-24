@@ -18,7 +18,12 @@ from industrial_reliability.champion import (
     ScoringContractError,
     load_champion,
 )
-from industrial_reliability.persistence import RuntimeStore
+from industrial_reliability.persistence import (
+    AlertDetailRecord,
+    AlertSummaryRecord,
+    ReplaySessionRecord,
+    RuntimeStore,
+)
 from industrial_reliability.runtime_messages import (
     ApiErrorV1,
     ErrorResponseV1,
@@ -28,6 +33,52 @@ from industrial_reliability.runtime_messages import (
 )
 
 RUNTIME_NAMESPACE = NAMESPACE_URL
+ERR_STORE_UNAVAILABLE_MSG = "Database store not configured"
+
+
+def _serialize_replay(record: ReplaySessionRecord) -> dict[str, Any]:
+    data = asdict(record)
+    data["replay_session_id"] = str(data["replay_session_id"])
+    data["source_timestamp"] = (
+        data["source_timestamp"].isoformat() if data["source_timestamp"] else None
+    )
+    data["updated_at"] = data["updated_at"].isoformat() if data["updated_at"] else None
+    return data
+
+
+def _serialize_alert_summary(alert: AlertSummaryRecord) -> dict[str, Any]:
+    d = asdict(alert)
+    d["alert_id"] = str(d["alert_id"])
+    d["replay_session_id"] = str(d["replay_session_id"])
+    d["latest_decision_id"] = str(d["latest_decision_id"])
+    d["first_detection"] = d["first_detection"].isoformat() if d["first_detection"] else None
+    d["last_detection"] = d["last_detection"].isoformat() if d["last_detection"] else None
+    d["resolved_at"] = d["resolved_at"].isoformat() if d["resolved_at"] else None
+    return d
+
+
+def _serialize_alert_detail(detail: AlertDetailRecord) -> dict[str, Any]:
+    return {
+        "alert": _serialize_alert_summary(detail.alert),
+        "events": detail.events,
+        "evidence": detail.evidence,
+        "decisions": detail.decisions,
+        "rca": None,
+    }
+
+
+def _store_unavailable_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "success": False,
+            "data": None,
+            "error": {
+                "code": "STORE_UNAVAILABLE",
+                "message": ERR_STORE_UNAVAILABLE_MSG,
+            },
+        },
+    )
 
 
 def create_app(
@@ -95,17 +146,7 @@ def create_app(
     @app.get("/v1/replays/{replay_session_id}")
     def get_replay(replay_session_id: UUID) -> JSONResponse:
         if store is None:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "success": False,
-                    "data": None,
-                    "error": {
-                        "code": "STORE_UNAVAILABLE",
-                        "message": "Database store not configured",
-                    },
-                },
-            )
+            return _store_unavailable_response()
         record = store.get_replay(replay_session_id)
         if record is None:
             return JSONResponse(
@@ -116,13 +157,10 @@ def create_app(
                     "error": {"code": "REPLAY_NOT_FOUND", "message": "Replay session not found"},
                 },
             )
-        data = asdict(record)
-        data["replay_session_id"] = str(data["replay_session_id"])
-        data["source_timestamp"] = (
-            data["source_timestamp"].isoformat() if data["source_timestamp"] else None
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "data": _serialize_replay(record), "error": None},
         )
-        data["updated_at"] = data["updated_at"].isoformat() if data["updated_at"] else None
-        return JSONResponse(status_code=200, content={"success": True, "data": data, "error": None})
 
     @app.get("/v1/replays/{replay_session_id}/alerts")
     def list_alerts(
@@ -131,30 +169,9 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
     ) -> JSONResponse:
         if store is None:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "success": False,
-                    "data": None,
-                    "error": {
-                        "code": "STORE_UNAVAILABLE",
-                        "message": "Database store not configured",
-                    },
-                },
-            )
+            return _store_unavailable_response()
         alerts = store.list_alerts(replay_session_id, after=after, limit=limit)
-        serialized_alerts = []
-        for a in alerts:
-            d = asdict(a)
-            d["alert_id"] = str(d["alert_id"])
-            d["replay_session_id"] = str(d["replay_session_id"])
-            d["latest_decision_id"] = str(d["latest_decision_id"])
-            d["first_detection"] = (
-                d["first_detection"].isoformat() if d["first_detection"] else None
-            )
-            d["last_detection"] = d["last_detection"].isoformat() if d["last_detection"] else None
-            d["resolved_at"] = d["resolved_at"].isoformat() if d["resolved_at"] else None
-            serialized_alerts.append(d)
+        serialized_alerts = [_serialize_alert_summary(a) for a in alerts]
         return JSONResponse(
             status_code=200,
             content={"success": True, "data": {"alerts": serialized_alerts}, "error": None},
@@ -163,17 +180,7 @@ def create_app(
     @app.get("/v1/alerts/{alert_id}")
     def get_alert(alert_id: UUID) -> JSONResponse:
         if store is None:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "success": False,
-                    "data": None,
-                    "error": {
-                        "code": "STORE_UNAVAILABLE",
-                        "message": "Database store not configured",
-                    },
-                },
-            )
+            return _store_unavailable_response()
         detail = store.get_alert_detail(alert_id)
         if detail is None:
             return JSONResponse(
@@ -184,28 +191,10 @@ def create_app(
                     "error": {"code": "ALERT_NOT_FOUND", "message": "Alert not found"},
                 },
             )
-        d_summary = asdict(detail.alert)
-        d_summary["alert_id"] = str(d_summary["alert_id"])
-        d_summary["replay_session_id"] = str(d_summary["replay_session_id"])
-        d_summary["latest_decision_id"] = str(d_summary["latest_decision_id"])
-        d_summary["first_detection"] = (
-            d_summary["first_detection"].isoformat() if d_summary["first_detection"] else None
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "data": _serialize_alert_detail(detail), "error": None},
         )
-        d_summary["last_detection"] = (
-            d_summary["last_detection"].isoformat() if d_summary["last_detection"] else None
-        )
-        d_summary["resolved_at"] = (
-            d_summary["resolved_at"].isoformat() if d_summary["resolved_at"] else None
-        )
-
-        data = {
-            "alert": d_summary,
-            "events": detail.events,
-            "evidence": detail.evidence,
-            "decisions": detail.decisions,
-            "rca": None,
-        }
-        return JSONResponse(status_code=200, content={"success": True, "data": data, "error": None})
 
     return app
 

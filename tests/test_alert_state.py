@@ -136,16 +136,19 @@ def test_reopen_merged_alert() -> None:
     # 1. Open alert at t=0
     dec0 = _make_decision(session_id, 0, True)
     res0 = transition(state, dec0, policy)
-    assert res0.event is not None and res0.event.action == "OPENED"
+    assert res0.event is not None
+    assert res0.event.action == "OPENED"
     initial_alert_id = res0.event.alert_id
 
     # 2. Resolve alert at t=5min
     dec1 = _make_decision(session_id, 1, False)
     res1 = transition(res0.state, dec1, policy)
-    assert res1.event is not None and res1.event.action == "RESOLVED"
+    assert res1.event is not None
+    assert res1.event.action == "RESOLVED"
 
     # 3. New anomaly at t=10min (gap is 5 min <= 10 min merge gap)
     dec2 = _make_decision(session_id, 2, True)
     res2 = transition(res1.state, dec2, policy)
-    assert res2.event is not None and res2.event.action == "REOPENED"
+    assert res2.event is not None
+    assert res2.event.action == "REOPENED"
     assert res2.event.alert_id == initial_alert_id

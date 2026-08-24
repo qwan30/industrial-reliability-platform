@@ -308,8 +308,9 @@ def test_alert_event_round_trips_without_mutation() -> None:
         policy_sha256="c" * 64,
     )
     assert AlertEventV1.model_validate_json(event.model_dump_json()) == event
+    invalid_payload = {**event.model_dump(), "action": "INVALID_ACTION"}
     with pytest.raises(ValidationError):
-        AlertEventV1.model_validate({**event.model_dump(), "action": "INVALID_ACTION"})
+        AlertEventV1.model_validate(invalid_payload)
 
 
 def test_evidence_snapshot_round_trips_and_validates() -> None:

@@ -91,8 +91,8 @@ class AlertConsumer:
         raw_bytes = getattr(record, "value", b"")
         try:
             decision = decode_message(raw_bytes, ScoreDecisionV1)
-        except Exception as err:
-            logger.error("Failed to decode score decision: %s", err)
+        except Exception:
+            logger.exception("Failed to decode score decision")
             return ProcessOutcome.QUARANTINED
 
         session_id = decision.replay_session_id
@@ -101,8 +101,8 @@ class AlertConsumer:
 
         try:
             self._assert_identity(decision)
-        except ValueError as val_err:
-            logger.error("Contract mismatch in score decision: %s", val_err)
+        except ValueError:
+            logger.exception("Contract mismatch in score decision")
             await self._fail_session(session_id, decision.source_timestamp, "CONTRACT_MISMATCH")
             return ProcessOutcome.SESSION_FAILED
 
@@ -144,8 +144,8 @@ class AlertOutboxDispatcher:
                 dispatched = await self.dispatch_one()
                 if not dispatched:
                     await asyncio.sleep(poll_interval)
-            except Exception as err:
-                logger.error("Outbox dispatch error: %s", err)
+            except Exception:
+                logger.exception("Outbox dispatch error")
                 await asyncio.sleep(poll_interval)
 
     def stop(self) -> None:

@@ -1,7 +1,7 @@
 FROM python:3.12.10-slim-bookworm
 WORKDIR /app
 COPY requirements-runtime.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --only-binary :all: --require-hashes -r requirements.txt
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 ENV PYTHONPATH=/app/src

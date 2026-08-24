@@ -19,6 +19,9 @@ TELEMETRY_TOPIC = "irp.telemetry.v1"
 FEATURES_TOPIC = "irp.features.v1"
 SCORES_TOPIC = "irp.scores.v1"
 QUARANTINE_TOPIC = "irp.quarantine.v1"
+ALERT_EVENTS_TOPIC = "irp.alerts.v1"
+
+AlertAction = Literal["OPENED", "UPDATED", "RESOLVED", "REOPENED"]
 
 
 class FrozenMessage(BaseModel):
@@ -301,6 +304,78 @@ class QuarantineRecordV1(FrozenMessage):
 
     @model_validator(mode="after")
     def validate_quarantine(self) -> QuarantineRecordV1:
+        if self.source_timestamp.tzinfo is not None:
+            raise ValueError(ERR_SOURCE_TS_NAIVE)
+        if self.emitted_at.tzinfo is None:
+            raise ValueError(ERR_EMITTED_AT_UTC)
+        return self
+
+
+class FeatureDeviationV1(FrozenMessage):
+    feature_name: str = Field(min_length=1)
+    observed_value: float
+    baseline_value: float
+    absolute_deviation: float = Field(ge=0.0)
+
+    @model_validator(mode="after")
+    def validate_deviation(self) -> FeatureDeviationV1:
+        for val in (self.observed_value, self.baseline_value, self.absolute_deviation):
+            if not math.isfinite(val):
+                raise ValueError("Deviation values must be finite")
+        return self
+
+
+class AlertEventV1(FrozenMessage):
+    schema_version: Literal["alert-event-v1"] = "alert-event-v1"
+    message_id: UUID
+    replay_session_id: UUID
+    source_dataset_sha256: str = Field(pattern=HEX_64_PATTERN)
+    contract_sha256: str = Field(pattern=HEX_64_PATTERN)
+    source_timestamp: datetime
+    emitted_at: datetime
+    alert_id: UUID
+    machine_id: str = Field(min_length=1)
+    action: AlertAction
+    first_detection: datetime
+    last_detection: datetime
+    decision_ids: tuple[UUID, ...] = Field(min_length=1)
+    policy_sha256: str = Field(pattern=HEX_64_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_alert_event(self) -> AlertEventV1:
+        if self.source_timestamp.tzinfo is not None:
+            raise ValueError(ERR_SOURCE_TS_NAIVE)
+        if self.emitted_at.tzinfo is None:
+            raise ValueError(ERR_EMITTED_AT_UTC)
+        if self.first_detection.tzinfo is not None:
+            raise ValueError("first_detection must be timezone-naive")
+        if self.last_detection.tzinfo is not None:
+            raise ValueError("last_detection must be timezone-naive")
+        if self.first_detection > self.last_detection:
+            raise ValueError("first_detection must not be later than last_detection")
+        return self
+
+
+class EvidenceSnapshotV1(FrozenMessage):
+    schema_version: Literal["evidence-snapshot-v1"] = "evidence-snapshot-v1"
+    message_id: UUID
+    replay_session_id: UUID
+    source_dataset_sha256: str = Field(pattern=HEX_64_PATTERN)
+    contract_sha256: str = Field(pattern=HEX_64_PATTERN)
+    source_timestamp: datetime
+    emitted_at: datetime
+    evidence_id: UUID
+    alert_id: UUID
+    decision_id: UUID
+    window_id: UUID
+    model_version: str = Field(min_length=1)
+    feature_deviations: tuple[FeatureDeviationV1, ...]
+    data_quality: dict[str, float | int | str | bool]
+    model: dict[str, float | int | str | bool]
+    system_health: dict[str, float | int | str | bool]
+
+    @model_validator(mode="after")
+    def validate_evidence_snapshot(self) -> EvidenceSnapshotV1:
         if self.source_timestamp.tzinfo is not None:
             raise ValueError(ERR_SOURCE_TS_NAIVE)
         if self.emitted_at.tzinfo is None:

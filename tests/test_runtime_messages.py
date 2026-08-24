@@ -7,8 +7,11 @@ import pytest
 from pydantic import ValidationError
 
 from industrial_reliability.runtime_messages import (
+    AlertEventV1,
     ErrorResponseV1,
+    EvidenceSnapshotV1,
     EvidenceValueV1,
+    FeatureDeviationV1,
     FeatureVectorV1,
     QuarantineRecordV1,
     ReplayCommandV1,
@@ -281,3 +284,63 @@ def test_quarantine_record_validation() -> None:
     )
     assert qr.original_topic == "irp.replay.commands.v1"
     assert qr.offset == 42
+
+
+def test_alert_event_round_trips_without_mutation() -> None:
+    session_id = uuid4()
+    alert_id = uuid4()
+    decision_1 = uuid4()
+    decision_2 = uuid4()
+    event = AlertEventV1(
+        schema_version="alert-event-v1",
+        message_id=uuid4(),
+        replay_session_id=session_id,
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+        source_timestamp=datetime(2020, 4, 18, 0, 5),
+        emitted_at=datetime.now(UTC),
+        alert_id=alert_id,
+        machine_id="metropt3",
+        action="OPENED",
+        first_detection=datetime(2020, 4, 18, 0, 0),
+        last_detection=datetime(2020, 4, 18, 0, 5),
+        decision_ids=(decision_1, decision_2),
+        policy_sha256="c" * 64,
+    )
+    assert AlertEventV1.model_validate_json(event.model_dump_json()) == event
+    invalid_payload = {**event.model_dump(), "action": "INVALID_ACTION"}
+    with pytest.raises(ValidationError):
+        AlertEventV1.model_validate(invalid_payload)
+
+
+def test_evidence_snapshot_round_trips_and_validates() -> None:
+    session_id = uuid4()
+    alert_id = uuid4()
+    decision_id = uuid4()
+    window_id = uuid4()
+    evidence = EvidenceSnapshotV1(
+        schema_version="evidence-snapshot-v1",
+        message_id=uuid4(),
+        replay_session_id=session_id,
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+        source_timestamp=datetime(2020, 4, 18, 0, 5),
+        emitted_at=datetime.now(UTC),
+        evidence_id=uuid4(),
+        alert_id=alert_id,
+        decision_id=decision_id,
+        window_id=window_id,
+        model_version="champion-statistical-v1",
+        feature_deviations=(
+            FeatureDeviationV1(
+                feature_name="tp2_mean",
+                observed_value=1.5,
+                baseline_value=1.0,
+                absolute_deviation=0.5,
+            ),
+        ),
+        data_quality={"valid_bins": 6, "observation_count": 180},
+        model={"score": 1.2, "threshold": 1.0},
+        system_health={"cpu_pct": 12.5, "mem_mb": 128},
+    )
+    assert EvidenceSnapshotV1.model_validate_json(evidence.model_dump_json()) == evidence

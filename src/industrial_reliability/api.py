@@ -1,14 +1,15 @@
-"""Stateless scoring API exposed with FastAPI."""
+"""Stateless scoring and alert evidence APIs exposed with FastAPI."""
 
 from __future__ import annotations
 
 import os
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
-from uuid import NAMESPACE_URL, uuid5
+from typing import Annotated, Any
+from uuid import NAMESPACE_URL, UUID, uuid5
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -16,6 +17,12 @@ from industrial_reliability.champion import (
     ChampionScorer,
     ScoringContractError,
     load_champion,
+)
+from industrial_reliability.persistence import (
+    AlertDetailRecord,
+    AlertSummaryRecord,
+    ReplaySessionRecord,
+    RuntimeStore,
 )
 from industrial_reliability.runtime_messages import (
     ApiErrorV1,
@@ -26,10 +33,59 @@ from industrial_reliability.runtime_messages import (
 )
 
 RUNTIME_NAMESPACE = NAMESPACE_URL
+ERR_STORE_UNAVAILABLE_MSG = "Database store not configured"
 
 
-def create_app(scorer: ChampionScorer) -> FastAPI:
-    app = FastAPI(title="Industrial Reliability Scoring API", version="1.0")
+def _serialize_replay(record: ReplaySessionRecord) -> dict[str, Any]:
+    data = asdict(record)
+    data["replay_session_id"] = str(data["replay_session_id"])
+    data["source_timestamp"] = (
+        data["source_timestamp"].isoformat() if data["source_timestamp"] else None
+    )
+    data["updated_at"] = data["updated_at"].isoformat() if data["updated_at"] else None
+    return data
+
+
+def _serialize_alert_summary(alert: AlertSummaryRecord) -> dict[str, Any]:
+    d = asdict(alert)
+    d["alert_id"] = str(d["alert_id"])
+    d["replay_session_id"] = str(d["replay_session_id"])
+    d["latest_decision_id"] = str(d["latest_decision_id"])
+    d["first_detection"] = d["first_detection"].isoformat() if d["first_detection"] else None
+    d["last_detection"] = d["last_detection"].isoformat() if d["last_detection"] else None
+    d["resolved_at"] = d["resolved_at"].isoformat() if d["resolved_at"] else None
+    return d
+
+
+def _serialize_alert_detail(detail: AlertDetailRecord) -> dict[str, Any]:
+    return {
+        "alert": _serialize_alert_summary(detail.alert),
+        "events": detail.events,
+        "evidence": detail.evidence,
+        "decisions": detail.decisions,
+        "rca": None,
+    }
+
+
+def _store_unavailable_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "success": False,
+            "data": None,
+            "error": {
+                "code": "STORE_UNAVAILABLE",
+                "message": ERR_STORE_UNAVAILABLE_MSG,
+            },
+        },
+    )
+
+
+def create_app(
+    scorer: ChampionScorer,
+    store: RuntimeStore | None = None,
+) -> FastAPI:
+    app = FastAPI(title="Industrial Reliability Scoring and Alert API", version="1.0")
 
     @app.exception_handler(ScoringContractError)
     async def scoring_contract_error_handler(
@@ -87,6 +143,59 @@ def create_app(scorer: ChampionScorer) -> FastAPI:
         )
         return ScoreResponseV1(data=decision)
 
+    @app.get("/v1/replays/{replay_session_id}")
+    def get_replay(replay_session_id: UUID) -> JSONResponse:
+        if store is None:
+            return _store_unavailable_response()
+        record = store.get_replay(replay_session_id)
+        if record is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {"code": "REPLAY_NOT_FOUND", "message": "Replay session not found"},
+                },
+            )
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "data": _serialize_replay(record), "error": None},
+        )
+
+    @app.get("/v1/replays/{replay_session_id}/alerts")
+    def list_alerts(
+        replay_session_id: UUID,
+        after: UUID | None = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ) -> JSONResponse:
+        if store is None:
+            return _store_unavailable_response()
+        alerts = store.list_alerts(replay_session_id, after=after, limit=limit)
+        serialized_alerts = [_serialize_alert_summary(a) for a in alerts]
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "data": {"alerts": serialized_alerts}, "error": None},
+        )
+
+    @app.get("/v1/alerts/{alert_id}")
+    def get_alert(alert_id: UUID) -> JSONResponse:
+        if store is None:
+            return _store_unavailable_response()
+        detail = store.get_alert_detail(alert_id)
+        if detail is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {"code": "ALERT_NOT_FOUND", "message": "Alert not found"},
+                },
+            )
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "data": _serialize_alert_detail(detail), "error": None},
+        )
+
     return app
 
 
@@ -99,4 +208,8 @@ def create_app_from_env() -> FastAPI:
         )
     pkg_dir = Path(pkg_dir_str).resolve()
     scorer = load_champion(pkg_dir, manifest_sha)
-    return create_app(scorer)
+
+    db_url = os.environ.get("DATABASE_URL")
+    store = RuntimeStore(db_url) if db_url else None
+
+    return create_app(scorer, store)

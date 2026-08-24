@@ -66,6 +66,31 @@ def test_detectors_reject_scoring_before_fit(detector: type[object]) -> None:
         detector().score(np.array([[0.0]]))  # type: ignore[attr-defined]
 
 
+def test_detector_constructors_reject_fitted_state_injection() -> None:
+    with pytest.raises(TypeError):
+        RobustStatisticalDetector(
+            _medians=np.array([0.0]),
+            _mads=np.array([1.0]),
+            _feature_mask=np.array([True]),
+        )
+    with pytest.raises(TypeError):
+        IsolationForestDetector(_model=IsolationForest(), _feature_count=1)
+
+
+@pytest.mark.parametrize("detector", [RobustStatisticalDetector, IsolationForestDetector])
+def test_fit_returns_fresh_detector_and_leaves_original_unfitted(
+    detector: type[object],
+) -> None:
+    original = detector()
+    fitted = original.fit(  # type: ignore[attr-defined]
+        np.array([[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]])
+    )
+
+    assert fitted is not original
+    with pytest.raises(RuntimeError, match="fit"):
+        original.score(np.array([[0.0, 1.0]]))  # type: ignore[attr-defined]
+
+
 @pytest.mark.parametrize("detector", [RobustStatisticalDetector, IsolationForestDetector])
 @pytest.mark.parametrize(
     "values",

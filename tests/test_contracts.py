@@ -36,6 +36,14 @@ def test_contract_freezes_dataset_schema_and_events() -> None:
     assert PHASE1.events[2].disagreement is not None
 
 
+def test_contract_freezes_feasibility_gate_defaults() -> None:
+    assert (
+        PHASE1.min_detected_events,
+        PHASE1.max_false_episodes_per_day,
+        PHASE1.max_time_in_alert,
+    ) == (2, 1.0, 0.05)
+
+
 def test_contract_freezes_execution_policies() -> None:
     assert PHASE1.dataset_path == "data/raw/metropt/dataset_train.csv"
     assert PHASE1.dataset_release_status == (

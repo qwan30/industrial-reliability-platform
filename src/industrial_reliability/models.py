@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Self, cast
 
 import numpy as np
@@ -33,9 +33,9 @@ def _immutable(values: NDArray[np.generic]) -> NDArray[np.generic]:
 class RobustStatisticalDetector:
     """Score rows by their maximum absolute train-derived robust z-score."""
 
-    _medians: NDArray[np.float64] | None = None
-    _mads: NDArray[np.float64] | None = None
-    _feature_mask: NDArray[np.bool_] | None = None
+    _medians: NDArray[np.float64] | None = field(default=None, init=False, repr=False)
+    _mads: NDArray[np.float64] | None = field(default=None, init=False, repr=False)
+    _feature_mask: NDArray[np.bool_] | None = field(default=None, init=False, repr=False)
 
     def fit(self, train: NDArray[np.float64]) -> Self:
         values = _matrix(train, "train")
@@ -44,14 +44,19 @@ class RobustStatisticalDetector:
         feature_mask = mads != 0.0
         if not feature_mask.any():
             raise ValueError("all training features have zero MAD")
-        return cast(
-            Self,
-            RobustStatisticalDetector(
-                cast(NDArray[np.float64], _immutable(medians)),
-                cast(NDArray[np.float64], _immutable(mads)),
-                cast(NDArray[np.bool_], _immutable(feature_mask)),
-            ),
+        fitted = cast(Self, RobustStatisticalDetector())
+        object.__setattr__(
+            fitted,
+            "_medians",
+            cast(NDArray[np.float64], _immutable(medians)),
         )
+        object.__setattr__(fitted, "_mads", cast(NDArray[np.float64], _immutable(mads)))
+        object.__setattr__(
+            fitted,
+            "_feature_mask",
+            cast(NDArray[np.bool_], _immutable(feature_mask)),
+        )
+        return fitted
 
     def score(self, values: NDArray[np.float64]) -> NDArray[np.float64]:
         if self._medians is None or self._mads is None or self._feature_mask is None:
@@ -70,8 +75,8 @@ class RobustStatisticalDetector:
 class IsolationForestDetector:
     """Score rows with the frozen deterministic Phase 1 Isolation Forest."""
 
-    _model: IsolationForest | None = None
-    _feature_count: int | None = None
+    _model: IsolationForest | None = field(default=None, init=False, repr=False)
+    _feature_count: int | None = field(default=None, init=False, repr=False)
 
     def fit(self, train: NDArray[np.float64]) -> Self:
         values = _matrix(train, "train")
@@ -82,7 +87,10 @@ class IsolationForestDetector:
             random_state=PHASE1.random_seed,
             n_jobs=PHASE1.isolation_forest_n_jobs,
         ).fit(values)
-        return cast(Self, IsolationForestDetector(model, values.shape[1]))
+        fitted = cast(Self, IsolationForestDetector())
+        object.__setattr__(fitted, "_model", model)
+        object.__setattr__(fitted, "_feature_count", values.shape[1])
+        return fitted
 
     def score(self, values: NDArray[np.float64]) -> NDArray[np.float64]:
         if self._model is None or self._feature_count is None:

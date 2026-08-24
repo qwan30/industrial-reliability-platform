@@ -50,6 +50,15 @@ def test_autoencoder_is_deterministic() -> None:
     )
 
 
+def test_autoencoder_seeded_shuffle_is_deterministic_across_multiple_batches() -> None:
+    train = seeded_training_matrix(rows=257, columns=4)
+
+    first = DenseAutoencoderDetector(epochs=2).fit(train).score(train)
+    second = DenseAutoencoderDetector(epochs=2).fit(train).score(train)
+
+    np.testing.assert_allclose(first, second, rtol=0, atol=1e-7)
+
+
 def test_autoencoder_scaler_is_train_only_and_provenance_is_read_only() -> None:
     train = seeded_training_matrix(rows=128, columns=4)
     detector = DenseAutoencoderDetector(epochs=1).fit(train)

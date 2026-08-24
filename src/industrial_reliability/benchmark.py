@@ -483,6 +483,69 @@ def _boolean(value: object, context: str) -> bool:
     return value
 
 
+def _count(value: object, context: str) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError(f"{context} must be a non-negative integer")
+    return value
+
+
+def _same_number(actual: object, expected: float) -> bool:
+    return math.isclose(float(cast("int | float", actual)), expected, rel_tol=1e-12, abs_tol=1e-12)
+
+
+def _validate_metric_arithmetic(
+    metric: dict[str, object],
+    event_results: list[object],
+    episode_decisions: int,
+    stride_seconds: int | float,
+    context: str,
+) -> bool:
+    valid = _count(metric["valid_holdout_decisions"], f"{context}.valid_holdout_decisions")
+    positive = _count(metric["positive_decisions"], f"{context}.positive_decisions")
+    anomalous = _count(metric["anomalous_decisions"], f"{context}.anomalous_decisions")
+    normal = _count(metric["normal_valid_decisions"], f"{context}.normal_valid_decisions")
+    detected = _count(metric["detected_events"], f"{context}.detected_events")
+    total = _count(metric["total_events"], f"{context}.total_events")
+    false_episodes = _count(metric["false_episodes"], f"{context}.false_episodes")
+    if valid != positive + normal:
+        raise ValueError(f"{context} decision counts disagree")
+    if anomalous > valid or anomalous != episode_decisions:
+        raise ValueError(f"{context} anomalous decision counts disagree")
+
+    detected_results = sum(
+        _boolean(
+            _mapping(item, f"{context}.event_results[{index}]")["detected"],
+            f"{context}.event_results[{index}].detected",
+        )
+        for index, item in enumerate(event_results)
+    )
+    if total != len(event_results) or detected != detected_results:
+        raise ValueError(f"{context} event counts disagree")
+    if valid == 0 or normal == 0:
+        raise ValueError(f"{context} exposure counts must be positive")
+
+    normal_exposure_days = normal * float(stride_seconds) / 86_400
+    if not _same_number(metric["normal_exposure_days"], normal_exposure_days):
+        raise ValueError(f"{context}.normal_exposure_days arithmetic mismatch")
+    if not _same_number(metric["time_in_alert"], anomalous / valid):
+        raise ValueError(f"{context}.time_in_alert arithmetic mismatch")
+    if not _same_number(
+        metric["false_episodes_per_day"],
+        false_episodes / normal_exposure_days,
+    ):
+        raise ValueError(f"{context}.false_episodes_per_day arithmetic mismatch")
+
+    feasible = (
+        detected >= PHASE1.min_detected_events
+        and float(cast("int | float", metric["false_episodes_per_day"]))
+        <= PHASE1.max_false_episodes_per_day
+        and float(cast("int | float", metric["time_in_alert"])) <= PHASE1.max_time_in_alert
+    )
+    if _boolean(metric["feasible"], f"{context}.feasible") != feasible:
+        raise ValueError(f"{context}.feasible disagrees with frozen gate")
+    return feasible
+
+
 def _validate_manifest_values(manifest: dict[str, object]) -> None:
     for key in ("schema_version", "run_id", "dataset_sha256", "contract_sha256", "git_sha"):
         _string(manifest[key], f"manifest.{key}")
@@ -668,6 +731,7 @@ def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Pa
         )
         if metric_events != event_results:
             raise ValueError(f"metrics.{model_id} event results disagree with source artifact")
+        episode_decisions = 0
         for index, item in enumerate(_list(episodes[model_id], f"episodes.{model_id}")):
             episode = _mapping(item, f"episodes.{model_id}[{index}]")
             _exact_keys(episode, _PUBLISHED_EPISODE_FIELDS, f"episodes.{model_id}[{index}]")
@@ -679,14 +743,21 @@ def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Pa
                 episode["last_detection_time"],
                 f"episodes.{model_id}[{index}].last_detection_time",
             )
-            _number(
+            decision_count = _count(
                 episode["decision_count"],
                 f"episodes.{model_id}[{index}].decision_count",
             )
+            if decision_count == 0:
+                raise ValueError(f"episodes.{model_id}[{index}].decision_count must be positive")
+            episode_decisions += decision_count
 
-        feasible = metric["feasible"]
-        if not isinstance(feasible, bool):
-            raise ValueError(f"metrics.{model_id}.feasible must be boolean")
+        feasible = _validate_metric_arithmetic(
+            metric,
+            event_results,
+            episode_decisions,
+            cast("int | float", manifest["stride_seconds"]),
+            f"metrics.{model_id}",
+        )
         feasibility[model_id] = feasible
         aggregate_models[model_id] = {
             "parameters": metric_parameters,
@@ -745,10 +816,7 @@ def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Pa
         "source_artifact_sha256": artifact_hashes,
     }
 
-    json_path = output_dir / "phase1-benchmark.json"
-    markdown_path = output_dir / "phase1-benchmark.md"
-    if json_path.exists() or markdown_path.exists():
-        raise FileExistsError("aggregate benchmark output already exists")
+    json_path, markdown_path = _aggregate_output_paths(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_json(json_path, aggregate)
 
@@ -777,6 +845,15 @@ def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Pa
     return json_path, markdown_path
 
 
+def _aggregate_output_paths(output_dir: Path) -> tuple[Path, Path]:
+    output_dir = Path(output_dir)
+    json_path = output_dir / "phase1-benchmark.json"
+    markdown_path = output_dir / "phase1-benchmark.md"
+    if json_path.exists() or markdown_path.exists():
+        raise FileExistsError("aggregate benchmark output already exists")
+    return json_path, markdown_path
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", required=True, type=Path)
@@ -784,6 +861,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--artifact-dir", required=True, type=Path)
     parser.add_argument("--publish-dir", type=Path)
     arguments = parser.parse_args(argv)
+    if arguments.publish_dir is not None:
+        _aggregate_output_paths(arguments.publish_dir)
     result = run_benchmark(
         dataset=arguments.dataset,
         work_dir=arguments.work_dir,

@@ -431,6 +431,56 @@ def test_benchmark_writes_complete_reproducible_manifest_and_routes_splits(
         publish_aggregate_results(first.run_dir, tmp_path / "rejected-threshold")
     _restore_hashed_artifact(first.run_dir, manifest_payload, "metrics.json", original_metrics)
 
+    def assert_metric_tampering_rejected(
+        field: str,
+        value: object,
+        message: str,
+    ) -> None:
+        payload = json.loads(original_metrics)
+        payload["statistical"][field] = value
+        _write_hashed_artifact(
+            first.run_dir,
+            manifest_payload,
+            "metrics.json",
+            payload,
+            update_embedded_hash=False,
+        )
+        try:
+            with pytest.raises(ValueError, match=message):
+                publish_aggregate_results(
+                    first.run_dir,
+                    tmp_path / f"rejected-{field.replace('_', '-')}",
+                )
+        finally:
+            _restore_hashed_artifact(
+                first.run_dir,
+                manifest_payload,
+                "metrics.json",
+                original_metrics,
+            )
+
+    statistical_metrics = json.loads(original_metrics)["statistical"]
+    assert_metric_tampering_rejected(
+        "normal_valid_decisions",
+        statistical_metrics["normal_valid_decisions"] + 1,
+        r"decision counts.*disagree",
+    )
+    assert_metric_tampering_rejected(
+        "time_in_alert",
+        statistical_metrics["time_in_alert"] + 0.01,
+        r"time_in_alert.*arithmetic",
+    )
+    assert_metric_tampering_rejected(
+        "false_episodes_per_day",
+        statistical_metrics["false_episodes_per_day"] + 1.0,
+        r"false_episodes_per_day.*arithmetic",
+    )
+    assert_metric_tampering_rejected(
+        "feasible",
+        not statistical_metrics["feasible"],
+        r"feasible.*frozen gate",
+    )
+
     reflected_event_fields = getattr(benchmark, "_EVENT_RESULT_FIELDS", set())
     monkeypatch.setattr(
         benchmark,
@@ -887,6 +937,41 @@ def test_cli_publishes_completed_run_when_publish_dir_is_supplied(
     assert calls == [(run_dir, publish_dir)]
     assert (publish_dir / "phase1-benchmark.json").read_text(encoding="utf-8") == "{}\n"
     assert (publish_dir / "phase1-benchmark.md").read_text(encoding="utf-8") == "# fixture\n"
+
+
+@pytest.mark.parametrize("stale_name", ["phase1-benchmark.json", "phase1-benchmark.md"])
+def test_cli_rejects_stale_publish_target_before_running_benchmark(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stale_name: str,
+) -> None:
+    publish_dir = tmp_path / "published"
+    publish_dir.mkdir()
+    (publish_dir / stale_name).write_text("stale\n", encoding="utf-8")
+    runner_called = False
+
+    def run_spy(**kwargs: object) -> SimpleNamespace:
+        nonlocal runner_called
+        runner_called = True
+        return SimpleNamespace(run_dir=tmp_path / "artifacts" / "run-id")
+
+    monkeypatch.setattr(benchmark, "run_benchmark", run_spy)
+
+    with pytest.raises(FileExistsError, match="aggregate benchmark output"):
+        benchmark.main(
+            [
+                "--dataset",
+                "data/raw/metropt/dataset_train.csv",
+                "--work-dir",
+                "data/interim/phase1",
+                "--artifact-dir",
+                "artifacts/phase1",
+                "--publish-dir",
+                str(publish_dir),
+            ]
+        )
+
+    assert runner_called is False
 
 
 @pytest.mark.slow

@@ -233,6 +233,32 @@ def test_episode_interval_can_match_source_after_detection_before_horizon() -> N
     assert result.false_episodes == 0
 
 
+def test_event_matching_excludes_touching_episode_boundaries() -> None:
+    contract = sample_policy(stride_seconds=60, event_horizon_seconds=0)
+    events = (event("event-1", 600, 720),)
+    scores = score_frame([540, 600, 720, 780], [2.0, 0.0, 2.0, 0.0])
+
+    result = evaluate(scores, build_episodes(scores, 1.0, contract), 1.0, events, contract)
+
+    assert result.event_results[0].detected is False
+    assert result.false_episodes == 2
+
+
+def test_overlapping_event_horizons_count_positive_decisions_once() -> None:
+    contract = sample_policy(stride_seconds=60, event_horizon_seconds=120)
+    events = (event("event-1", 600, 720), event("event-2", 660, 780))
+    scores = score_frame(
+        [300, 480, 540, 600, 660, 720, 780, 900],
+        [0.0] * 8,
+    )
+
+    result = evaluate(scores, (), 1.0, events, contract)
+
+    assert [item.matching_horizon_valid_decisions for item in result.event_results] == [4, 4]
+    assert result.positive_decisions == 5
+    assert result.normal_valid_decisions == 3
+
+
 def test_feasibility_gate_requires_every_predeclared_limit() -> None:
     events = (event("event-1", 600, 720), event("event-2", 1_200, 1_320))
     scores = score_frame([300, 480, 900, 1_080, 1_500], [0.0, 2.0, 0.0, 2.0, 0.0])

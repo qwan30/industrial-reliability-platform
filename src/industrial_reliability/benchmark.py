@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from importlib.metadata import version
 from pathlib import Path
@@ -24,21 +24,13 @@ import pandas as pd
 
 from industrial_reliability.autoencoder import DenseAutoencoderDetector
 from industrial_reliability.contracts import PHASE1, Phase1Contract, contract_manifest
-from industrial_reliability.data import (
-    PreparationManifest,
-    SegmentManifest,
-    prepare_dataset,
-    sha256_file,
-)
+from industrial_reliability.data import prepare_dataset, sha256_file
 from industrial_reliability.evaluation import (
-    Episode,
-    EvaluationResult,
-    EventResult,
     build_episodes,
     calibrate_threshold,
     evaluate,
 )
-from industrial_reliability.features import FeatureManifest, build_features
+from industrial_reliability.features import build_features
 from industrial_reliability.models import IsolationForestDetector, RobustStatisticalDetector
 
 SCHEMA_VERSION = "phase1-benchmark-v1"
@@ -75,18 +67,18 @@ def _jsonable(value: object) -> object:
     return value
 
 
-def _write_json(path: Path, value: object) -> None:
-    path.write_text(
-        json.dumps(
-            _jsonable(value),
-            sort_keys=True,
-            ensure_ascii=True,
-            allow_nan=False,
-            separators=(",", ":"),
-        )
-        + "\n",
-        encoding="utf-8",
+def _canonical_json(value: object) -> str:
+    return json.dumps(
+        _jsonable(value),
+        sort_keys=True,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
     )
+
+
+def _write_json(path: Path, value: object) -> None:
+    path.write_text(_canonical_json(value) + "\n", encoding="utf-8")
 
 
 def _existing_parent(path: Path) -> Path:
@@ -215,11 +207,15 @@ def run_benchmark(
     _check_work_dir(work_dir)
     _check_disk(work_dir)
 
-    if _model_parameters(contract, contract.autoencoder_epochs) != _model_parameters(
-        PHASE1, PHASE1.autoencoder_epochs
+    if type(contract.autoencoder_epochs) is not int or contract.autoencoder_epochs < 1:
+        raise ValueError("contract autoencoder_epochs must be a positive built-in int")
+    epochs = contract.autoencoder_epochs if autoencoder_epochs is None else autoencoder_epochs
+    if type(epochs) is not int or epochs < 1:
+        raise ValueError("effective autoencoder epochs must be a positive built-in int")
+    if _canonical_json(_model_parameters(contract, contract.autoencoder_epochs)) != _canonical_json(
+        _model_parameters(PHASE1, PHASE1.autoencoder_epochs)
     ):
         raise ValueError("contract model settings must match PHASE1 hardcoded detector settings")
-    epochs = contract.autoencoder_epochs if autoencoder_epochs is None else autoencoder_epochs
     full_identity = (contract.dataset_sha256, contract.dataset_bytes, contract.dataset_rows) == (
         PHASE1.dataset_sha256,
         PHASE1.dataset_bytes,
@@ -393,13 +389,27 @@ _MANIFEST_FIELDS = {
     "artifact_sha256",
     "limitations",
 }
-_DATA_MANIFEST_FIELDS = {field.name for field in fields(PreparationManifest)}
-_SEGMENT_FIELDS = {field.name for field in fields(SegmentManifest)}
-_FEATURE_MANIFEST_FIELDS = {field.name for field in fields(FeatureManifest)}
-_EVENT_RESULT_FIELDS = {field.name for field in fields(EventResult)}
-_EPISODE_FIELDS = {field.name for field in fields(Episode)}
-_EVALUATION_FIELDS = {field.name for field in fields(EvaluationResult)}
-_METRIC_FIELDS = _EVALUATION_FIELDS | {"fit_seconds", "score_seconds", "model_parameters"}
+_DATA_MANIFEST_FIELDS = set(
+    "dataset_sha256 dataset_bytes dataset_rows contract_sha256 source_columns total_rows gap_count segments manifest_sha256".split()  # noqa: SIM905
+)
+_SEGMENT_FIELDS = set("segment_id path start end rows sha256".split())  # noqa: SIM905
+_FEATURE_MANIFEST_FIELDS = set(
+    "contract_sha256 data_manifest_sha256 feature_columns total_windows windows_by_split rejected_windows_by_reason output_path output_sha256 manifest_sha256".split()  # noqa: SIM905
+)
+_PUBLISHED_EVENT_FIELDS = set(
+    "event_id evaluable matching_horizon_valid_decisions source_interval_valid_decisions source_interval_coverage_seconds detected first_detection_time lead_seconds_to_source_start lead_seconds_to_local_lps".split()  # noqa: SIM905
+)
+_PUBLISHED_EPISODE_FIELDS = set(
+    "detection_time last_detection_time decision_count".split()  # noqa: SIM905
+)
+_PUBLISHED_EVALUATION_FIELDS = set(
+    "threshold valid_holdout_decisions positive_decisions anomalous_decisions normal_valid_decisions normal_exposure_days time_in_alert pr_auc detected_events total_events false_episodes false_episodes_per_day event_results feasible".split()  # noqa: SIM905
+)
+_METRIC_FIELDS = _PUBLISHED_EVALUATION_FIELDS | {
+    "fit_seconds",
+    "score_seconds",
+    "model_parameters",
+}
 _PARAMETER_FIELDS = {
     "statistical": {"robust_mad_scale", "aggregation"},
     "isolation_forest": {
@@ -524,7 +534,7 @@ def _validate_events(value: object, context: str) -> list[object]:
     events = _list(value, context)
     for index, item in enumerate(events):
         event_result = _mapping(item, f"{context}[{index}]")
-        _exact_keys(event_result, _EVENT_RESULT_FIELDS, f"{context}[{index}]")
+        _exact_keys(event_result, _PUBLISHED_EVENT_FIELDS, f"{context}[{index}]")
         _string(event_result["event_id"], f"{context}[{index}].event_id")
         _boolean(event_result["evaluable"], f"{context}[{index}].evaluable")
         _boolean(event_result["detected"], f"{context}[{index}].detected")
@@ -549,13 +559,7 @@ def _validate_events(value: object, context: str) -> list[object]:
 def _verify_embedded_manifest_hash(value: dict[str, object], context: str) -> None:
     stored_hash = value["manifest_sha256"]
     payload = {key: item for key, item in value.items() if key != "manifest_sha256"}
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        ensure_ascii=True,
-        allow_nan=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
+    encoded = _canonical_json(payload).encode("utf-8")
     if not isinstance(stored_hash, str) or hashlib.sha256(encoded).hexdigest() != stored_hash:
         raise ValueError(f"{context} embedded manifest SHA-256 mismatch")
 
@@ -644,7 +648,7 @@ def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Pa
         _exact_keys(metric, _METRIC_FIELDS, f"metrics.{model_id}")
         if metric["threshold"] != _mapping(thresholds[model_id], model_id)["threshold"]:
             raise ValueError(f"metrics.{model_id}.threshold disagrees with threshold provenance")
-        for key in _EVALUATION_FIELDS.difference({"event_results", "feasible"}) | {
+        for key in _PUBLISHED_EVALUATION_FIELDS.difference({"event_results", "feasible"}) | {
             "fit_seconds",
             "score_seconds",
         }:
@@ -666,7 +670,7 @@ def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Pa
             raise ValueError(f"metrics.{model_id} event results disagree with source artifact")
         for index, item in enumerate(_list(episodes[model_id], f"episodes.{model_id}")):
             episode = _mapping(item, f"episodes.{model_id}[{index}]")
-            _exact_keys(episode, _EPISODE_FIELDS, f"episodes.{model_id}[{index}]")
+            _exact_keys(episode, _PUBLISHED_EPISODE_FIELDS, f"episodes.{model_id}[{index}]")
             _string(
                 episode["detection_time"],
                 f"episodes.{model_id}[{index}].detection_time",

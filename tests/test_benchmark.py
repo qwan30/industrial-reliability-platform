@@ -431,6 +431,41 @@ def test_benchmark_writes_complete_reproducible_manifest_and_routes_splits(
         publish_aggregate_results(first.run_dir, tmp_path / "rejected-threshold")
     _restore_hashed_artifact(first.run_dir, manifest_payload, "metrics.json", original_metrics)
 
+    reflected_event_fields = getattr(benchmark, "_EVENT_RESULT_FIELDS", set())
+    monkeypatch.setattr(
+        benchmark,
+        "_EVENT_RESULT_FIELDS",
+        {*reflected_event_fields, "secret_path"},
+        raising=False,
+    )
+    events_path = first.run_dir / "event_results.json"
+    original_events = events_path.read_bytes()
+    events_payload = json.loads(original_events)
+    metrics_payload = json.loads(original_metrics)
+    for model_id in MODEL_IDS:
+        for event in events_payload[model_id]:
+            event["secret_path"] = "raw-like-secret"
+        for event in metrics_payload[model_id]["event_results"]:
+            event["secret_path"] = "raw-like-secret"
+    _write_hashed_artifact(
+        first.run_dir,
+        manifest_payload,
+        "event_results.json",
+        events_payload,
+        update_embedded_hash=False,
+    )
+    _write_hashed_artifact(
+        first.run_dir,
+        manifest_payload,
+        "metrics.json",
+        metrics_payload,
+        update_embedded_hash=False,
+    )
+    with pytest.raises(ValueError, match=r"unknown.*secret_path"):
+        publish_aggregate_results(first.run_dir, tmp_path / "rejected-future-event-field")
+    _restore_hashed_artifact(first.run_dir, manifest_payload, "event_results.json", original_events)
+    _restore_hashed_artifact(first.run_dir, manifest_payload, "metrics.json", original_metrics)
+
     metrics_payload = json.loads(original_metrics)
     metrics_payload["statistical"]["raw_rows"] = [["must", "not", "publish"]]
     _canonical_json(metrics_path, metrics_payload)
@@ -646,6 +681,86 @@ def test_full_identity_rejects_mutated_contract_epochs_before_dataset_access(
             tmp_path / "artifacts",
             contract=replace(PHASE1, autoencoder_epochs=1),
             autoencoder_epochs=override,
+            require_clean_git=False,
+        )
+
+
+@pytest.mark.parametrize("override", [None, 20])
+def test_full_identity_rejects_float_contract_epochs_before_dataset_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    override: int | None,
+) -> None:
+    monkeypatch.setattr(
+        benchmark.shutil,
+        "disk_usage",
+        lambda _: SimpleNamespace(total=20 * GIB, used=1 * GIB, free=19 * GIB),
+    )
+
+    with pytest.raises(ValueError, match="positive built-in int"):
+        run_benchmark(
+            tmp_path / "missing.csv",
+            tmp_path / "work",
+            tmp_path / "artifacts",
+            contract=replace(PHASE1, autoencoder_epochs=20.0),  # type: ignore[arg-type]
+            autoencoder_epochs=override,
+            require_clean_git=False,
+        )
+
+
+@pytest.mark.parametrize("override", [20.0, True])
+def test_full_identity_rejects_non_integer_effective_epochs_before_dataset_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    override: object,
+) -> None:
+    monkeypatch.setattr(
+        benchmark.shutil,
+        "disk_usage",
+        lambda _: SimpleNamespace(total=20 * GIB, used=1 * GIB, free=19 * GIB),
+    )
+
+    with pytest.raises(ValueError, match="positive built-in int"):
+        run_benchmark(
+            tmp_path / "missing.csv",
+            tmp_path / "work",
+            tmp_path / "artifacts",
+            autoencoder_epochs=override,  # type: ignore[arg-type]
+            require_clean_git=False,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "equivalent_value"),
+    [
+        ("random_seed", 42.0),
+        ("isolation_forest_estimators", 200.0),
+        ("isolation_forest_n_jobs", True),
+        ("autoencoder_hidden_width", 64.0),
+        ("autoencoder_bottleneck_width", 16.0),
+        ("autoencoder_batch_size", 256.0),
+        ("autoencoder_deterministic", 1),
+        ("autoencoder_num_workers", False),
+    ],
+)
+def test_runner_rejects_python_equal_model_setting_types_before_dataset_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field_name: str,
+    equivalent_value: object,
+) -> None:
+    monkeypatch.setattr(
+        benchmark.shutil,
+        "disk_usage",
+        lambda _: SimpleNamespace(total=20 * GIB, used=1 * GIB, free=19 * GIB),
+    )
+
+    with pytest.raises(ValueError, match="model settings"):
+        run_benchmark(
+            tmp_path / "missing.csv",
+            tmp_path / "work",
+            tmp_path / "artifacts",
+            contract=replace(PHASE1, **{field_name: equivalent_value}),
             require_clean_git=False,
         )
 

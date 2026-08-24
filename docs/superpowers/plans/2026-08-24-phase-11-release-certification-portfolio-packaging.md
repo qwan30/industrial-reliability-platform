@@ -43,6 +43,7 @@ from industrial_reliability.release_certification import (
     ReleaseCertificationReportV1,
 )
 
+
 def test_validator_detects_feasible_platform_path():
     validator = ReleaseCertificationValidator(artifact_dir="tests/fixtures/artifacts_feasible")
     report = validator.evaluate()
@@ -51,11 +52,13 @@ def test_validator_detects_feasible_platform_path():
     assert "phase9" in report.phases_passed
     assert report.is_certified is True
 
+
 def test_validator_detects_infeasible_research_path():
     validator = ReleaseCertificationValidator(artifact_dir="tests/fixtures/artifacts_infeasible")
     report = validator.evaluate()
     assert report.verdict == "NEGATIVE_RESEARCH_RELEASE"
     assert report.is_certified is True
+
 
 def test_validator_rejects_missing_mandatory_gate():
     validator = ReleaseCertificationValidator(artifact_dir="tests/fixtures/artifacts_incomplete")
@@ -78,6 +81,7 @@ from pathlib import Path
 from typing import Literal
 import json
 
+
 @dataclass(frozen=True)
 class ReleaseCertificationReportV1:
     schema_version: str
@@ -87,6 +91,7 @@ class ReleaseCertificationReportV1:
     artifact_hashes: dict[str, str]
     is_certified: bool
     limitations: list[str]
+
 
 class ReleaseCertificationValidator:
     def __init__(self, artifact_dir: str | Path) -> None:
@@ -138,16 +143,22 @@ git commit -m "feat(release): implement release certification and gate validator
 ```python
 from deploy.preflight import verify_host_environment, PreflightConfig
 
+
 def test_preflight_checks_required_ports_and_memory(monkeypatch):
     monkeypatch.setattr("shutil.disk_usage", lambda _: (100 * 1024**3, 50 * 1024**3, 50 * 1024**3))
-    monkeypatch.setattr("psutil.virtual_memory", lambda: type("VM", (), {"available": 8 * 1024**3})())
-    
+    monkeypatch.setattr(
+        "psutil.virtual_memory", lambda: type("VM", (), {"available": 8 * 1024**3})()
+    )
+
     result = verify_host_environment(PreflightConfig(min_memory_gb=4, min_disk_gb=10))
     assert result.passed is True
     assert len(result.errors) == 0
 
+
 def test_preflight_fails_on_low_memory(monkeypatch):
-    monkeypatch.setattr("psutil.virtual_memory", lambda: type("VM", (), {"available": 1 * 1024**3})())
+    monkeypatch.setattr(
+        "psutil.virtual_memory", lambda: type("VM", (), {"available": 1 * 1024**3})()
+    )
     result = verify_host_environment(PreflightConfig(min_memory_gb=4, min_disk_gb=10))
     assert result.passed is False
     assert any("memory" in err.lower() for err in result.errors)
@@ -168,11 +179,13 @@ import socket
 import psutil
 from dataclasses import dataclass
 
+
 @dataclass(frozen=True)
 class PreflightConfig:
     min_memory_gb: float = 4.0
     min_disk_gb: float = 10.0
     required_ports: tuple[int, ...] = (8000, 3000, 5432, 9092, 9090, 5000)
+
 
 @dataclass(frozen=True)
 class PreflightResult:
@@ -180,13 +193,16 @@ class PreflightResult:
     errors: list[str]
     warnings: list[str]
 
+
 def verify_host_environment(config: PreflightConfig = PreflightConfig()) -> PreflightResult:
     errors = []
     warnings = []
     # Check RAM
     vm = psutil.virtual_memory()
     if vm.available < config.min_memory_gb * (1024**3):
-        errors.append(f"Insufficient RAM: {vm.available / 1024**3:.1f}GB available, {config.min_memory_gb}GB required.")
+        errors.append(
+            f"Insufficient RAM: {vm.available / 1024**3:.1f}GB available, {config.min_memory_gb}GB required."
+        )
     # Check Ports
     for port in config.required_ports:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -225,20 +241,21 @@ git commit -m "feat(deploy): add pinned compose stack and preflight verification
 import pytest
 from playwright.sync_api import Page, expect
 
+
 @pytest.mark.e2e
 def test_full_platform_demo_scenario(page: Page, live_server_url: str):
     # Navigate to Operator Console
     page.goto(live_server_url)
     expect(page.locator("h1")).to_contain_text("Operator Console")
-    
+
     # Start Replay
     page.click("button#start-replay-btn")
     expect(page.locator("#replay-status")).to_contain_text("RUNNING")
-    
+
     # Observe streaming anomaly score
     page.wait_for_selector("#telemetry-chart")
     expect(page.locator("#active-alerts-count")).not_to_have_text("0", timeout=15000)
-    
+
     # Inspect Alert and grounded RCA
     page.click(".alert-item-row:first-child")
     expect(page.locator("#rca-summary")).to_be_visible()
@@ -287,6 +304,7 @@ git commit -m "test(e2e): add end-to-end real-click release certification tests"
 ```python
 from industrial_reliability.portfolio_claims import generate_portfolio_claims
 
+
 def test_claims_strictly_derived_from_actual_metrics():
     metrics = {
         "dataset": "MetroPT-3",
@@ -314,11 +332,12 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'industrial_reliabilit
 from __future__ import annotations
 from typing import Any
 
+
 def generate_portfolio_claims(metrics: dict[str, Any]) -> dict[str, Any]:
     detected = metrics.get("detected_events", 0)
     total = metrics.get("total_events", 1)
     rate = (detected / total) * 100
-    
+
     return {
         "event_detection_rate": f"{rate:.1f}% ({detected}/{total} events)",
         "false_alarm_rate": f"{metrics.get('false_episodes_per_day', 0.0):.2f} false episodes/day",
@@ -357,14 +376,18 @@ git commit -m "docs(release): generate runbook, model/data cards, and measured c
 ```python
 import tempfile
 from pathlib import Path
-from industrial_reliability.package_release import generate_release_manifest, verify_release_manifest
+from industrial_reliability.package_release import (
+    generate_release_manifest,
+    verify_release_manifest,
+)
+
 
 def test_generate_and_verify_release_manifest():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "README.md").write_text("demo", encoding="utf-8")
         manifest_path = generate_release_manifest(root)
-        
+
         assert manifest_path.exists()
         assert verify_release_manifest(manifest_path) is True
 ```
@@ -382,22 +405,29 @@ import hashlib
 import json
 from pathlib import Path
 
+
 def generate_release_manifest(root: Path) -> Path:
     checksums: dict[str, str] = {}
     for p in root.rglob("*"):
         if p.is_file() and not any(part.startswith(".") for part in p.parts):
             checksums[str(p.relative_to(root))] = hashlib.sha256(p.read_bytes()).hexdigest()
-    
+
     manifest_path = root / "release_manifest.json"
-    manifest_path.write_text(json.dumps({"checksums": checksums}, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps({"checksums": checksums}, indent=2, sort_keys=True), encoding="utf-8"
+    )
     return manifest_path
+
 
 def verify_release_manifest(manifest_path: Path) -> bool:
     root = manifest_path.parent
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     for rel_path, expected_hash in data.get("checksums", {}).items():
         file_path = root / rel_path
-        if not file_path.exists() or hashlib.sha256(file_path.read_bytes()).hexdigest() != expected_hash:
+        if (
+            not file_path.exists()
+            or hashlib.sha256(file_path.read_bytes()).hexdigest() != expected_hash
+        ):
             return False
     return True
 ```

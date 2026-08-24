@@ -127,7 +127,11 @@ git commit -m "docs: record Airflow not-adopted decision"
 def test_repository_has_no_airflow_runtime_surface() -> None:
     project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     dependencies = project["project"]["dependencies"]
-    extras = [item for group in project["project"].get("optional-dependencies", {}).values() for item in group]
+    extras = [
+        item
+        for group in project["project"].get("optional-dependencies", {}).values()
+        for item in group
+    ]
     assert all("airflow" not in item.lower() for item in [*dependencies, *extras])
     compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
     assert all("airflow" not in name.lower() for name in compose["services"])

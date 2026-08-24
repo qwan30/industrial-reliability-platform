@@ -302,8 +302,10 @@ def transition(
         return TransitionResult(state, None, None)
     if state.last_source_timestamp and decision.source_timestamp <= state.last_source_timestamp:
         raise OrderingViolation(decision.decision_id)
-    return _advance_anomaly(state, decision, policy) if decision.is_anomaly else _advance_normal(
-        state, decision, policy
+    return (
+        _advance_anomaly(state, decision, policy)
+        if decision.is_anomaly
+        else _advance_normal(state, decision, policy)
     )
 ```
 

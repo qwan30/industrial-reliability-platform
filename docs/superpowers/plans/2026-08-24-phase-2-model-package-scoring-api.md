@@ -56,7 +56,10 @@ def test_package_contains_one_model_and_three_golden_cases(tmp_path: Path) -> No
     result = build_champion_package(run_dir, features, tmp_path / "package")
     assert result.manifest["schema_version"] == "champion-package-v1"
     assert set(path.name for path in result.output_dir.iterdir()) == {
-        "manifest.json", "detector.joblib", "evidence-baseline.npz", "golden-cases.json"
+        "manifest.json",
+        "detector.joblib",
+        "evidence-baseline.npz",
+        "golden-cases.json",
     }
 ```
 
@@ -122,7 +125,10 @@ def build_champion_package(
     run_dir: Path, features_path: Path, output_dir: Path
 ) -> ChampionPackageResult:
     champion = load_json_object(run_dir / "champion-manifest.json")
-    if champion.get("schema_version") != "phase1b-champion-v1" or champion.get("verdict") != "FEASIBLE":
+    if (
+        champion.get("schema_version") != "phase1b-champion-v1"
+        or champion.get("verdict") != "FEASIBLE"
+    ):
         raise ChampionPackageError("Phase 2 requires a FEASIBLE champion")
     if output_dir.exists():
         raise FileExistsError(f"destination already exists: {output_dir}")
@@ -358,7 +364,9 @@ def score(self, feature: FeatureVectorV1) -> ScoredVector:
         where=self.mad != 0.0,
     )
     evidence = tuple(
-        EvidenceValueV1(feature_name=name, feature_value=float(value), robust_deviation=float(delta))
+        EvidenceValueV1(
+            feature_name=name, feature_value=float(value), robust_deviation=float(delta)
+        )
         for name, value, delta in zip(self.feature_names, matrix[0], deviations, strict=True)
     )
     return ScoredVector(score, self.threshold, score >= self.threshold, evidence)
@@ -391,7 +399,9 @@ Expected: no registry, plugin loader, model switch, or second runtime implementa
 - [ ] **Step 1: Write API behavior tests**
 
 ```python
-def test_score_returns_versioned_decision(client: TestClient, valid_request: dict[str, object]) -> None:
+def test_score_returns_versioned_decision(
+    client: TestClient, valid_request: dict[str, object]
+) -> None:
     response = client.post("/v1/score", json=valid_request)
     assert response.status_code == 200
     body = response.json()
@@ -402,7 +412,9 @@ def test_score_returns_versioned_decision(client: TestClient, valid_request: dic
 
 
 @pytest.mark.parametrize("field", ["model_version", "contract_sha256"])
-def test_score_identity_mismatch_is_conflict(client: TestClient, valid_request: dict[str, object], field: str) -> None:
+def test_score_identity_mismatch_is_conflict(
+    client: TestClient, valid_request: dict[str, object], field: str
+) -> None:
     mutate_identity(valid_request, field)
     response = client.post("/v1/score", json=valid_request)
     assert response.status_code == 409
@@ -424,20 +436,30 @@ def create_app(scorer: ChampionScorer) -> FastAPI:
     app = FastAPI(title="Industrial Reliability Scoring API", version="1.0")
 
     @app.exception_handler(ScoringContractError)
-    async def scoring_contract_error(_request: Request, error: ScoringContractError) -> JSONResponse:
-        body = ErrorResponseV1(error=ApiErrorV1(code="SCORING_CONTRACT_MISMATCH", message=str(error)))
+    async def scoring_contract_error(
+        _request: Request, error: ScoringContractError
+    ) -> JSONResponse:
+        body = ErrorResponseV1(
+            error=ApiErrorV1(code="SCORING_CONTRACT_MISMATCH", message=str(error))
+        )
         return JSONResponse(status_code=409, content=body.model_dump(mode="json"))
 
     @app.exception_handler(RequestValidationError)
-    async def request_validation_error(_request: Request, _error: RequestValidationError) -> JSONResponse:
-        body = ErrorResponseV1(error=ApiErrorV1(code="INVALID_REQUEST", message="request validation failed"))
+    async def request_validation_error(
+        _request: Request, _error: RequestValidationError
+    ) -> JSONResponse:
+        body = ErrorResponseV1(
+            error=ApiErrorV1(code="INVALID_REQUEST", message="request validation failed")
+        )
         return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
 
     @app.post("/v1/score", response_model=ScoreResponseV1)
     def score(request: ScoreRequestV1) -> ScoreResponseV1:
         result = scorer.score(request.feature_vector)
         feature = request.feature_vector
-        decision_id = uuid5(RUNTIME_NAMESPACE, f"decision:{feature.window_id}:{scorer.model_version}")
+        decision_id = uuid5(
+            RUNTIME_NAMESPACE, f"decision:{feature.window_id}:{scorer.model_version}"
+        )
         decision = ScoreDecisionV1(
             message_id=decision_id,
             decision_id=decision_id,
@@ -500,7 +522,9 @@ def test_http_scores_every_packaged_golden_case(champion_package: Path) -> None:
     for case in load_golden_cases(champion_package):
         response = client.post("/v1/score", json=case.request)
         assert response.status_code == 200
-        assert response.json()["data"]["score"] == pytest.approx(case.expected_score, rel=0.0, abs=1e-12)
+        assert response.json()["data"]["score"] == pytest.approx(
+            case.expected_score, rel=0.0, abs=1e-12
+        )
         assert response.json()["data"]["evidence_vector"] == case.expected_evidence
 ```
 

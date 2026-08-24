@@ -157,7 +157,12 @@ git commit -m "feat: instrument bounded runtime metrics"
 import numpy as np
 import pytest
 
-from industrial_reliability.drift import build_reference, load_reference, max_population_stability_index, save_reference
+from industrial_reliability.drift import (
+    build_reference,
+    load_reference,
+    max_population_stability_index,
+    save_reference,
+)
 
 
 def test_reference_is_train_only_and_hash_checked(tmp_path) -> None:
@@ -250,7 +255,10 @@ from pathlib import Path
 
 def test_dashboards_are_provisioned_and_keep_conditions_separate() -> None:
     root = Path("ops/grafana/dashboards")
-    dashboards = {json.loads(path.read_text(encoding="utf-8"))["uid"]: path.read_text() for path in root.glob("*.json")}
+    dashboards = {
+        json.loads(path.read_text(encoding="utf-8"))["uid"]: path.read_text()
+        for path in root.glob("*.json")
+    }
     assert set(dashboards) == {"irp-system", "irp-data-quality", "irp-model-machine"}
     assert "irp_dependency_ready" in dashboards["irp-system"]
     assert "irp_telemetry_events_total" in dashboards["irp-data-quality"]

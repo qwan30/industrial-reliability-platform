@@ -37,12 +37,17 @@
 - [ ] **Step 1: Write offline-online parity and reset tests**
 
 ```python
-def test_online_features_equal_phase1b_offline_rows(real_window: pd.DataFrame, builder: OnlineFeatureBuilder) -> None:
-    emitted = tuple(
-        feature
-        for event in telemetry_events(real_window)
-        for feature in builder.push(event).features
-    ) + builder.complete(real_window["timestamp"].iloc[-1]).features
+def test_online_features_equal_phase1b_offline_rows(
+    real_window: pd.DataFrame, builder: OnlineFeatureBuilder
+) -> None:
+    emitted = (
+        tuple(
+            feature
+            for event in telemetry_events(real_window)
+            for feature in builder.push(event).features
+        )
+        + builder.complete(real_window["timestamp"].iloc[-1]).features
+    )
     offline = tuple(iter_phase1b_windows(real_window, PHASE1B))
     assert len(emitted) == len(offline)
     for actual, expected in zip(emitted, offline, strict=True):
@@ -50,7 +55,9 @@ def test_online_features_equal_phase1b_offline_rows(real_window: pd.DataFrame, b
         assert actual.feature_values == pytest.approx(expected.feature_values, rel=0.0, abs=1e-12)
 
 
-@pytest.mark.parametrize("fault", ["sequence_gap", "conflicting_duplicate", "timestamp_regression", "invalid_bin"])
+@pytest.mark.parametrize(
+    "fault", ["sequence_gap", "conflicting_duplicate", "timestamp_regression", "invalid_bin"]
+)
 def test_stream_fault_closes_segment_without_crossing(fault: str) -> None:
     result = feed_faulted_stream(fault)
     assert result.segment_closed_reason == fault
@@ -146,7 +153,9 @@ Expected: no scoring, Kafka consumer, persistence, or alert code is included.
 @pytest.mark.asyncio
 async def test_client_retries_timeout_then_returns_verified_decision() -> None:
     transport = sequence_transport(TimeoutException("timeout"), score_response())
-    client = ScoringClient("http://scoring-api:8000", MODEL_VERSION, transport=transport, sleep=no_sleep)
+    client = ScoringClient(
+        "http://scoring-api:8000", MODEL_VERSION, transport=transport, sleep=no_sleep
+    )
     decision = await client.score(feature_vector())
     assert decision.window_id == feature_vector().window_id
     assert transport.request_count == 2
@@ -223,7 +232,9 @@ Expected: retry policy is fixed and small; no circuit breaker or provider abstra
 
 ```python
 @pytest.mark.asyncio
-async def test_offset_commits_only_after_completed_session_outputs_succeed(worker: StreamingWorker) -> None:
+async def test_offset_commits_only_after_completed_session_outputs_succeed(
+    worker: StreamingWorker,
+) -> None:
     await worker.handle(telemetry_record_for_complete_window())
     assert worker.consumer.commits == []
     assert worker.producer.topics == [FEATURES_TOPIC, SCORES_TOPIC]
@@ -244,7 +255,9 @@ Also test invalid telemetry quarantine without offset commit, exact duplicate no
 
 ```python
 @pytest.mark.asyncio
-async def test_completed_status_waits_for_its_last_telemetry_sequence(worker: StreamingWorker) -> None:
+async def test_completed_status_waits_for_its_last_telemetry_sequence(
+    worker: StreamingWorker,
+) -> None:
     await worker.handle(completed_status_record(last_sequence=180))
     assert worker.consumer.commits == []
     assert worker.builders[SESSION_ID].is_complete is False
@@ -273,7 +286,9 @@ class StreamingWorker:
         )
 
     async def _complete_session(self, status: ReplayStatusV1) -> None:
-        for feature in self.builders[status.replay_session_id].complete(status.source_timestamp).features:
+        for feature in (
+            self.builders[status.replay_session_id].complete(status.source_timestamp).features
+        ):
             await self._process_feature(feature)
         await self.consumer.commit(self.session_offsets[status.replay_session_id])
 
@@ -330,7 +345,9 @@ async def test_real_replay_matches_offline_feature_and_score_golden(
     kafka_bootstrap: str, golden_online_range: GoldenOnlineRange
 ) -> None:
     await publish_command(kafka_bootstrap, golden_online_range.command)
-    features = await consume_exact(kafka_bootstrap, FEATURES_TOPIC, golden_online_range.window_count)
+    features = await consume_exact(
+        kafka_bootstrap, FEATURES_TOPIC, golden_online_range.window_count
+    )
     scores = await consume_exact(kafka_bootstrap, SCORES_TOPIC, golden_online_range.window_count)
     assert [item.feature_values for item in features] == pytest.approx(
         golden_online_range.offline_feature_values, rel=0.0, abs=1e-12

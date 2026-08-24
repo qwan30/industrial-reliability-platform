@@ -40,14 +40,14 @@ class ScoringClient:
         self,
         base_url: str,
         model_version: str,
-        retry_policy: RetryPolicy = RetryPolicy(),
+        retry_policy: RetryPolicy | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         timeout: float = 5.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model_version = model_version
-        self.retry_policy = retry_policy
+        self.retry_policy = retry_policy or RetryPolicy()
         self.sleep = sleep
         self.client = httpx.AsyncClient(
             base_url=self.base_url,

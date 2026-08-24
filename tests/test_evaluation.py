@@ -5,8 +5,6 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import pytest
-from tests.helpers import sample_policy
-from tests.helpers import score_frame as _score_frame
 
 from industrial_reliability.contracts import Event
 from industrial_reliability.evaluation import (
@@ -15,6 +13,8 @@ from industrial_reliability.evaluation import (
     calibrate_threshold,
     evaluate,
 )
+from tests.helpers import sample_policy
+from tests.helpers import score_frame as _score_frame
 
 BASE_TIME = datetime(2022, 1, 1, 6)
 

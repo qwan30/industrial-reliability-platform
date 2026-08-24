@@ -12,13 +12,6 @@ from pathlib import Path
 import pandas as pd
 import pyarrow.parquet as pq
 import pytest
-from tests.helpers import (
-    make_segment,
-    make_segment_around_split_boundary,
-    sample_contract,
-    sample_contract_for_frame,
-    write_sample_csv,
-)
 
 import industrial_reliability.features as features_module
 from industrial_reliability.contracts import PHASE1, Phase1Contract, Split, contract_manifest
@@ -27,6 +20,13 @@ from industrial_reliability.features import (
     FeatureManifest,
     build_features,
     extract_segment_features,
+)
+from tests.helpers import (
+    make_segment,
+    make_segment_around_split_boundary,
+    sample_contract,
+    sample_contract_for_frame,
+    write_sample_csv,
 )
 
 

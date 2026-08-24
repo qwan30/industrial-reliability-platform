@@ -11,13 +11,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-from tests.helpers import sample_contract, write_sample_csv
 
 import industrial_reliability.benchmark as benchmark
 from industrial_reliability.benchmark import publish_aggregate_results, run_benchmark
 from industrial_reliability.contracts import PHASE1, Phase1Contract
 from industrial_reliability.data import DataContractError, sha256_file
 from industrial_reliability.evaluation import EvaluationResult
+from tests.helpers import sample_contract, write_sample_csv
 
 MODEL_IDS = ("statistical", "isolation_forest", "autoencoder")
 GIB = 1024**3

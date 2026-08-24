@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from tests.helpers import seeded_training_matrix
 
 from industrial_reliability.autoencoder import DenseAutoencoderDetector
+from tests.helpers import seeded_training_matrix
 
 
 def test_autoencoder_scores_and_contributions_have_expected_shapes() -> None:

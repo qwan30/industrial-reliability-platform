@@ -10,11 +10,11 @@ from pathlib import Path
 import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
 import pytest
-from tests.helpers import sample_contract, sample_policy, write_sample_csv
 
 import industrial_reliability.data as data_module
 from industrial_reliability.contracts import PHASE1
 from industrial_reliability.data import DataContractError, prepare_dataset, sha256_file
+from tests.helpers import sample_contract, sample_policy, write_sample_csv
 
 
 def _rewrite_cell(path: Path, row_index: int, column: str, value: object) -> None:

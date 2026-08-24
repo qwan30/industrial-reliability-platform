@@ -56,6 +56,48 @@ class LockedAlertPolicyV1:
         return asdict(self)
 
 
+def _step_anomaly(
+    ts: datetime,
+    is_active: bool,
+    anomaly_streak: int,
+    last_resolution: datetime | None,
+    persistence: int,
+    merge_gap_seconds: int,
+) -> tuple[bool, int, int]:
+    new_anomaly_streak = anomaly_streak + 1
+    new_active = is_active
+    episode_inc = 0
+
+    if not is_active and new_anomaly_streak >= persistence:
+        is_merged = (
+            last_resolution is not None
+            and merge_gap_seconds > 0
+            and (ts - last_resolution).total_seconds() <= merge_gap_seconds
+        )
+        if not is_merged:
+            episode_inc = 1
+        new_active = True
+
+    return new_active, new_anomaly_streak, episode_inc
+
+
+def _step_normal(
+    ts: datetime,
+    is_active: bool,
+    normal_streak: int,
+    cooldown: int,
+) -> tuple[bool, int, datetime | None]:
+    new_normal_streak = normal_streak + 1
+    new_active = is_active
+    new_resolution = None
+
+    if is_active and new_normal_streak >= cooldown:
+        new_active = False
+        new_resolution = ts
+
+    return new_active, new_normal_streak, new_resolution
+
+
 def _simulate_alert_stream(
     sorted_df: pd.DataFrame,
     persistence: int,
@@ -71,32 +113,23 @@ def _simulate_alert_stream(
 
     for _, row in sorted_df.iterrows():
         is_anom = bool(row["is_anomaly"])
-        ts = row["window_end"]
-        if isinstance(ts, str):
-            ts = datetime.fromisoformat(ts)
+        ts_val = row["window_end"]
+        ts = datetime.fromisoformat(ts_val) if isinstance(ts_val, str) else ts_val
 
         if is_anom:
             normal_streak = 0
-            anomaly_streak += 1
-            if not is_active and anomaly_streak >= persistence:
-                is_merged = (
-                    last_resolution is not None
-                    and merge_gap_seconds > 0
-                    and (ts - last_resolution).total_seconds() <= merge_gap_seconds
-                )
-                if not is_merged:
-                    episodes += 1
-                is_active = True
-            if is_active:
-                alert_window_count += 1
+            is_active, anomaly_streak, ep_inc = _step_anomaly(
+                ts, is_active, anomaly_streak, last_resolution, persistence, merge_gap_seconds
+            )
+            episodes += ep_inc
         else:
             anomaly_streak = 0
-            normal_streak += 1
-            if is_active:
-                alert_window_count += 1
-                if normal_streak >= cooldown:
-                    is_active = False
-                    last_resolution = ts
+            is_active, normal_streak, res = _step_normal(ts, is_active, normal_streak, cooldown)
+            if res is not None:
+                last_resolution = res
+
+        if is_active:
+            alert_window_count += 1
 
     return episodes, alert_window_count
 
@@ -115,12 +148,10 @@ def evaluate_candidate(
         sorted_df, persistence, cooldown, merge_gap_seconds
     )
 
-    start_time = sorted_df["window_start"].min()
-    end_time = sorted_df["window_end"].max()
-    if isinstance(start_time, str):
-        start_time = datetime.fromisoformat(start_time)
-    if isinstance(end_time, str):
-        end_time = datetime.fromisoformat(end_time)
+    start_val = sorted_df["window_start"].min()
+    end_val = sorted_df["window_end"].max()
+    start_time = datetime.fromisoformat(start_val) if isinstance(start_val, str) else start_val
+    end_time = datetime.fromisoformat(end_val) if isinstance(end_val, str) else end_val
 
     duration_days = max((end_time - start_time).total_seconds() / 86400.0, 1.0 / 288.0)
     false_episodes_per_day = episodes / duration_days
@@ -132,7 +163,7 @@ def evaluate_candidate(
     )
 
 
-def select_policy(frame: pd.DataFrame, *, stride_seconds: int = 300) -> PolicySelection:
+def select_policy(frame: pd.DataFrame) -> PolicySelection:
     unique_splits = set(frame["split"].unique())
     if unique_splits != {"calibration"}:
         raise ValueError(
@@ -163,7 +194,7 @@ def select_policy(frame: pd.DataFrame, *, stride_seconds: int = 300) -> PolicySe
 
 def lock_alert_policy(manifest_path: Path, output_path: Path) -> LockedAlertPolicyV1:
     resolved_manifest = manifest_path.resolve()
-    resolved_output = output_path.resolve()
+    manifest_root = resolved_manifest.parent
 
     manifest_data = json.loads(resolved_manifest.read_text(encoding="utf-8"))
     model_id = manifest_data["model_id"]
@@ -173,8 +204,8 @@ def lock_alert_policy(manifest_path: Path, output_path: Path) -> LockedAlertPoli
     threshold = float(manifest_data["threshold"])
     stride_seconds = int(manifest_data.get("stride_seconds", 300))
 
-    scores_file = resolved_manifest.parent / "scores.parquet"
-    if not scores_file.is_file():
+    scores_file = manifest_root.joinpath("scores.parquet").resolve()
+    if not scores_file.is_relative_to(manifest_root) or not scores_file.is_file():
         raise ValueError(f"Scores file not found at {scores_file}")
 
     actual_scores_sha = sha256_file(scores_file)
@@ -193,7 +224,7 @@ def lock_alert_policy(manifest_path: Path, output_path: Path) -> LockedAlertPoli
             f"No calibration rows found for champion model {model_id} in {scores_file}"
         )
 
-    selection = select_policy(champion_calib, stride_seconds=stride_seconds)
+    selection = select_policy(champion_calib)
 
     payload: dict[str, Any] = {
         "schema_version": "alert-policy-v1",
@@ -216,8 +247,13 @@ def lock_alert_policy(manifest_path: Path, output_path: Path) -> LockedAlertPoli
     policy_sha256 = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
     payload["policy_sha256"] = policy_sha256
 
-    resolved_output.parent.mkdir(parents=True, exist_ok=True)
-    temp_output = resolved_output.with_suffix(".tmp")
+    resolved_output = output_path.resolve()
+    output_root = resolved_output.parent
+    output_root.mkdir(parents=True, exist_ok=True)
+    temp_output = output_root.joinpath(f"{resolved_output.name}.tmp").resolve()
+    if not temp_output.is_relative_to(output_root):
+        raise ValueError("Invalid output path")
+
     temp_output.write_text(
         json.dumps(payload, indent=2, sort_keys=True, allow_nan=False),
         encoding="utf-8",
@@ -248,7 +284,9 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.command == "lock":
-        policy = lock_alert_policy(args.manifest.resolve(), args.output.resolve())
+        manifest_p = args.manifest.resolve()
+        output_p = args.output.resolve()
+        policy = lock_alert_policy(manifest_p, output_p)
         print(
             f"Locked alert policy {policy.policy_sha256}: "
             f"persistence={policy.persistence_decisions}, cooldown={policy.cooldown_decisions}, merge_gap={policy.merge_gap_seconds}"

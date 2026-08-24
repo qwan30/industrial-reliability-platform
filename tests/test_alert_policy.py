@@ -109,4 +109,4 @@ def test_candidate_evaluator_rejects_holdout_rows() -> None:
         ]
     )
     with pytest.raises(ValueError, match="calibration"):
-        select_policy(frame, stride_seconds=300)
+        select_policy(frame)

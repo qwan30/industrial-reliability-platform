@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import platform
@@ -10,7 +11,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime
 from importlib.metadata import version
 from pathlib import Path
@@ -23,13 +24,21 @@ import pandas as pd
 
 from industrial_reliability.autoencoder import DenseAutoencoderDetector
 from industrial_reliability.contracts import PHASE1, Phase1Contract, contract_manifest
-from industrial_reliability.data import prepare_dataset, sha256_file
+from industrial_reliability.data import (
+    PreparationManifest,
+    SegmentManifest,
+    prepare_dataset,
+    sha256_file,
+)
 from industrial_reliability.evaluation import (
+    Episode,
+    EvaluationResult,
+    EventResult,
     build_episodes,
     calibrate_threshold,
     evaluate,
 )
-from industrial_reliability.features import build_features
+from industrial_reliability.features import FeatureManifest, build_features
 from industrial_reliability.models import IsolationForestDetector, RobustStatisticalDetector
 
 SCHEMA_VERSION = "phase1-benchmark-v1"
@@ -206,18 +215,18 @@ def run_benchmark(
     _check_work_dir(work_dir)
     _check_disk(work_dir)
 
-    if (
-        (
-            contract.dataset_sha256,
-            contract.dataset_bytes,
-            contract.dataset_rows,
-        )
-        == (PHASE1.dataset_sha256, PHASE1.dataset_bytes, PHASE1.dataset_rows)
-        and autoencoder_epochs is not None
-        and autoencoder_epochs != contract.autoencoder_epochs
+    if _model_parameters(contract, contract.autoencoder_epochs) != _model_parameters(
+        PHASE1, PHASE1.autoencoder_epochs
     ):
-        raise ValueError("full-run autoencoder epoch override must match the contract")
+        raise ValueError("contract model settings must match PHASE1 hardcoded detector settings")
     epochs = contract.autoencoder_epochs if autoencoder_epochs is None else autoencoder_epochs
+    full_identity = (contract.dataset_sha256, contract.dataset_bytes, contract.dataset_rows) == (
+        PHASE1.dataset_sha256,
+        PHASE1.dataset_bytes,
+        PHASE1.dataset_rows,
+    )
+    if full_identity and epochs != PHASE1.autoencoder_epochs:
+        raise ValueError("full-run autoencoder epoch override must match PHASE1")
     git_sha, tracked_tree_clean = _git_provenance(require_clean_git)
     contract_sha256 = cast(str, contract_manifest(contract)["contract_sha256"])
     run_id = f"run-{contract_sha256[:12]}-{git_sha[:12]}"
@@ -384,57 +393,12 @@ _MANIFEST_FIELDS = {
     "artifact_sha256",
     "limitations",
 }
-_DATA_MANIFEST_FIELDS = {
-    "dataset_sha256",
-    "dataset_bytes",
-    "dataset_rows",
-    "contract_sha256",
-    "source_columns",
-    "total_rows",
-    "gap_count",
-    "segments",
-    "manifest_sha256",
-}
-_SEGMENT_FIELDS = {"segment_id", "path", "start", "end", "rows", "sha256"}
-_FEATURE_MANIFEST_FIELDS = {
-    "contract_sha256",
-    "data_manifest_sha256",
-    "feature_columns",
-    "total_windows",
-    "windows_by_split",
-    "rejected_windows_by_reason",
-    "output_path",
-    "output_sha256",
-    "manifest_sha256",
-}
-_EVENT_RESULT_FIELDS = {
-    "event_id",
-    "evaluable",
-    "matching_horizon_valid_decisions",
-    "source_interval_valid_decisions",
-    "source_interval_coverage_seconds",
-    "detected",
-    "first_detection_time",
-    "lead_seconds_to_source_start",
-    "lead_seconds_to_local_lps",
-}
-_EPISODE_FIELDS = {"detection_time", "last_detection_time", "decision_count"}
-_EVALUATION_FIELDS = {
-    "threshold",
-    "valid_holdout_decisions",
-    "positive_decisions",
-    "anomalous_decisions",
-    "normal_valid_decisions",
-    "normal_exposure_days",
-    "time_in_alert",
-    "pr_auc",
-    "detected_events",
-    "total_events",
-    "false_episodes",
-    "false_episodes_per_day",
-    "event_results",
-    "feasible",
-}
+_DATA_MANIFEST_FIELDS = {field.name for field in fields(PreparationManifest)}
+_SEGMENT_FIELDS = {field.name for field in fields(SegmentManifest)}
+_FEATURE_MANIFEST_FIELDS = {field.name for field in fields(FeatureManifest)}
+_EVENT_RESULT_FIELDS = {field.name for field in fields(EventResult)}
+_EPISODE_FIELDS = {field.name for field in fields(Episode)}
+_EVALUATION_FIELDS = {field.name for field in fields(EvaluationResult)}
 _METRIC_FIELDS = _EVALUATION_FIELDS | {"fit_seconds", "score_seconds", "model_parameters"}
 _PARAMETER_FIELDS = {
     "statistical": {"robust_mad_scale", "aggregation"},
@@ -582,6 +546,20 @@ def _validate_events(value: object, context: str) -> list[object]:
     return events
 
 
+def _verify_embedded_manifest_hash(value: dict[str, object], context: str) -> None:
+    stored_hash = value["manifest_sha256"]
+    payload = {key: item for key, item in value.items() if key != "manifest_sha256"}
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if not isinstance(stored_hash, str) or hashlib.sha256(encoded).hexdigest() != stored_hash:
+        raise ValueError(f"{context} embedded manifest SHA-256 mismatch")
+
+
 def _validate_source_artifacts(
     run_dir: Path,
     manifest: dict[str, object],
@@ -594,12 +572,14 @@ def _validate_source_artifacts(
 
     data_manifest = _object(run_dir / "data_manifest.json")
     _exact_keys(data_manifest, _DATA_MANIFEST_FIELDS, "data_manifest.json")
+    _verify_embedded_manifest_hash(data_manifest, "data manifest")
     for index, item in enumerate(_list(data_manifest["segments"], "data_manifest.segments")):
         segment = _mapping(item, f"data_manifest.segments[{index}]")
         _exact_keys(segment, _SEGMENT_FIELDS, f"data_manifest.segments[{index}]")
 
     feature_manifest = _object(run_dir / "feature_manifest.json")
     _exact_keys(feature_manifest, _FEATURE_MANIFEST_FIELDS, "feature_manifest.json")
+    _verify_embedded_manifest_hash(feature_manifest, "feature manifest")
     return data_manifest, feature_manifest
 
 
@@ -612,12 +592,23 @@ def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Pa
     if manifest["schema_version"] != SCHEMA_VERSION or manifest["run_id"] != run_dir.name:
         raise ValueError("benchmark manifest identity does not match its run directory")
     _validate_manifest_values(manifest)
+    expected_run_id = (
+        f"run-{cast(str, manifest['contract_sha256'])[:12]}-{cast(str, manifest['git_sha'])[:12]}"
+    )
+    if manifest["run_id"] != expected_run_id:
+        raise ValueError("benchmark manifest run_id does not match contract and Git hashes")
+    if manifest["tracked_tree_clean"] is not True:
+        raise ValueError("aggregate publication requires a clean Git worktree")
 
     data_manifest, feature_manifest = _validate_source_artifacts(run_dir, manifest)
     if data_manifest["dataset_sha256"] != manifest["dataset_sha256"]:
         raise ValueError("data manifest dataset identity disagrees with benchmark manifest")
     if data_manifest["contract_sha256"] != manifest["contract_sha256"]:
         raise ValueError("data manifest contract identity disagrees with benchmark manifest")
+    if feature_manifest["contract_sha256"] != manifest["contract_sha256"]:
+        raise ValueError("feature manifest contract identity disagrees with benchmark manifest")
+    if feature_manifest["data_manifest_sha256"] != data_manifest["manifest_sha256"]:
+        raise ValueError("feature manifest data manifest identity disagrees with prepared data")
     if feature_manifest["feature_columns"] != manifest["feature_columns"]:
         raise ValueError("feature manifest columns disagree with benchmark manifest")
 
@@ -651,6 +642,8 @@ def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Pa
     for model_id in MODEL_IDS:
         metric = _mapping(metrics[model_id], f"metrics.{model_id}")
         _exact_keys(metric, _METRIC_FIELDS, f"metrics.{model_id}")
+        if metric["threshold"] != _mapping(thresholds[model_id], model_id)["threshold"]:
+            raise ValueError(f"metrics.{model_id}.threshold disagrees with threshold provenance")
         for key in _EVALUATION_FIELDS.difference({"event_results", "feasible"}) | {
             "fit_seconds",
             "score_seconds",

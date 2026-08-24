@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from dataclasses import fields, replace
@@ -61,6 +62,46 @@ def _canonical_json(path: Path, value: object) -> None:
     )
 
 
+def _embedded_manifest_hash(value: dict[str, object]) -> str:
+    payload = {key: item for key, item in value.items() if key != "manifest_sha256"}
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _write_hashed_artifact(
+    run_dir: Path,
+    manifest: dict[str, Any],
+    name: str,
+    payload: dict[str, Any],
+    *,
+    update_embedded_hash: bool,
+) -> None:
+    if update_embedded_hash and "manifest_sha256" in payload:
+        payload["manifest_sha256"] = _embedded_manifest_hash(payload)
+    path = run_dir / name
+    _canonical_json(path, payload)
+    manifest["artifact_sha256"][name] = sha256_file(path)
+    _canonical_json(run_dir / "manifest.json", manifest)
+
+
+def _restore_hashed_artifact(
+    run_dir: Path,
+    manifest: dict[str, Any],
+    name: str,
+    original: bytes,
+) -> None:
+    path = run_dir / name
+    path.write_bytes(original)
+    manifest["artifact_sha256"][name] = sha256_file(path)
+    _canonical_json(run_dir / "manifest.json", manifest)
+
+
 def test_benchmark_writes_complete_reproducible_manifest_and_routes_splits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -74,6 +115,7 @@ def test_benchmark_writes_complete_reproducible_manifest_and_routes_splits(
     scaler_means: list[np.ndarray] = []
     calibration_inputs: list[np.ndarray] = []
     evaluation_inputs: list[pd.DataFrame] = []
+    monkeypatch.setattr(benchmark, "_git_provenance", lambda _: ("a" * 40, True))
 
     def fit_spy(model_id: str, original: Any) -> Any:
         def wrapped(detector: Any, values: np.ndarray) -> Any:
@@ -286,12 +328,112 @@ def test_benchmark_writes_complete_reproducible_manifest_and_routes_splits(
     assert aggregate_markdown.read_text(encoding="utf-8").startswith("# Phase 1 Benchmark")
     assert not _forbidden_json_key(aggregate)
 
-    metrics_path = first.run_dir / "metrics.json"
     manifest_path = first.run_dir / "manifest.json"
-    metrics_payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    manifest_payload["tracked_tree_clean"] = False
+    _canonical_json(manifest_path, manifest_payload)
+    with pytest.raises(ValueError, match=r"clean.*worktree"):
+        publish_aggregate_results(first.run_dir, tmp_path / "rejected-dirty")
+    manifest_payload["tracked_tree_clean"] = True
+    _canonical_json(manifest_path, manifest_payload)
+
+    manifest_payload["git_sha"] = "b" * 40
+    _canonical_json(manifest_path, manifest_payload)
+    with pytest.raises(ValueError, match="run_id"):
+        publish_aggregate_results(first.run_dir, tmp_path / "rejected-run-id")
+    manifest_payload["git_sha"] = "a" * 40
+    _canonical_json(manifest_path, manifest_payload)
+
+    data_path = first.run_dir / "data_manifest.json"
+    original_data = data_path.read_bytes()
+    data_payload = json.loads(original_data)
+    data_payload["total_rows"] += 1
+    _write_hashed_artifact(
+        first.run_dir,
+        manifest_payload,
+        "data_manifest.json",
+        data_payload,
+        update_embedded_hash=False,
+    )
+    with pytest.raises(ValueError, match=r"data.*manifest.*SHA-256"):
+        publish_aggregate_results(first.run_dir, tmp_path / "rejected-data-self-hash")
+    _restore_hashed_artifact(first.run_dir, manifest_payload, "data_manifest.json", original_data)
+
+    feature_path = first.run_dir / "feature_manifest.json"
+    original_feature = feature_path.read_bytes()
+    feature_payload = json.loads(original_feature)
+    feature_payload["total_windows"] += 1
+    _write_hashed_artifact(
+        first.run_dir,
+        manifest_payload,
+        "feature_manifest.json",
+        feature_payload,
+        update_embedded_hash=False,
+    )
+    with pytest.raises(ValueError, match=r"feature.*manifest.*SHA-256"):
+        publish_aggregate_results(first.run_dir, tmp_path / "rejected-feature-self-hash")
+    _restore_hashed_artifact(
+        first.run_dir,
+        manifest_payload,
+        "feature_manifest.json",
+        original_feature,
+    )
+
+    feature_payload = json.loads(original_feature)
+    feature_payload["contract_sha256"] = "c" * 64
+    _write_hashed_artifact(
+        first.run_dir,
+        manifest_payload,
+        "feature_manifest.json",
+        feature_payload,
+        update_embedded_hash=True,
+    )
+    with pytest.raises(ValueError, match=r"feature.*contract"):
+        publish_aggregate_results(first.run_dir, tmp_path / "rejected-feature-contract")
+    _restore_hashed_artifact(
+        first.run_dir,
+        manifest_payload,
+        "feature_manifest.json",
+        original_feature,
+    )
+
+    feature_payload = json.loads(original_feature)
+    feature_payload["data_manifest_sha256"] = "d" * 64
+    _write_hashed_artifact(
+        first.run_dir,
+        manifest_payload,
+        "feature_manifest.json",
+        feature_payload,
+        update_embedded_hash=True,
+    )
+    with pytest.raises(ValueError, match=r"feature.*data manifest"):
+        publish_aggregate_results(first.run_dir, tmp_path / "rejected-feature-data")
+    _restore_hashed_artifact(
+        first.run_dir,
+        manifest_payload,
+        "feature_manifest.json",
+        original_feature,
+    )
+
+    metrics_path = first.run_dir / "metrics.json"
+    original_metrics = metrics_path.read_bytes()
+    metrics_payload = json.loads(original_metrics)
+    metrics_payload["statistical"]["threshold"] += 1.0
+    _write_hashed_artifact(
+        first.run_dir,
+        manifest_payload,
+        "metrics.json",
+        metrics_payload,
+        update_embedded_hash=False,
+    )
+    with pytest.raises(ValueError, match=r"threshold.*provenance"):
+        publish_aggregate_results(first.run_dir, tmp_path / "rejected-threshold")
+    _restore_hashed_artifact(first.run_dir, manifest_payload, "metrics.json", original_metrics)
+
+    metrics_payload = json.loads(original_metrics)
     metrics_payload["statistical"]["raw_rows"] = [["must", "not", "publish"]]
     _canonical_json(metrics_path, metrics_payload)
-    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest_payload["artifact_sha256"]["metrics.json"] = sha256_file(metrics_path)
     _canonical_json(manifest_path, manifest_payload)
     with pytest.raises(ValueError, match=r"unknown.*raw_rows"):
@@ -481,6 +623,76 @@ def test_full_contract_rejects_epoch_override_before_dataset_access(
             tmp_path / "artifacts-copy",
             contract=replace(PHASE1, dataset_path="copied-full-dataset.csv"),
             autoencoder_epochs=1,
+            require_clean_git=False,
+        )
+
+
+@pytest.mark.parametrize("override", [None, 1])
+def test_full_identity_rejects_mutated_contract_epochs_before_dataset_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    override: int | None,
+) -> None:
+    monkeypatch.setattr(
+        benchmark.shutil,
+        "disk_usage",
+        lambda _: SimpleNamespace(total=20 * GIB, used=1 * GIB, free=19 * GIB),
+    )
+
+    with pytest.raises(ValueError, match="model settings"):
+        run_benchmark(
+            tmp_path / "missing.csv",
+            tmp_path / "work",
+            tmp_path / "artifacts",
+            contract=replace(PHASE1, autoencoder_epochs=1),
+            autoencoder_epochs=override,
+            require_clean_git=False,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "changed_value"),
+    [
+        ("random_seed", 7),
+        ("robust_mad_scale", 1.0),
+        ("statistical_aggregation", "mean_abs_robust_z"),
+        ("isolation_forest_estimators", 10),
+        ("isolation_forest_max_samples", "changed"),
+        ("isolation_forest_contamination", "changed"),
+        ("isolation_forest_n_jobs", 2),
+        ("isolation_forest_score_rule", "score_samples"),
+        ("autoencoder_hidden_width", 32),
+        ("autoencoder_bottleneck_width", 8),
+        ("autoencoder_activation", "tanh"),
+        ("autoencoder_loss", "mae"),
+        ("autoencoder_optimizer", "sgd"),
+        ("autoencoder_learning_rate", 0.01),
+        ("autoencoder_batch_size", 128),
+        ("autoencoder_epochs", 1),
+        ("autoencoder_scaler", "none"),
+        ("autoencoder_device", "cuda"),
+        ("autoencoder_deterministic", False),
+        ("autoencoder_num_workers", 1),
+    ],
+)
+def test_runner_rejects_non_phase1_hardcoded_model_settings_before_dataset_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field_name: str,
+    changed_value: object,
+) -> None:
+    monkeypatch.setattr(
+        benchmark.shutil,
+        "disk_usage",
+        lambda _: SimpleNamespace(total=20 * GIB, used=1 * GIB, free=19 * GIB),
+    )
+
+    with pytest.raises(ValueError, match="model settings"):
+        run_benchmark(
+            tmp_path / "missing.csv",
+            tmp_path / "work",
+            tmp_path / "artifacts",
+            contract=replace(PHASE1, **{field_name: changed_value}),
             require_clean_git=False,
         )
 

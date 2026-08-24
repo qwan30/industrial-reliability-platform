@@ -37,6 +37,8 @@ SCHEMA_VERSION = "phase1-benchmark-v1"
 MIN_FREE_BYTES = 10 * 1024**3
 MODEL_IDS = ("statistical", "isolation_forest", "autoencoder")
 
+_DATA_MANIFEST_FILE = "data_manifest.json"
+_FEATURE_MANIFEST_FILE = "feature_manifest.json"
 _EPISODES_FILE = "episodes.json"
 _EVENT_RESULTS_FILE = "event_results.json"
 _METRICS_FILE = "metrics.json"
@@ -44,8 +46,8 @@ _MANIFEST_FILE = "manifest.json"
 _MANIFEST_ARTIFACT_SHA256 = "manifest.artifact_sha256"
 
 ARTIFACT_NAMES = (
-    "data_manifest.json",
-    "feature_manifest.json",
+    _DATA_MANIFEST_FILE,
+    _FEATURE_MANIFEST_FILE,
     "scores.parquet",
     _EPISODES_FILE,
     _EVENT_RESULTS_FILE,
@@ -326,10 +328,10 @@ def run_benchmark(
     resolved_artifact_dir.mkdir(parents=True, exist_ok=True)
     temporary_run = Path(tempfile.mkdtemp(prefix=f".{run_id}.tmp-", dir=resolved_artifact_dir))
     try:
-        shutil.copyfile(prepared_dir / _MANIFEST_FILE, temporary_run / "data_manifest.json")
+        shutil.copyfile(prepared_dir / _MANIFEST_FILE, temporary_run / _DATA_MANIFEST_FILE)
         shutil.copyfile(
             features_path.with_suffix(".manifest.json"),
-            temporary_run / "feature_manifest.json",
+            temporary_run / _FEATURE_MANIFEST_FILE,
         )
         pd.concat(score_frames, ignore_index=True).to_parquet(
             temporary_run / "scores.parquet",
@@ -648,15 +650,15 @@ def _validate_source_artifacts(
         if not isinstance(expected, str) or sha256_file(run_dir / name) != expected:
             raise ValueError(f"source artifact SHA-256 mismatch: {name}")
 
-    data_manifest = _object(run_dir / "data_manifest.json")
-    _exact_keys(data_manifest, _DATA_MANIFEST_FIELDS, "data_manifest.json")
+    data_manifest = _object(run_dir / _DATA_MANIFEST_FILE)
+    _exact_keys(data_manifest, _DATA_MANIFEST_FIELDS, _DATA_MANIFEST_FILE)
     _verify_embedded_manifest_hash(data_manifest, "data manifest")
     for index, item in enumerate(_list(data_manifest["segments"], "data_manifest.segments")):
         segment = _mapping(item, f"data_manifest.segments[{index}]")
         _exact_keys(segment, _SEGMENT_FIELDS, f"data_manifest.segments[{index}]")
 
-    feature_manifest = _object(run_dir / "feature_manifest.json")
-    _exact_keys(feature_manifest, _FEATURE_MANIFEST_FIELDS, "feature_manifest.json")
+    feature_manifest = _object(run_dir / _FEATURE_MANIFEST_FILE)
+    _exact_keys(feature_manifest, _FEATURE_MANIFEST_FIELDS, _FEATURE_MANIFEST_FILE)
     _verify_embedded_manifest_hash(feature_manifest, "feature manifest")
     return data_manifest, feature_manifest
 

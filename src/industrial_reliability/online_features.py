@@ -205,20 +205,16 @@ class OnlineFeatureBuilder:
         self._current_bin_samples.clear()
         return emitted
 
-    def push(self, event: TelemetryEventV1) -> BuilderResult:
-        payload_hash = _hash_event_payload(event)
-
-        # 1. Check duplicate
+    def _check_sequence_and_ordering(
+        self, event: TelemetryEventV1, payload_hash: str
+    ) -> tuple[bool, SegmentCloseReason | None]:
+        """Returns (should_ignore, close_reason)."""
         if self._last_sequence is not None and event.sequence == self._last_sequence:
             if event.message_id == self._last_event_id and payload_hash == self._last_payload_hash:
-                return BuilderResult(features=(), segment_closed_reason=None)
+                return True, None
             self._reset_segment()
-            return BuilderResult(
-                features=(),
-                segment_closed_reason="conflicting_duplicate",
-            )
+            return True, "conflicting_duplicate"
 
-        # 2. Check ordering faults
         close_reason: SegmentCloseReason | None = None
         if self._last_sequence is not None and event.sequence != self._last_sequence + 1:
             self._reset_segment()
@@ -226,6 +222,15 @@ class OnlineFeatureBuilder:
         elif self._last_timestamp is not None and event.source_timestamp < self._last_timestamp:
             self._reset_segment()
             close_reason = "timestamp_regression"
+
+        return False, close_reason
+
+    def push(self, event: TelemetryEventV1) -> BuilderResult:
+        payload_hash = _hash_event_payload(event)
+
+        should_ignore, close_reason = self._check_sequence_and_ordering(event, payload_hash)
+        if should_ignore:
+            return BuilderResult(features=(), segment_closed_reason=close_reason)
 
         # 3. Bin boundary checks
         event_bin_end = _compute_bin_end(event.source_timestamp)

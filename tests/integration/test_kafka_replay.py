@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from tests.helpers_replay import make_sample_replay_command
 from tests.test_replay import _create_mock_parquet
 
 from industrial_reliability.kafka_io import (
@@ -19,7 +19,6 @@ from industrial_reliability.replay_service import ReplayService
 from industrial_reliability.runtime_messages import (
     REPLAY_COMMANDS_TOPIC,
     TELEMETRY_TOPIC,
-    ReplayCommandV1,
     TelemetryEventV1,
 )
 
@@ -27,7 +26,6 @@ from industrial_reliability.runtime_messages import (
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_kafka_replay_end_to_end(tmp_path: Path) -> None:
-    # Use live broker if available, otherwise skip cleanly
     try:
         from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
@@ -47,19 +45,7 @@ async def test_kafka_replay_end_to_end(tmp_path: Path) -> None:
 
     try:
         session_id = uuid4()
-        cmd = ReplayCommandV1(
-            message_id=uuid4(),
-            replay_session_id=session_id,
-            source_dataset_sha256="a" * 64,
-            contract_sha256="b" * 64,
-            source_timestamp=datetime(2020, 3, 1, 0, 0, 0),
-            emitted_at=datetime.now(UTC),
-            command_id=uuid4(),
-            action="START",
-            speed=1000,
-            range_start=datetime(2020, 3, 1, 0, 0, 0),
-            range_end=datetime(2020, 3, 1, 0, 1, 0),
-        )
+        cmd = make_sample_replay_command(action="START", session_id=session_id, speed=1000)
 
         test_producer = AIOKafkaProducer(bootstrap_servers="localhost:29092")
         await test_producer.start()

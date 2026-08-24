@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -14,11 +13,11 @@ from industrial_reliability.replay_service import (
     ReplayService,
     main,
 )
-from industrial_reliability.runtime_messages import (
-    QuarantineRecordV1,
-    ReplayCommandV1,
-    ReplayStatusV1,
-    TelemetryEventV1,
+from tests.helpers_replay import (
+    make_sample_quarantine,
+    make_sample_replay_command,
+    make_sample_replay_status,
+    make_sample_telemetry_event,
 )
 from tests.test_replay import _create_mock_parquet
 
@@ -44,19 +43,7 @@ async def test_replay_service_handles_valid_start_and_completion(tmp_path: Path)
     service.publish_status = AsyncMock(side_effect=lambda st: published_status.append(st))  # type: ignore[method-assign]
 
     session_id = uuid4()
-    cmd = ReplayCommandV1(
-        message_id=uuid4(),
-        replay_session_id=session_id,
-        source_dataset_sha256="a" * 64,
-        contract_sha256="b" * 64,
-        source_timestamp=datetime(2020, 3, 1, 0, 0, 0),
-        emitted_at=datetime.now(UTC),
-        command_id=uuid4(),
-        action="START",
-        speed=1000,
-        range_start=datetime(2020, 3, 1, 0, 0, 0),
-        range_end=datetime(2020, 3, 1, 0, 1, 0),
-    )
+    cmd = make_sample_replay_command(action="START", session_id=session_id, speed=1000)
 
     record = MockRecord(encode_message(cmd))
     await service.handle_command_record(record)
@@ -82,63 +69,21 @@ async def test_replay_service_pause_resume_stop_lifecycle(tmp_path: Path) -> Non
     service.publish_status = AsyncMock(side_effect=lambda st: published_status.append(st))  # type: ignore[method-assign]
 
     session_id = uuid4()
-    cmd_start = ReplayCommandV1(
-        message_id=uuid4(),
-        replay_session_id=session_id,
-        source_dataset_sha256="a" * 64,
-        contract_sha256="b" * 64,
-        source_timestamp=datetime(2020, 3, 1, 0, 0, 0),
-        emitted_at=datetime.now(UTC),
-        command_id=uuid4(),
-        action="START",
-        speed=1,
-        range_start=datetime(2020, 3, 1, 0, 0, 0),
-        range_end=datetime(2020, 3, 1, 0, 10, 0),
-    )
+    cmd_start = make_sample_replay_command(action="START", session_id=session_id, speed=1)
     await service.handle_command(cmd_start)
     assert service.active_session is not None
 
     # Pause
-    cmd_pause = ReplayCommandV1(
-        message_id=uuid4(),
-        replay_session_id=session_id,
-        source_dataset_sha256="a" * 64,
-        contract_sha256="b" * 64,
-        source_timestamp=datetime(2020, 3, 1, 0, 0, 10),
-        emitted_at=datetime.now(UTC),
-        command_id=uuid4(),
-        action="PAUSE",
-        speed=1,
-    )
+    cmd_pause = make_sample_replay_command(action="PAUSE", session_id=session_id, speed=1)
     await service.handle_command(cmd_pause)
     assert any(st.state == "PAUSED" for st in published_status)
 
     # Resume with speed change
-    cmd_resume = ReplayCommandV1(
-        message_id=uuid4(),
-        replay_session_id=session_id,
-        source_dataset_sha256="a" * 64,
-        contract_sha256="b" * 64,
-        source_timestamp=datetime(2020, 3, 1, 0, 0, 10),
-        emitted_at=datetime.now(UTC),
-        command_id=uuid4(),
-        action="RESUME",
-        speed=1000,
-    )
+    cmd_resume = make_sample_replay_command(action="RESUME", session_id=session_id, speed=1000)
     await service.handle_command(cmd_resume)
 
     # Stop
-    cmd_stop = ReplayCommandV1(
-        message_id=uuid4(),
-        replay_session_id=session_id,
-        source_dataset_sha256="a" * 64,
-        contract_sha256="b" * 64,
-        source_timestamp=datetime(2020, 3, 1, 0, 0, 20),
-        emitted_at=datetime.now(UTC),
-        command_id=uuid4(),
-        action="STOP",
-        speed=1000,
-    )
+    cmd_stop = make_sample_replay_command(action="STOP", session_id=session_id, speed=1000)
     await service.handle_command(cmd_stop)
     assert any(st.state == "STOPPED" for st in published_status)
 
@@ -156,62 +101,16 @@ async def test_publish_methods_with_mock_producer(tmp_path: Path) -> None:
     service.producer = mock_producer
 
     # Test publish_telemetry
-    ev = TelemetryEventV1(
-        message_id=uuid4(),
-        replay_session_id=uuid4(),
-        source_dataset_sha256="a" * 64,
-        contract_sha256="b" * 64,
-        source_timestamp=datetime(2020, 3, 1, 0, 0),
-        emitted_at=datetime.now(UTC),
-        machine_id="compressor-01",
-        sequence=1,
-        tp2=1.0,
-        tp3=2.0,
-        h1=3.0,
-        dv_pressure=4.0,
-        reservoirs=5.0,
-        oil_temperature=6.0,
-        motor_current=7.0,
-        comp=1,
-        dv_electric=0,
-        towers=1,
-        mpg=0,
-        lps=1,
-        pressure_switch=0,
-        oil_level=1,
-        caudal_impulses=0,
-    )
+    ev = make_sample_telemetry_event()
     await service.publish_telemetry(ev)
     assert mock_producer.send_and_wait.called
 
     # Test publish_status
-    st = ReplayStatusV1(
-        message_id=uuid4(),
-        replay_session_id=uuid4(),
-        source_dataset_sha256="a" * 64,
-        contract_sha256="b" * 64,
-        source_timestamp=datetime(2020, 3, 1, 0, 0),
-        emitted_at=datetime.now(UTC),
-        state="RUNNING",
-        last_sequence=1,
-    )
+    st = make_sample_replay_status()
     await service.publish_status(st)
 
     # Test publish_quarantine
-    qr = QuarantineRecordV1(
-        message_id=uuid4(),
-        replay_session_id=None,
-        source_dataset_sha256="a" * 64,
-        contract_sha256="b" * 64,
-        source_timestamp=datetime(2020, 3, 1, 0, 0),
-        emitted_at=datetime.now(UTC),
-        original_topic="topic",
-        partition=0,
-        offset=0,
-        payload_sha256="c" * 64,
-        error_code="ERR",
-        error_detail="detail",
-    )
+    qr = make_sample_quarantine()
     await service.publish_quarantine(qr)
 
 

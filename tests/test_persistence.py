@@ -11,6 +11,7 @@ from industrial_reliability.alert_state import (
     AlertState,
     transition,
 )
+from industrial_reliability.console_stream import ConsoleEventV1
 from industrial_reliability.persistence import (
     RuntimeStore,
 )
@@ -253,3 +254,49 @@ def test_store_get_alert_detail() -> None:
         # Missing alert
         mock_cur.fetchone.return_value = None
         assert store.get_alert_detail(uuid4()) is None
+
+
+def test_store_append_and_query_console_events() -> None:
+    store = RuntimeStore("postgresql://test:5432/test")
+    session_id = uuid4()
+    event = ConsoleEventV1(
+        event_id="ev-1",
+        replay_session_id=str(session_id),
+        event_type="score",
+        source_timestamp=datetime(2020, 4, 18, 0, 5),
+        payload={"score": 1.5},
+        durable=True,
+    )
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+    with patch("psycopg.connect", return_value=mock_conn):
+        store.append_console_event(event)
+        assert mock_cur.execute.called
+
+        # Query events_after with None
+        mock_cur.fetchall.return_value = [
+            {
+                "event_id": "ev-1",
+                "replay_session_id": str(session_id),
+                "event_type": "score",
+                "source_timestamp": datetime(2020, 4, 18, 0, 5),
+                "payload": {"score": 1.5},
+            }
+        ]
+        events = store.events_after(str(session_id), after_event_id=None)
+        assert len(events) == 1
+        assert events[0].event_id == "ev-1"
+
+        # Query events_after with after_event_id
+        mock_cur.fetchone.return_value = {"stream_sequence": 1}
+        events2 = store.events_after(str(session_id), after_event_id="ev-1")
+        assert len(events2) == 1
+
+        # Unknown after_event_id
+        mock_cur.fetchone.return_value = None
+        events_unknown = store.events_after(str(session_id), after_event_id="ev-unknown")
+        assert events_unknown == ()

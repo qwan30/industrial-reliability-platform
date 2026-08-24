@@ -23,6 +23,13 @@ MODEL_IDS = ("statistical", "isolation_forest", "autoencoder")
 GIB = 1024**3
 
 
+@pytest.fixture(autouse=True)
+def mock_disk_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "shutil.disk_usage", lambda _: SimpleNamespace(free=100 * GIB, total=500 * GIB)
+    )
+
+
 def _benchmark_contract(source: Path) -> Phase1Contract:
     contract = sample_contract(source)
     return replace(

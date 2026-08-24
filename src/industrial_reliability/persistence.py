@@ -12,6 +12,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from industrial_reliability.alert_state import AlertState, TransitionResult
+from industrial_reliability.console_stream import ConsoleEventV1
 from industrial_reliability.runtime_messages import (
     ReplayStatusV1,
     ScoreDecisionV1,
@@ -98,6 +99,7 @@ class RuntimeStore:
             "alert_events",
             "evidence_snapshots",
             "alert_outbox",
+            "console_events",
         }
         if table_name not in allowed_tables:
             raise ValueError(f"Invalid table name: {table_name}")
@@ -521,3 +523,83 @@ class RuntimeStore:
                 decisions=decisions,
                 rca=None,
             )
+
+    def append_console_event(self, event: ConsoleEventV1) -> None:
+        with psycopg.connect(self.db_url) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO console_events (
+                    event_id,
+                    replay_session_id,
+                    event_type,
+                    source_timestamp,
+                    payload
+                ) VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (event_id) DO NOTHING;
+                """,
+                (
+                    event.event_id,
+                    str(event.replay_session_id),
+                    event.event_type,
+                    event.source_timestamp,
+                    json.dumps(event.payload),
+                ),
+            )
+
+    def events_after(
+        self,
+        replay_session_id: str,
+        after_event_id: str | None = None,
+        limit: int = 100,
+    ) -> tuple[ConsoleEventV1, ...]:
+        with (
+            psycopg.connect(self.db_url) as conn,
+            conn.cursor(row_factory=dict_row) as cur,
+        ):
+            if after_event_id:
+                cur.execute(
+                    "SELECT stream_sequence FROM console_events WHERE event_id = %s AND replay_session_id = %s;",
+                    (after_event_id, str(replay_session_id)),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return ()
+                seq = row["stream_sequence"]
+                cur.execute(
+                    """
+                    SELECT event_id, replay_session_id, event_type, source_timestamp, payload
+                    FROM console_events
+                    WHERE replay_session_id = %s AND stream_sequence > %s
+                    ORDER BY stream_sequence ASC
+                    LIMIT %s;
+                    """,
+                    (str(replay_session_id), seq, limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT event_id, replay_session_id, event_type, source_timestamp, payload
+                    FROM console_events
+                    WHERE replay_session_id = %s
+                    ORDER BY stream_sequence ASC
+                    LIMIT %s;
+                    """,
+                    (str(replay_session_id), limit),
+                )
+
+            results: list[ConsoleEventV1] = []
+            for r in cur.fetchall():
+                payload = (
+                    r["payload"] if isinstance(r["payload"], dict) else json.loads(r["payload"])
+                )
+                results.append(
+                    ConsoleEventV1(
+                        event_id=r["event_id"],
+                        replay_session_id=r["replay_session_id"],
+                        event_type=r["event_type"],
+                        source_timestamp=r["source_timestamp"],
+                        payload=payload,
+                        durable=True,
+                    )
+                )
+            return tuple(results)

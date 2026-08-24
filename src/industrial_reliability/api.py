@@ -1,23 +1,32 @@
-"""Stateless scoring and alert evidence APIs exposed with FastAPI."""
+"""Stateless scoring, alert evidence, replay control, and SSE stream APIs exposed with FastAPI."""
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
+from collections.abc import AsyncIterator
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
-from uuid import NAMESPACE_URL, UUID, uuid5
+from typing import Annotated, Any, Literal
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from industrial_reliability.champion import (
     ChampionScorer,
     ScoringContractError,
     load_champion,
 )
+from industrial_reliability.console_stream import (
+    ConsoleEventBroker,
+    ConsoleEventV1,
+)
+from industrial_reliability.kafka_io import encode_message
 from industrial_reliability.persistence import (
     AlertDetailRecord,
     AlertSummaryRecord,
@@ -25,8 +34,10 @@ from industrial_reliability.persistence import (
     RuntimeStore,
 )
 from industrial_reliability.runtime_messages import (
+    REPLAY_COMMANDS_TOPIC,
     ApiErrorV1,
     ErrorResponseV1,
+    ReplayCommandV1,
     ScoreDecisionV1,
     ScoreRequestV1,
     ScoreResponseV1,
@@ -34,6 +45,40 @@ from industrial_reliability.runtime_messages import (
 
 RUNTIME_NAMESPACE = NAMESPACE_URL
 ERR_STORE_UNAVAILABLE_MSG = "Database store not configured"
+
+
+class StartReplayRequestV1(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    range_start: datetime
+    range_end: datetime
+    speed: Literal[1, 100, 1000]
+
+    @model_validator(mode="after")
+    def bounded_range(self) -> StartReplayRequestV1:
+        if self.range_start >= self.range_end:
+            raise ValueError("range_start must precede range_end")
+        return self
+
+
+class ReplayControlRequestV1(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    action: Literal["PAUSE", "RESUME", "STOP"]
+
+
+def encode_sse(
+    event: str,
+    data: Any,
+    event_id: str | None = None,
+) -> bytes:
+    lines: list[str] = []
+    if event_id:
+        lines.append(f"id: {event_id}")
+    lines.append(f"event: {event}")
+    if isinstance(data, str):
+        lines.append(f"data: {data}")
+    else:
+        lines.append(f"data: {json.dumps(data, separators=(',', ':'), allow_nan=False)}")
+    return ("\n".join(lines) + "\n\n").encode("utf-8")
 
 
 def _serialize_replay(record: ReplaySessionRecord) -> dict[str, Any]:
@@ -81,9 +126,21 @@ def _store_unavailable_response() -> JSONResponse:
     )
 
 
+def _publish_command(producer: Any, topic: str, key: str, cmd: ReplayCommandV1) -> None:
+    if producer is None:
+        return
+    payload_bytes = encode_message(cmd)
+    if hasattr(producer, "send"):
+        producer.send(topic, key=key.encode("utf-8"), value=payload_bytes)
+    elif hasattr(producer, "produce"):
+        producer.produce(topic, key=key.encode("utf-8"), value=payload_bytes)
+
+
 def create_app(
     scorer: ChampionScorer,
     store: RuntimeStore | None = None,
+    producer: Any = None,
+    broker: ConsoleEventBroker | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Industrial Reliability Scoring and Alert API", version="1.0")
 
@@ -143,6 +200,63 @@ def create_app(
         )
         return ScoreResponseV1(data=decision)
 
+    @app.post("/v1/replays", status_code=202)
+    def start_replay(body: StartReplayRequestV1) -> JSONResponse:
+        session_id = uuid4()
+        now = datetime.now(UTC)
+        ds_sha = "0" * 64
+        c_sha = "0" * 64
+        if hasattr(scorer, "manifest") and isinstance(scorer.manifest, dict):
+            ds_sha = scorer.manifest.get("source_dataset_sha256", ds_sha)
+            c_sha = scorer.manifest.get("contract_sha256", c_sha)
+
+        cmd = ReplayCommandV1(
+            schema_version="replay-command-v1",
+            message_id=uuid4(),
+            replay_session_id=session_id,
+            source_dataset_sha256=ds_sha,
+            contract_sha256=c_sha,
+            source_timestamp=body.range_start,
+            emitted_at=now,
+            command_id=uuid4(),
+            action="START",
+            speed=body.speed,
+            range_start=body.range_start,
+            range_end=body.range_end,
+        )
+        _publish_command(producer, REPLAY_COMMANDS_TOPIC, str(session_id), cmd)
+        return JSONResponse(
+            status_code=202,
+            content={
+                "success": True,
+                "data": {"replay_session_id": str(session_id)},
+                "error": None,
+            },
+        )
+
+    @app.post("/v1/replays/{replay_session_id}/commands", status_code=202)
+    def control_replay(replay_session_id: UUID, body: ReplayControlRequestV1) -> JSONResponse:
+        now = datetime.now(UTC)
+        cmd = ReplayCommandV1(
+            schema_version="replay-command-v1",
+            message_id=uuid4(),
+            replay_session_id=replay_session_id,
+            source_dataset_sha256="0" * 64,
+            contract_sha256="0" * 64,
+            source_timestamp=datetime(2020, 1, 1),
+            emitted_at=now,
+            command_id=uuid4(),
+            action=body.action,
+            speed=100,
+            range_start=None,
+            range_end=None,
+        )
+        _publish_command(producer, REPLAY_COMMANDS_TOPIC, str(replay_session_id), cmd)
+        return JSONResponse(
+            status_code=202,
+            content={"success": True, "data": {"status": "accepted"}, "error": None},
+        )
+
     @app.get("/v1/replays/{replay_session_id}")
     def get_replay(replay_session_id: UUID) -> JSONResponse:
         if store is None:
@@ -194,6 +308,65 @@ def create_app(
         return JSONResponse(
             status_code=200,
             content={"success": True, "data": _serialize_alert_detail(detail), "error": None},
+        )
+
+    @app.get("/v1/replays/{replay_session_id}/stream")
+    async def stream_replay(
+        replay_session_id: UUID,
+        request: Request,
+        last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
+    ) -> StreamingResponse:
+        async def event_generator() -> AsyncIterator[bytes]:
+            sid_str = str(replay_session_id)
+            snapshot_data: dict[str, Any] = {}
+            if store is not None:
+                rep = store.get_replay(replay_session_id)
+                alerts = store.list_alerts(replay_session_id)
+                snapshot_data = {
+                    "replay": _serialize_replay(rep) if rep else None,
+                    "alerts": [_serialize_alert_summary(a) for a in alerts],
+                }
+
+            if last_event_id is not None and store is not None:
+                missed_events = store.events_after(sid_str, after_event_id=last_event_id)
+                if not missed_events:
+                    yield encode_sse("resync_required", {}, event_id=None)
+                    yield encode_sse("snapshot", snapshot_data, event_id=f"snap-{uuid4()}")
+                else:
+                    yield encode_sse("snapshot", snapshot_data, event_id=f"snap-{uuid4()}")
+                    for ev in missed_events:
+                        yield encode_sse(ev.event_type, ev.payload, event_id=ev.event_id)
+            else:
+                yield encode_sse("snapshot", snapshot_data, event_id=f"snap-{uuid4()}")
+
+            if broker is None:
+                return
+
+            q = await broker.subscribe(sid_str)
+            try:
+                while True:
+                    try:
+                        item = await asyncio.wait_for(q.get(), timeout=15.0)
+                        if isinstance(item, str):
+                            if item == "resync_required":
+                                yield encode_sse("resync_required", {}, event_id=None)
+                        elif isinstance(item, ConsoleEventV1):
+                            yield encode_sse(item.event_type, item.payload, event_id=item.event_id)
+                    except TimeoutError:
+                        yield b": heartbeat\n\n"
+            except asyncio.CancelledError:
+                pass
+            finally:
+                await broker.unsubscribe(sid_str, q)
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     return app

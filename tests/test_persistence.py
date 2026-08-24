@@ -300,4 +300,3 @@ def test_store_append_and_query_console_events() -> None:
         mock_cur.fetchone.return_value = None
         events_unknown = store.events_after(str(session_id), after_event_id="ev-unknown")
         assert events_unknown == ()
-

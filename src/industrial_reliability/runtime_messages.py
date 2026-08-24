@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+HEX_64_PATTERN = r"^[0-9a-f]{64}$"
+
 
 class FrozenMessage(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -45,8 +47,8 @@ class FeatureVectorV1(FrozenMessage):
     schema_version: Literal["feature-vector-v1"] = "feature-vector-v1"
     message_id: UUID
     replay_session_id: UUID
-    source_dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_dataset_sha256: str = Field(pattern=HEX_64_PATTERN)
+    contract_sha256: str = Field(pattern=HEX_64_PATTERN)
     source_timestamp: datetime
     emitted_at: datetime
     window_id: UUID
@@ -105,8 +107,8 @@ class ScoreDecisionV1(FrozenMessage):
     schema_version: Literal["score-decision-v1"] = "score-decision-v1"
     message_id: UUID
     replay_session_id: UUID
-    source_dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_dataset_sha256: str = Field(pattern=HEX_64_PATTERN)
+    contract_sha256: str = Field(pattern=HEX_64_PATTERN)
     source_timestamp: datetime
     emitted_at: datetime
     decision_id: UUID

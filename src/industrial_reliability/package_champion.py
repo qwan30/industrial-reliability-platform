@@ -19,6 +19,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 
 from industrial_reliability.phase1b_data import sha256_file
 
+DETECTOR_FILENAME = "detector.joblib"
+BASELINE_FILENAME = "evidence-baseline.npz"
+GOLDEN_CASES_FILENAME = "golden-cases.json"
+MANIFEST_FILENAME = "manifest.json"
+HEX_64_PATTERN = r"^[0-9a-f]{64}$"
+
 
 class ChampionPackageError(ValueError):
     """Raised when Phase 1B champion artifacts are infeasible, missing, or corrupted."""
@@ -38,8 +44,8 @@ class ChampionManifest(BaseModel):
     source_run_id: str
     model_id: Literal["statistical", "isolation_forest", "autoencoder"]
     model_version: str
-    contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    source_dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    contract_sha256: str = Field(pattern=HEX_64_PATTERN)
+    source_dataset_sha256: str = Field(pattern=HEX_64_PATTERN)
     feature_names: tuple[str, ...] = Field(min_length=1)
     threshold: float
     threshold_provenance: ThresholdProvenance
@@ -49,7 +55,7 @@ class ChampionManifest(BaseModel):
     @field_validator("artifact_sha256")
     @classmethod
     def validate_artifact_hashes(cls, v: Mapping[str, str]) -> Mapping[str, str]:
-        allowed_keys = {"detector.joblib", "evidence-baseline.npz", "golden-cases.json"}
+        allowed_keys = {DETECTOR_FILENAME, BASELINE_FILENAME, GOLDEN_CASES_FILENAME}
         if set(v.keys()) != allowed_keys:
             raise ValueError(f"artifact_sha256 must contain exact keys: {allowed_keys}")
         for key, hash_val in v.items():
@@ -108,14 +114,14 @@ def _verify_phase1b_artifacts(
     expected_baseline = artifact_hashes.get("evidence_baseline")
 
     scores_file = (resolved_run / "scores.parquet").resolve()
-    baseline_file = (resolved_run / "evidence-baseline.npz").resolve()
+    baseline_file = (resolved_run / BASELINE_FILENAME).resolve()
     model_id = champion_dict.get("model_id")
     model_file = (resolved_run / "models" / f"{model_id}.joblib").resolve()
 
     if not scores_file.is_file() or sha256_file(scores_file) != expected_scores:
         raise ChampionPackageError("scores.parquet missing or SHA-256 mismatch")
     if not baseline_file.is_file() or sha256_file(baseline_file) != expected_baseline:
-        raise ChampionPackageError("evidence-baseline.npz missing or SHA-256 mismatch")
+        raise ChampionPackageError(f"{BASELINE_FILENAME} missing or SHA-256 mismatch")
     if not model_file.is_file() or sha256_file(model_file) != expected_model:
         raise ChampionPackageError(f"Model binary {model_file.name} missing or SHA-256 mismatch")
 
@@ -153,11 +159,17 @@ def _select_golden_cases(
     if model_scores.empty:
         raise ChampionPackageError(f"No scores for champion model {model_id}")
 
-    # Merge features with scores on window_start / window_end
-    merged = pd.merge(features_df, model_scores, on=["split", "window_start", "window_end"])
+    # Merge features with scores on window_start / window_end with explicit how and validate
+    merged = pd.merge(
+        features_df,
+        model_scores,
+        on=["split", "window_start", "window_end"],
+        how="inner",
+        validate="one_to_one",
+    )
     calib_merged = merged[merged["split"] == "calibration"].sort_values("window_start")
     if calib_merged.empty:
-        # Fallback to holdout / all rows if calibration was not evaluated in scores table
+        # Fallback to all rows if calibration was not evaluated in scores table
         calib_merged = merged.sort_values("window_start")
 
     # 1. Earliest valid row
@@ -191,7 +203,7 @@ def _select_golden_cases(
             np.abs(vals_array - median),
             1.4826 * mad,
             out=np.zeros_like(vals_array),
-            where=mad != 0.0,
+            where=~np.isclose(mad, 0.0),
         )
         evidence = tuple(
             (name, float(val), float(dev))
@@ -278,7 +290,7 @@ def build_champion_package(
 
     model_id = champion["model_id"]
     model_src = (resolved_run / "models" / f"{model_id}.joblib").resolve()
-    baseline_src = (resolved_run / "evidence-baseline.npz").resolve()
+    baseline_src = (resolved_run / BASELINE_FILENAME).resolve()
     scores_src = (resolved_run / "scores.parquet").resolve()
 
     golden = _select_golden_cases(scores_src, features_path, champion, baseline_src)
@@ -289,10 +301,10 @@ def build_champion_package(
     temp_output.mkdir(parents=True, exist_ok=True)
 
     try:
-        dest_model = _resolve_path(temp_output, "detector.joblib")
-        dest_baseline = _resolve_path(temp_output, "evidence-baseline.npz")
-        dest_golden = _resolve_path(temp_output, "golden-cases.json")
-        dest_manifest = _resolve_path(temp_output, "manifest.json")
+        dest_model = _resolve_path(temp_output, DETECTOR_FILENAME)
+        dest_baseline = _resolve_path(temp_output, BASELINE_FILENAME)
+        dest_golden = _resolve_path(temp_output, GOLDEN_CASES_FILENAME)
+        dest_manifest = _resolve_path(temp_output, MANIFEST_FILENAME)
 
         shutil.copy2(model_src, dest_model)
         shutil.copy2(baseline_src, dest_baseline)
@@ -301,9 +313,9 @@ def build_champion_package(
         dest_golden.write_text(json.dumps(golden_payload, indent=2), encoding="utf-8")
 
         artifact_hashes = {
-            "detector.joblib": sha256_file(dest_model),
-            "evidence-baseline.npz": sha256_file(dest_baseline),
-            "golden-cases.json": sha256_file(dest_golden),
+            DETECTOR_FILENAME: sha256_file(dest_model),
+            BASELINE_FILENAME: sha256_file(dest_baseline),
+            GOLDEN_CASES_FILENAME: sha256_file(dest_golden),
         }
 
         package_manifest = ChampionManifest(

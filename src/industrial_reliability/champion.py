@@ -74,7 +74,7 @@ class ChampionScorer:
             np.abs(matrix[0] - self.median),
             1.4826 * self.mad,
             out=np.zeros_like(matrix[0]),
-            where=self.mad != 0.0,
+            where=~np.isclose(self.mad, 0.0),
         )
         evidence = tuple(
             EvidenceValueV1(

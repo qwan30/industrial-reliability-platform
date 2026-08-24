@@ -57,7 +57,7 @@ def create_app(scorer: ChampionScorer) -> FastAPI:
     def readyz() -> dict[str, Any]:
         return {"success": True, "data": {"status": "ready"}, "error": None}
 
-    @app.post("/v1/score", response_model=ScoreResponseV1)
+    @app.post("/v1/score")
     def score(request: ScoreRequestV1) -> ScoreResponseV1:
         if request.model_version != scorer.model_version:
             raise ScoringContractError(

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { ReplaySession, StartReplayParams } from '../types';
 
 export interface ReplayControlsProps {
@@ -25,7 +25,7 @@ export function ReplayControls({
   const isPaused = replay?.state === 'PAUSED';
   const hasActiveSession = Boolean(replay && (isRunning || isPaused));
 
-  const handleStart = async (e: React.FormEvent) => {
+  const handleStart = async (e: FormEvent) => {
     e.preventDefault();
     if (!isValidRange) {
       setErrorMessage('Start time must precede end time');

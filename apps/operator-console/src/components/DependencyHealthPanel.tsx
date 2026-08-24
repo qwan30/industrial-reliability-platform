@@ -1,4 +1,3 @@
-import React from 'react';
 import { ConnectionStatus, DependencyHealth } from '../types';
 
 export interface DependencyHealthPanelProps {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { ScorePayload, TelemetryPayload } from '../types';
 
 export interface LiveChartsProps {

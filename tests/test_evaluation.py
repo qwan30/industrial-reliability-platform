@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import pytest
-from tests.helpers import sample_policy, score_frame
+from tests.helpers import sample_policy
+from tests.helpers import score_frame as _score_frame
 
 from industrial_reliability.contracts import Event
 from industrial_reliability.evaluation import (
@@ -16,6 +17,16 @@ from industrial_reliability.evaluation import (
 )
 
 BASE_TIME = datetime(2022, 1, 1, 6)
+
+
+def score_frame(offsets: list[int], scores: list[float]) -> pd.DataFrame:
+    """Return schema-valid synthetic score frames."""
+    frame = _score_frame(offsets, scores)
+    return frame.assign(
+        window_start=[
+            end - timedelta(seconds=1) for end in frame["window_end"]
+        ]
+    )
 
 
 def event(
@@ -97,6 +108,34 @@ def test_anomalies_more_than_one_stride_apart_form_separate_episodes() -> None:
     )
 
     assert [episode.decision_count for episode in episodes] == [2, 1]
+
+
+def test_score_frame_requires_window_start_for_both_public_evaluators() -> None:
+    scores = _score_frame([0, 60], [0.0, 0.0])
+
+    with pytest.raises(ValueError, match="window_start"):
+        build_episodes(scores, 1.0, sample_policy())
+    with pytest.raises(ValueError, match="window_start"):
+        evaluate(
+            scores,
+            (),
+            1.0,
+            (event("event-1", 0, 60),),
+            sample_policy(),
+        )
+
+
+@pytest.mark.parametrize("starts", [[0, 0], [60, 0]])
+def test_score_frame_rejects_nonincreasing_window_starts_with_increasing_ends(
+    starts: list[int],
+) -> None:
+    scores = score_frame([60, 120], [0.0, 0.0]).assign(
+        window_start=[BASE_TIME + timedelta(seconds=start) for start in starts]
+    )
+
+    assert scores["window_end"].is_monotonic_increasing
+    with pytest.raises(ValueError, match=r"window_start.*strictly increasing"):
+        build_episodes(scores, 1.0, sample_policy())
 
 
 @pytest.mark.parametrize(

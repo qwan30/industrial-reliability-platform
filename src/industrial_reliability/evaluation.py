@@ -99,7 +99,7 @@ def _validated_scores(
 ) -> tuple[tuple[datetime, ...], NDArray[np.float64]]:
     if scores.empty:
         raise ValueError("score frame must not be empty")
-    missing = {"window_end", "score"}.difference(scores.columns)
+    missing = {"window_start", "window_end", "score"}.difference(scores.columns)
     if missing:
         raise ValueError(f"score frame is missing columns: {sorted(missing)}")
 
@@ -114,12 +114,13 @@ def _validated_scores(
     if any(current <= previous for previous, current in pairwise(ends)):
         raise ValueError("window_end must be strictly increasing")
 
-    if "window_start" in scores:
-        starts = tuple(
-            _as_naive_datetime(value, "window_start") for value in scores["window_start"]
-        )
-        if any(start > end for start, end in zip(starts, ends, strict=True)):
-            raise ValueError("window_start must not follow window_end")
+    starts = tuple(
+        _as_naive_datetime(value, "window_start") for value in scores["window_start"]
+    )
+    if any(current <= previous for previous, current in pairwise(starts)):
+        raise ValueError("window_start must be strictly increasing")
+    if any(start > end for start, end in zip(starts, ends, strict=True)):
+        raise ValueError("window_start must not follow window_end")
     return ends, values
 
 

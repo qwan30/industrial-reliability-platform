@@ -90,15 +90,18 @@ def test_autoencoder_constructor_rejects_fitted_state_injection() -> None:
 @pytest.mark.parametrize("method", ["score", "contributions"])
 def test_autoencoder_rejects_scoring_before_fit(method: str) -> None:
     detector = DenseAutoencoderDetector(epochs=1)
+    func = getattr(detector, method)
+    data = np.array([[0.0]])
 
     with pytest.raises(RuntimeError, match="fit"):
-        getattr(detector, method)(np.array([[0.0]]))
+        func(data)
 
 
 @pytest.mark.parametrize("attribute", ["scaler_mean", "scaler_scale"])
 def test_autoencoder_rejects_scaler_provenance_before_fit(attribute: str) -> None:
+    detector = DenseAutoencoderDetector(epochs=1)
     with pytest.raises(RuntimeError, match="fit"):
-        getattr(DenseAutoencoderDetector(epochs=1), attribute)
+        getattr(detector, attribute)
 
 
 @pytest.mark.parametrize(
@@ -111,8 +114,9 @@ def test_autoencoder_rejects_scaler_provenance_before_fit(attribute: str) -> Non
     ],
 )
 def test_autoencoder_rejects_invalid_training_matrices(values: np.ndarray) -> None:
+    detector = DenseAutoencoderDetector(epochs=1)
     with pytest.raises(ValueError):
-        DenseAutoencoderDetector(epochs=1).fit(values)
+        detector.fit(values)
 
 
 @pytest.mark.parametrize("epochs", [0, -1, 1.5, True])

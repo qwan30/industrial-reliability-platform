@@ -64,7 +64,11 @@ class DenseAutoencoderDetector:
         )
         model = _network(values.shape[1]).to(PHASE1.autoencoder_device)
         loss_function = nn.MSELoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=PHASE1.autoencoder_learning_rate)
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            lr=PHASE1.autoencoder_learning_rate,
+            weight_decay=0.0,
+        )
         model.train()
         for _ in range(self.epochs):
             for (batch,) in loader:

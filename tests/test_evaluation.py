@@ -65,8 +65,9 @@ def test_threshold_uses_higher_calibration_quantile() -> None:
 
 @pytest.mark.parametrize("calibration", [np.array([]), np.array([1.0, np.nan])])
 def test_threshold_rejects_empty_or_nonfinite_calibration(calibration: np.ndarray) -> None:
+    policy = sample_policy()
     with pytest.raises(ValueError):
-        calibrate_threshold(calibration, sample_policy())
+        calibrate_threshold(calibration, policy)
 
 
 def test_adjacent_anomalies_form_one_episode_from_first_window_end() -> None:
@@ -108,16 +109,18 @@ def test_anomalies_more_than_one_stride_apart_form_separate_episodes() -> None:
 
 def test_score_frame_requires_window_start_for_both_public_evaluators() -> None:
     scores = _score_frame([0, 60], [0.0, 0.0])
+    policy = sample_policy()
+    events = (event("event-1", 0, 60),)
 
     with pytest.raises(ValueError, match="window_start"):
-        build_episodes(scores, 1.0, sample_policy())
+        build_episodes(scores, 1.0, policy)
     with pytest.raises(ValueError, match="window_start"):
         evaluate(
             scores,
             (),
             1.0,
-            (event("event-1", 0, 60),),
-            sample_policy(),
+            events,
+            policy,
         )
 
 
@@ -128,10 +131,11 @@ def test_score_frame_rejects_nonincreasing_window_starts_with_increasing_ends(
     scores = score_frame([60, 120], [0.0, 0.0]).assign(
         window_start=[BASE_TIME + timedelta(seconds=start) for start in starts]
     )
+    policy = sample_policy()
 
     assert scores["window_end"].is_monotonic_increasing
     with pytest.raises(ValueError, match=r"window_start.*strictly increasing"):
-        build_episodes(scores, 1.0, sample_policy())
+        build_episodes(scores, 1.0, policy)
 
 
 @pytest.mark.parametrize(
@@ -146,8 +150,9 @@ def test_score_frame_rejects_nonincreasing_window_starts_with_increasing_ends(
 def test_episode_builder_rejects_empty_nonfinite_or_nonmonotonic_scores(
     scores: pd.DataFrame,
 ) -> None:
+    policy = sample_policy()
     with pytest.raises(ValueError):
-        build_episodes(scores, 1.0, sample_policy())
+        build_episodes(scores, 1.0, policy)
 
 
 def test_evaluation_reports_event_window_and_exposure_arithmetic() -> None:
@@ -285,27 +290,31 @@ def test_feasibility_gate_requires_every_predeclared_limit() -> None:
 
 def test_evaluation_rejects_an_event_without_a_valid_matching_decision() -> None:
     scores = score_frame([0], [0.0])
+    events = (event("event-1", 600, 720),)
+    policy = sample_policy(event_horizon_seconds=120)
 
     with pytest.raises(ValueError, match="evaluable"):
         evaluate(
             scores,
             (),
             1.0,
-            (event("event-1", 600, 720),),
-            sample_policy(event_horizon_seconds=120),
+            events,
+            policy,
         )
 
 
 def test_evaluation_rejects_zero_normal_exposure() -> None:
     contract = sample_policy(stride_seconds=60, event_horizon_seconds=120)
     scores = score_frame([480, 540, 600], [0.0, 2.0, 0.0])
+    episodes = build_episodes(scores, 1.0, contract)
+    events = (event("event-1", 600, 720),)
 
     with pytest.raises(ValueError, match="normal exposure"):
         evaluate(
             scores,
-            build_episodes(scores, 1.0, contract),
+            episodes,
             1.0,
-            (event("event-1", 600, 720),),
+            events,
             contract,
         )
 
@@ -317,11 +326,13 @@ def test_evaluation_rejects_zero_normal_exposure() -> None:
 def test_evaluation_rejects_empty_nonfinite_or_nonmonotonic_holdout(
     scores: pd.DataFrame,
 ) -> None:
+    events = (event("event-1", 0, 60),)
+    policy = sample_policy()
     with pytest.raises(ValueError):
         evaluate(
             scores,
             (),
             1.0,
-            (event("event-1", 0, 60),),
-            sample_policy(),
+            events,
+            policy,
         )

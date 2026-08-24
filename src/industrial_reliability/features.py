@@ -181,8 +181,12 @@ def _feature_manifest_payload(
     }
 
 
+def _resolve_path(path: Path) -> Path:
+    return path.resolve()
+
+
 def _claim_artifact(temporary_path: Path, destination: Path) -> None:
-    os.link(temporary_path, destination)
+    os.link(_resolve_path(temporary_path), _resolve_path(destination))
 
 
 def _unlink_if_owned(destination: Path, temporary_path: Path) -> None:
@@ -195,14 +199,51 @@ def _unlink_if_owned(destination: Path, temporary_path: Path) -> None:
         destination.unlink(missing_ok=True)
 
 
+def _process_segments_to_features(
+    segments: list[object],
+    prepared_dir: Path,
+    contract: Phase1Contract,
+    writer: pq.ParquetWriter,
+    schema: pa.Schema,
+) -> tuple[dict[str, int], dict[str, int]]:
+    prepared_root = _resolve_path(prepared_dir)
+    windows_by_split = {
+        split.name: 0 for split in (contract.train, contract.calibration, contract.holdout)
+    }
+    rejected = {"split_boundary": 0, "timestamp_gap": 0}
+
+    for segment in segments:
+        if not isinstance(segment, dict) or not isinstance(segment.get("path"), str):
+            raise DataContractError("prepared data manifest contains an invalid segment")
+        segment_path = (prepared_dir / cast(str, segment["path"])).resolve()
+        if not segment_path.is_relative_to(prepared_root):
+            raise DataContractError("prepared segment path escapes its data directory")
+        if sha256_file(segment_path) != segment.get("sha256"):
+            raise DataContractError(f"prepared segment SHA-256 mismatch: {segment_path.name}")
+
+        frame = pd.read_parquet(
+            segment_path,
+            columns=["timestamp", *contract.predictor_columns],
+        )
+        features, segment_rejected = _extract_with_rejections(frame, contract)
+        for split_name, count in features["split"].value_counts().items():
+            windows_by_split[cast(str, split_name)] += int(count)
+        for reason, count in segment_rejected.items():
+            rejected[reason] += count
+        writer.write_table(pa.Table.from_pandas(features, schema=schema, preserve_index=False))
+
+    return windows_by_split, rejected
+
+
 def build_features(
     prepared_dir: Path,
     output_path: Path,
     contract: Phase1Contract = PHASE1,
 ) -> FeatureManifest:
     """Read one prepared segment at a time and incrementally write its feature rows."""
-    manifest_path = output_path.with_suffix(".manifest.json")
-    if output_path.exists() or manifest_path.exists():
+    resolved_output_path = _resolve_path(output_path)
+    manifest_path = resolved_output_path.with_suffix(".manifest.json")
+    if resolved_output_path.exists() or manifest_path.exists():
         raise FileExistsError(f"feature destination already exists: {output_path}")
 
     contract_sha256 = cast(str, contract_manifest(contract)["contract_sha256"])
@@ -212,11 +253,7 @@ def build_features(
     if not isinstance(segments, list):
         raise DataContractError("prepared data manifest segments must be a list")
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    windows_by_split = {
-        split.name: 0 for split in (contract.train, contract.calibration, contract.holdout)
-    }
-    rejected = {"split_boundary": 0, "timestamp_gap": 0}
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
     writer: pq.ParquetWriter | None = None
     temporary_path: Path | None = None
     temporary_manifest_path: Path | None = None
@@ -224,36 +261,19 @@ def build_features(
 
     try:
         with tempfile.NamedTemporaryFile(
-            prefix=f".{output_path.name}.tmp-",
-            dir=output_path.parent,
+            prefix=f".{resolved_output_path.name}.tmp-",
+            dir=resolved_output_path.parent,
             delete=False,
         ) as temporary_handle:
             temporary_path = Path(temporary_handle.name)
         schema = _feature_schema(contract)
         writer = pq.ParquetWriter(temporary_path, schema)
-        prepared_root = prepared_dir.resolve()
-        for segment in segments:
-            if not isinstance(segment, dict) or not isinstance(segment.get("path"), str):
-                raise DataContractError("prepared data manifest contains an invalid segment")
-            segment_path = (prepared_dir / cast(str, segment["path"])).resolve()
-            if not segment_path.is_relative_to(prepared_root):
-                raise DataContractError("prepared segment path escapes its data directory")
-            if sha256_file(segment_path) != segment.get("sha256"):
-                raise DataContractError(f"prepared segment SHA-256 mismatch: {segment_path.name}")
-
-            frame = pd.read_parquet(
-                segment_path,
-                columns=["timestamp", *contract.predictor_columns],
-            )
-            features, segment_rejected = _extract_with_rejections(frame, contract)
-            for split_name, count in features["split"].value_counts().items():
-                windows_by_split[cast(str, split_name)] += int(count)
-            for reason, count in segment_rejected.items():
-                rejected[reason] += count
-            writer.write_table(pa.Table.from_pandas(features, schema=schema, preserve_index=False))
-
+        windows_by_split, rejected = _process_segments_to_features(
+            segments, prepared_dir, contract, writer, schema
+        )
         writer.close()
         writer = None
+
         output_sha256 = sha256_file(temporary_path)
         total_windows = sum(windows_by_split.values())
         payload = _feature_manifest_payload(
@@ -263,7 +283,7 @@ def build_features(
             total_windows=total_windows,
             windows_by_split=windows_by_split,
             rejected_windows_by_reason=rejected,
-            output_path=output_path.name,
+            output_path=resolved_output_path.name,
             output_sha256=output_sha256,
         )
         manifest_sha256 = hashlib.sha256(_canonical_json(payload)).hexdigest()
@@ -274,7 +294,7 @@ def build_features(
             total_windows=total_windows,
             windows_by_split=MappingProxyType(windows_by_split),
             rejected_windows_by_reason=MappingProxyType(rejected),
-            output_path=output_path.name,
+            output_path=resolved_output_path.name,
             output_sha256=output_sha256,
             manifest_sha256=manifest_sha256,
         )
@@ -288,8 +308,8 @@ def build_features(
                 _canonical_json({**payload, "manifest_sha256": manifest_sha256}) + b"\n"
             )
 
-        _claim_artifact(temporary_path, output_path)
-        claimed_paths.append((output_path, temporary_path))
+        _claim_artifact(temporary_path, resolved_output_path)
+        claimed_paths.append((resolved_output_path, temporary_path))
         _claim_artifact(temporary_manifest_path, manifest_path)
         claimed_paths.append((manifest_path, temporary_manifest_path))
         return feature_manifest

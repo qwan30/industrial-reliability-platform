@@ -41,7 +41,7 @@ class RobustStatisticalDetector:
         values = _matrix(train, "train")
         medians = cast(NDArray[np.float64], np.median(values, axis=0))
         mads = cast(NDArray[np.float64], np.median(np.abs(values - medians), axis=0))
-        feature_mask = mads != 0.0
+        feature_mask = ~np.isclose(mads, 0.0)
         if not feature_mask.any():
             raise ValueError("all training features have zero MAD")
         fitted = cast(Self, RobustStatisticalDetector())

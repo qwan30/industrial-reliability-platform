@@ -144,22 +144,18 @@ def test_prepare_dataset_records_source_faithful_manifest(
 
 
 def test_prepare_dataset_rejects_hash_mismatch(tmp_path: Path, sample_csv: Path) -> None:
+    contract = replace(sample_contract(sample_csv), dataset_sha256="0" * 64)
+    output = tmp_path / "prepared"
     with pytest.raises(DataContractError, match="SHA-256"):
-        prepare_dataset(
-            sample_csv,
-            tmp_path / "prepared",
-            contract=replace(sample_contract(sample_csv), dataset_sha256="0" * 64),
-        )
+        prepare_dataset(sample_csv, output, contract=contract)
 
 
 def test_prepare_dataset_rejects_byte_count_mismatch(tmp_path: Path, sample_csv: Path) -> None:
     contract = sample_contract(sample_csv)
+    contract_mod = replace(contract, dataset_bytes=contract.dataset_bytes + 1)
+    output = tmp_path / "prepared"
     with pytest.raises(DataContractError, match="byte count"):
-        prepare_dataset(
-            sample_csv,
-            tmp_path / "prepared",
-            contract=replace(contract, dataset_bytes=contract.dataset_bytes + 1),
-        )
+        prepare_dataset(sample_csv, output, contract=contract_mod)
 
 
 def test_prepare_dataset_rejects_wrong_header_order(tmp_path: Path, sample_csv: Path) -> None:
@@ -169,29 +165,27 @@ def test_prepare_dataset_rejects_wrong_header_order(tmp_path: Path, sample_csv: 
     with sample_csv.open("w", encoding="utf-8", newline="") as handle:
         csv.writer(handle, lineterminator="\n").writerows(rows)
 
+    contract = _contract_after_edit(sample_csv)
+    output = tmp_path / "prepared"
     with pytest.raises(DataContractError, match="header"):
-        prepare_dataset(
-            sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv)
-        )
+        prepare_dataset(sample_csv, output, contract=contract)
 
 
 def test_prepare_dataset_rejects_wrong_row_count(tmp_path: Path, sample_csv: Path) -> None:
     contract = sample_contract(sample_csv)
+    contract_mod = replace(contract, dataset_rows=contract.dataset_rows + 1)
+    output = tmp_path / "prepared"
     with pytest.raises(DataContractError, match="row count"):
-        prepare_dataset(
-            sample_csv,
-            tmp_path / "prepared",
-            contract=replace(contract, dataset_rows=contract.dataset_rows + 1),
-        )
+        prepare_dataset(sample_csv, output, contract=contract_mod)
 
 
 def test_prepare_dataset_rejects_malformed_timestamp(tmp_path: Path, sample_csv: Path) -> None:
     _rewrite_cell(sample_csv, 1, "timestamp", "not-a-timestamp")
+    contract = _contract_after_edit(sample_csv)
+    output = tmp_path / "prepared"
 
     with pytest.raises(DataContractError, match="timestamp"):
-        prepare_dataset(
-            sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv)
-        )
+        prepare_dataset(sample_csv, output, contract=contract)
 
 
 def test_prepare_dataset_rejects_non_binary_digital_value(
@@ -199,11 +193,11 @@ def test_prepare_dataset_rejects_non_binary_digital_value(
     sample_csv: Path,
 ) -> None:
     _rewrite_cell(sample_csv, 1, "COMP", 2)
+    contract = _contract_after_edit(sample_csv)
+    output = tmp_path / "prepared"
 
     with pytest.raises(DataContractError, match="binary"):
-        prepare_dataset(
-            sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv)
-        )
+        prepare_dataset(sample_csv, output, contract=contract)
 
 
 def test_prepare_dataset_rejects_non_monotonic_timestamp(
@@ -211,11 +205,11 @@ def test_prepare_dataset_rejects_non_monotonic_timestamp(
     sample_csv: Path,
 ) -> None:
     _rewrite_cell(sample_csv, 2, "timestamp", "2022-01-01 06:00:01")
+    contract = _contract_after_edit(sample_csv)
+    output = tmp_path / "prepared"
 
     with pytest.raises(DataContractError, match="strictly increasing"):
-        prepare_dataset(
-            sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv)
-        )
+        prepare_dataset(sample_csv, output, contract=contract)
 
 
 @pytest.mark.parametrize(
@@ -229,11 +223,11 @@ def test_prepare_dataset_rejects_gps_sentinel_disagreement(
     value: object,
 ) -> None:
     _rewrite_cell(sample_csv, 0, column, value)
+    contract = _contract_after_edit(sample_csv)
+    output = tmp_path / "prepared"
 
     with pytest.raises(DataContractError, match="GPS sentinel"):
-        prepare_dataset(
-            sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv)
-        )
+        prepare_dataset(sample_csv, output, contract=contract)
 
 
 def test_prepare_dataset_allows_valid_coordinates_with_zero_speed(
@@ -260,8 +254,9 @@ def test_prepare_dataset_rejects_any_existing_destination(
     if existing_kind == "nonempty":
         (output / "unrelated.txt").write_text("owner data", encoding="utf-8")
 
+    contract = sample_contract(sample_csv)
     with pytest.raises(FileExistsError, match="already exists"):
-        prepare_dataset(sample_csv, output, contract=sample_contract(sample_csv))
+        prepare_dataset(sample_csv, output, contract=contract)
 
     assert output.exists()
     assert not list(tmp_path.glob(".prepared.tmp-*"))
@@ -270,9 +265,10 @@ def test_prepare_dataset_rejects_any_existing_destination(
 def test_prepare_dataset_rejects_partial_download_without_reading_it(tmp_path: Path) -> None:
     source = tmp_path / "dataset_train.csv.crdownload"
     source.write_text("partial", encoding="utf-8")
+    output = tmp_path / "prepared"
 
     with pytest.raises(DataContractError, match="partial download"):
-        prepare_dataset(source, tmp_path / "prepared")
+        prepare_dataset(source, output)
 
     assert not (tmp_path / "prepared").exists()
 
@@ -348,11 +344,13 @@ def test_prepare_dataset_cleans_temporary_directory_when_writer_close_fails(
 
     monkeypatch.setattr(data_module.pq, "ParquetWriter", CloseFailingWriter)
 
+    contract = sample_contract(sample_csv)
+    output = tmp_path / "prepared"
     with pytest.raises(RuntimeError, match="writer close failed"):
         prepare_dataset(
             sample_csv,
-            tmp_path / "prepared",
-            contract=sample_contract(sample_csv),
+            output,
+            contract=contract,
         )
 
     assert not (tmp_path / "prepared").exists()

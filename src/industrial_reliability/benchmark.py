@@ -36,13 +36,20 @@ from industrial_reliability.models import IsolationForestDetector, RobustStatist
 SCHEMA_VERSION = "phase1-benchmark-v1"
 MIN_FREE_BYTES = 10 * 1024**3
 MODEL_IDS = ("statistical", "isolation_forest", "autoencoder")
+
+_EPISODES_FILE = "episodes.json"
+_EVENT_RESULTS_FILE = "event_results.json"
+_METRICS_FILE = "metrics.json"
+_MANIFEST_FILE = "manifest.json"
+_MANIFEST_ARTIFACT_SHA256 = "manifest.artifact_sha256"
+
 ARTIFACT_NAMES = (
     "data_manifest.json",
     "feature_manifest.json",
     "scores.parquet",
-    "episodes.json",
-    "event_results.json",
-    "metrics.json",
+    _EPISODES_FILE,
+    _EVENT_RESULTS_FILE,
+    _METRICS_FILE,
     "limitations.md",
 )
 DEPENDENCIES = ("numpy", "pandas", "pyarrow", "scikit-learn", "torch")
@@ -53,6 +60,10 @@ class BenchmarkResult:
     run_dir: Path
     manifest: Mapping[str, object]
     metrics: Mapping[str, Mapping[str, object]]
+
+
+def _resolve_path(path: Path) -> Path:
+    return path.resolve()
 
 
 def _jsonable(value: object) -> object:
@@ -78,14 +89,12 @@ def _canonical_json(value: object) -> str:
 
 
 def _write_json(path: Path, value: object) -> None:
-    path.write_text(_canonical_json(value) + "\n", encoding="utf-8")
+    _resolve_path(path).write_text(_canonical_json(value) + "\n", encoding="utf-8")
 
 
 def _existing_parent(path: Path) -> Path:
-    candidate = path.resolve()
-    while not candidate.exists():
-        if candidate.parent == candidate:
-            return candidate
+    candidate = _resolve_path(path)
+    while not candidate.exists() and candidate.parent != candidate:
         candidate = candidate.parent
     return candidate
 
@@ -312,10 +321,12 @@ def run_benchmark(
         )
 
     limitations = _limitations(contract)
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    temporary_run = Path(tempfile.mkdtemp(prefix=f".{run_id}.tmp-", dir=artifact_dir))
+    resolved_artifact_dir = _resolve_path(artifact_dir)
+    resolved_run_dir = _resolve_path(run_dir)
+    resolved_artifact_dir.mkdir(parents=True, exist_ok=True)
+    temporary_run = Path(tempfile.mkdtemp(prefix=f".{run_id}.tmp-", dir=resolved_artifact_dir))
     try:
-        shutil.copyfile(prepared_dir / "manifest.json", temporary_run / "data_manifest.json")
+        shutil.copyfile(prepared_dir / _MANIFEST_FILE, temporary_run / "data_manifest.json")
         shutil.copyfile(
             features_path.with_suffix(".manifest.json"),
             temporary_run / "feature_manifest.json",
@@ -324,9 +335,9 @@ def run_benchmark(
             temporary_run / "scores.parquet",
             index=False,
         )
-        _write_json(temporary_run / "episodes.json", episode_payload)
-        _write_json(temporary_run / "event_results.json", event_payload)
-        _write_json(temporary_run / "metrics.json", metrics)
+        _write_json(temporary_run / _EPISODES_FILE, episode_payload)
+        _write_json(temporary_run / _EVENT_RESULTS_FILE, event_payload)
+        _write_json(temporary_run / _METRICS_FILE, metrics)
         (temporary_run / "limitations.md").write_text(
             "# Phase 1 Limitations\n\n"
             + "\n".join(f"- {limitation}" for limitation in limitations)
@@ -354,8 +365,8 @@ def run_benchmark(
             "artifact_sha256": artifact_sha256,
             "limitations": list(limitations),
         }
-        _write_json(temporary_run / "manifest.json", manifest)
-        temporary_run.rename(run_dir)
+        _write_json(temporary_run / _MANIFEST_FILE, manifest)
+        temporary_run.rename(resolved_run_dir)
     except BaseException:
         shutil.rmtree(temporary_run, ignore_errors=True)
         raise
@@ -631,8 +642,8 @@ def _validate_source_artifacts(
     run_dir: Path,
     manifest: dict[str, object],
 ) -> tuple[dict[str, object], dict[str, object]]:
-    artifact_hashes = _mapping(manifest["artifact_sha256"], "manifest.artifact_sha256")
-    _exact_keys(artifact_hashes, set(ARTIFACT_NAMES), "manifest.artifact_sha256")
+    artifact_hashes = _mapping(manifest["artifact_sha256"], _MANIFEST_ARTIFACT_SHA256)
+    _exact_keys(artifact_hashes, set(ARTIFACT_NAMES), _MANIFEST_ARTIFACT_SHA256)
     for name, expected in artifact_hashes.items():
         if not isinstance(expected, str) or sha256_file(run_dir / name) != expected:
             raise ValueError(f"source artifact SHA-256 mismatch: {name}")
@@ -650,13 +661,132 @@ def _validate_source_artifacts(
     return data_manifest, feature_manifest
 
 
+def _process_single_model_aggregate(
+    model_id: str,
+    metrics: dict[str, object],
+    events: dict[str, object],
+    episodes: dict[str, object],
+    thresholds: dict[str, object],
+    parameters: dict[str, object],
+    stride_seconds: int | float,
+) -> tuple[dict[str, object], bool]:
+    metric = _mapping(metrics[model_id], f"metrics.{model_id}")
+    _exact_keys(metric, _METRIC_FIELDS, f"metrics.{model_id}")
+    if metric["threshold"] != _mapping(thresholds[model_id], model_id)["threshold"]:
+        raise ValueError(f"metrics.{model_id}.threshold disagrees with threshold provenance")
+    for key in _PUBLISHED_EVALUATION_FIELDS.difference({"event_results", "feasible"}) | {
+        "fit_seconds",
+        "score_seconds",
+    }:
+        _number(metric[key], f"metrics.{model_id}.{key}")
+    metric_parameters = _mapping(metric["model_parameters"], f"metrics.{model_id}.parameters")
+    _exact_keys(
+        metric_parameters,
+        _PARAMETER_FIELDS[model_id],
+        f"metrics.{model_id}.parameters",
+    )
+    if metric_parameters != parameters[model_id]:
+        raise ValueError(f"metrics.{model_id} parameters disagree with manifest")
+    event_results = _validate_events(events[model_id], f"event_results.{model_id}")
+    metric_events = _validate_events(
+        metric["event_results"],
+        f"metrics.{model_id}.event_results",
+    )
+    if metric_events != event_results:
+        raise ValueError(f"metrics.{model_id} event results disagree with source artifact")
+    episode_decisions = 0
+    for index, item in enumerate(_list(episodes[model_id], f"episodes.{model_id}")):
+        episode = _mapping(item, f"episodes.{model_id}[{index}]")
+        _exact_keys(episode, _PUBLISHED_EPISODE_FIELDS, f"episodes.{model_id}[{index}]")
+        _string(
+            episode["detection_time"],
+            f"episodes.{model_id}[{index}].detection_time",
+        )
+        _string(
+            episode["last_detection_time"],
+            f"episodes.{model_id}[{index}].last_detection_time",
+        )
+        decision_count = _count(
+            episode["decision_count"],
+            f"episodes.{model_id}[{index}].decision_count",
+        )
+        if decision_count == 0:
+            raise ValueError(f"episodes.{model_id}[{index}].decision_count must be positive")
+        episode_decisions += decision_count
+
+    feasible = _validate_metric_arithmetic(
+        metric,
+        event_results,
+        episode_decisions,
+        stride_seconds,
+        f"metrics.{model_id}",
+    )
+    model_aggregate = {
+        "parameters": metric_parameters,
+        "threshold": metric["threshold"],
+        "metrics": {
+            key: metric[key]
+            for key in (
+                "time_in_alert",
+                "pr_auc",
+                "detected_events",
+                "total_events",
+                "false_episodes",
+                "false_episodes_per_day",
+            )
+        },
+        "timings": {
+            "fit_seconds": metric["fit_seconds"],
+            "score_seconds": metric["score_seconds"],
+        },
+        "counts": {
+            key: metric[key]
+            for key in (
+                "valid_holdout_decisions",
+                "positive_decisions",
+                "anomalous_decisions",
+                "normal_valid_decisions",
+            )
+        },
+        "normal_exposure_days": metric["normal_exposure_days"],
+        "event_results": event_results,
+        "feasible": feasible,
+    }
+    return model_aggregate, feasible
+
+
+def _build_benchmark_markdown(aggregate: dict[str, object], selected_model: str | None) -> str:
+    models = cast(dict[str, object], aggregate["models"])
+    lines = [
+        "# Phase 1 Benchmark",
+        "",
+        f"Verdict: **{'FEASIBLE' if selected_model else 'NOT FEASIBLE'}**",
+        f"Selected model: `{selected_model or 'none'}`",
+        "",
+        "| Model | Feasible | Events | False episodes/day | Time in alert | PR-AUC |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for model_id in MODEL_IDS:
+        model = cast(dict[str, object], models[model_id])
+        model_metrics = cast(dict[str, object], model["metrics"])
+        lines.append(
+            f"| {model_id} | {model['feasible']} | "
+            f"{model_metrics['detected_events']}/{model_metrics['total_events']} | "
+            f"{model_metrics['false_episodes_per_day']} | {model_metrics['time_in_alert']} | "
+            f"{model_metrics['pr_auc']} |"
+        )
+    lines.extend(["", "## Limitations", ""])
+    lines.extend(f"- {item}" for item in cast(list[str], aggregate["limitations"]))
+    return "\n".join(lines) + "\n"
+
+
 def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Path]:
     """Publish only schema-allowlisted aggregate evidence from hashed local artifacts."""
-    run_dir = Path(run_dir)
-    output_dir = Path(output_dir)
-    manifest = _object(run_dir / "manifest.json")
-    _exact_keys(manifest, _MANIFEST_FIELDS, "manifest.json")
-    if manifest["schema_version"] != SCHEMA_VERSION or manifest["run_id"] != run_dir.name:
+    resolved_run_dir = _resolve_path(run_dir)
+    resolved_output_dir = _resolve_path(output_dir)
+    manifest = _object(resolved_run_dir / _MANIFEST_FILE)
+    _exact_keys(manifest, _MANIFEST_FIELDS, _MANIFEST_FILE)
+    if manifest["schema_version"] != SCHEMA_VERSION or manifest["run_id"] != resolved_run_dir.name:
         raise ValueError("benchmark manifest identity does not match its run directory")
     _validate_manifest_values(manifest)
     expected_run_id = (
@@ -667,7 +797,7 @@ def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Pa
     if manifest["tracked_tree_clean"] is not True:
         raise ValueError("aggregate publication requires a clean Git worktree")
 
-    data_manifest, feature_manifest = _validate_source_artifacts(run_dir, manifest)
+    data_manifest, feature_manifest = _validate_source_artifacts(resolved_run_dir, manifest)
     if data_manifest["dataset_sha256"] != manifest["dataset_sha256"]:
         raise ValueError("data manifest dataset identity disagrees with benchmark manifest")
     if data_manifest["contract_sha256"] != manifest["contract_sha256"]:
@@ -694,9 +824,9 @@ def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Pa
         _number(provenance["quantile"], f"threshold_provenance.{model_id}.quantile")
         _number(provenance["threshold"], f"threshold_provenance.{model_id}.threshold")
 
-    metrics = _object(run_dir / "metrics.json")
-    events = _object(run_dir / "event_results.json")
-    episodes = _object(run_dir / "episodes.json")
+    metrics = _object(resolved_run_dir / _METRICS_FILE)
+    events = _object(resolved_run_dir / _EVENT_RESULTS_FILE)
+    episodes = _object(resolved_run_dir / _EPISODES_FILE)
     for context, payload in (
         ("metrics", metrics),
         ("event_results", events),
@@ -704,95 +834,21 @@ def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Pa
     ):
         _exact_keys(payload, set(MODEL_IDS), context)
 
+    stride_val = manifest["stride_seconds"]
+    stride_seconds: int | float = (
+        stride_val if isinstance(stride_val, (int, float)) else float(str(stride_val))
+    )
     aggregate_models: dict[str, object] = {}
     feasibility: dict[str, bool] = {}
     for model_id in MODEL_IDS:
-        metric = _mapping(metrics[model_id], f"metrics.{model_id}")
-        _exact_keys(metric, _METRIC_FIELDS, f"metrics.{model_id}")
-        if metric["threshold"] != _mapping(thresholds[model_id], model_id)["threshold"]:
-            raise ValueError(f"metrics.{model_id}.threshold disagrees with threshold provenance")
-        for key in _PUBLISHED_EVALUATION_FIELDS.difference({"event_results", "feasible"}) | {
-            "fit_seconds",
-            "score_seconds",
-        }:
-            _number(metric[key], f"metrics.{model_id}.{key}")
-        metric_parameters = _mapping(metric["model_parameters"], f"metrics.{model_id}.parameters")
-        _exact_keys(
-            metric_parameters,
-            _PARAMETER_FIELDS[model_id],
-            f"metrics.{model_id}.parameters",
-        )
-        if metric_parameters != parameters[model_id]:
-            raise ValueError(f"metrics.{model_id} parameters disagree with manifest")
-        event_results = _validate_events(events[model_id], f"event_results.{model_id}")
-        metric_events = _validate_events(
-            metric["event_results"],
-            f"metrics.{model_id}.event_results",
-        )
-        if metric_events != event_results:
-            raise ValueError(f"metrics.{model_id} event results disagree with source artifact")
-        episode_decisions = 0
-        for index, item in enumerate(_list(episodes[model_id], f"episodes.{model_id}")):
-            episode = _mapping(item, f"episodes.{model_id}[{index}]")
-            _exact_keys(episode, _PUBLISHED_EPISODE_FIELDS, f"episodes.{model_id}[{index}]")
-            _string(
-                episode["detection_time"],
-                f"episodes.{model_id}[{index}].detection_time",
-            )
-            _string(
-                episode["last_detection_time"],
-                f"episodes.{model_id}[{index}].last_detection_time",
-            )
-            decision_count = _count(
-                episode["decision_count"],
-                f"episodes.{model_id}[{index}].decision_count",
-            )
-            if decision_count == 0:
-                raise ValueError(f"episodes.{model_id}[{index}].decision_count must be positive")
-            episode_decisions += decision_count
-
-        feasible = _validate_metric_arithmetic(
-            metric,
-            event_results,
-            episode_decisions,
-            cast("int | float", manifest["stride_seconds"]),
-            f"metrics.{model_id}",
+        model_aggregate, feasible = _process_single_model_aggregate(
+            model_id, metrics, events, episodes, thresholds, parameters, stride_seconds
         )
         feasibility[model_id] = feasible
-        aggregate_models[model_id] = {
-            "parameters": metric_parameters,
-            "threshold": metric["threshold"],
-            "metrics": {
-                key: metric[key]
-                for key in (
-                    "time_in_alert",
-                    "pr_auc",
-                    "detected_events",
-                    "total_events",
-                    "false_episodes",
-                    "false_episodes_per_day",
-                )
-            },
-            "timings": {
-                "fit_seconds": metric["fit_seconds"],
-                "score_seconds": metric["score_seconds"],
-            },
-            "counts": {
-                key: metric[key]
-                for key in (
-                    "valid_holdout_decisions",
-                    "positive_decisions",
-                    "anomalous_decisions",
-                    "normal_valid_decisions",
-                )
-            },
-            "normal_exposure_days": metric["normal_exposure_days"],
-            "event_results": event_results,
-            "feasible": feasible,
-        }
+        aggregate_models[model_id] = model_aggregate
 
     selected_model = next((model_id for model_id in MODEL_IDS if feasibility[model_id]), None)
-    artifact_hashes = _mapping(manifest["artifact_sha256"], "manifest.artifact_sha256")
+    artifact_hashes = _mapping(manifest["artifact_sha256"], _MANIFEST_ARTIFACT_SHA256)
     aggregate: dict[str, object] = {
         "schema_version": manifest["schema_version"],
         "dataset_sha256": manifest["dataset_sha256"],
@@ -816,32 +872,13 @@ def publish_aggregate_results(run_dir: Path, output_dir: Path) -> tuple[Path, Pa
         "source_artifact_sha256": artifact_hashes,
     }
 
-    json_path, markdown_path = _aggregate_output_paths(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path, markdown_path = _aggregate_output_paths(resolved_output_dir)
+    resolved_output_dir.mkdir(parents=True, exist_ok=True)
     _write_json(json_path, aggregate)
-
-    models = cast(dict[str, object], aggregate["models"])
-    lines = [
-        "# Phase 1 Benchmark",
-        "",
-        f"Verdict: **{'FEASIBLE' if selected_model else 'NOT FEASIBLE'}**",
-        f"Selected model: `{selected_model or 'none'}`",
-        "",
-        "| Model | Feasible | Events | False episodes/day | Time in alert | PR-AUC |",
-        "|---|---:|---:|---:|---:|---:|",
-    ]
-    for model_id in MODEL_IDS:
-        model = cast(dict[str, object], models[model_id])
-        model_metrics = cast(dict[str, object], model["metrics"])
-        lines.append(
-            f"| {model_id} | {model['feasible']} | "
-            f"{model_metrics['detected_events']}/{model_metrics['total_events']} | "
-            f"{model_metrics['false_episodes_per_day']} | {model_metrics['time_in_alert']} | "
-            f"{model_metrics['pr_auc']} |"
-        )
-    lines.extend(["", "## Limitations", ""])
-    lines.extend(f"- {item}" for item in cast(list[str], aggregate["limitations"]))
-    markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _resolve_path(markdown_path).write_text(
+        _build_benchmark_markdown(aggregate, selected_model),
+        encoding="utf-8",
+    )
     return json_path, markdown_path
 
 

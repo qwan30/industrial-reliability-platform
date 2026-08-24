@@ -445,11 +445,12 @@ def test_benchmark_writes_complete_reproducible_manifest_and_routes_splits(
             payload,
             update_embedded_hash=False,
         )
+        rejected_dir = tmp_path / f"rejected-{field.replace('_', '-')}"
         try:
             with pytest.raises(ValueError, match=message):
                 publish_aggregate_results(
                     first.run_dir,
-                    tmp_path / f"rejected-{field.replace('_', '-')}",
+                    rejected_dir,
                 )
         finally:
             _restore_hashed_artifact(
@@ -558,12 +559,16 @@ def test_benchmark_rejects_low_disk_before_preparation(
     )
     monkeypatch.setattr(benchmark, "prepare_dataset", prepare_not_expected)
 
+    missing = tmp_path / "missing.csv"
+    work = tmp_path / "work"
+    artifacts = tmp_path / "artifacts"
+    contract = replace(PHASE1, dataset_sha256="fixture")
     with pytest.raises(RuntimeError, match="10 GiB"):
         run_benchmark(
-            tmp_path / "missing.csv",
-            tmp_path / "work",
-            tmp_path / "artifacts",
-            contract=replace(PHASE1, dataset_sha256="fixture"),
+            missing,
+            work,
+            artifacts,
+            contract=contract,
             autoencoder_epochs=1,
             require_clean_git=False,
         )
@@ -610,21 +615,25 @@ def test_clean_tree_allows_only_untracked_codex_descendants(
         lambda _: SimpleNamespace(total=20 * GIB, used=1 * GIB, free=19 * GIB),
     )
 
+    missing = tmp_path / "missing.csv"
+    work_allowed = tmp_path / "work-allowed"
+    artifacts = tmp_path / "artifacts"
     with pytest.raises(FileNotFoundError):
         run_benchmark(
-            tmp_path / "missing.csv",
-            tmp_path / "work-allowed",
-            tmp_path / "artifacts",
+            missing,
+            work_allowed,
+            artifacts,
         )
 
     rogue = repo / "src" / "rogue.py"
     rogue.parent.mkdir()
     rogue.write_text("ROGUE = True\n", encoding="utf-8")
+    work_rejected = tmp_path / "work-rejected"
     with pytest.raises(RuntimeError, match=r"src/rogue\.py"):
         run_benchmark(
-            tmp_path / "missing.csv",
-            tmp_path / "work-rejected",
-            tmp_path / "artifacts",
+            missing,
+            work_rejected,
+            artifacts,
         )
 
 
@@ -633,11 +642,13 @@ def test_benchmark_rejects_source_hash_mismatch(tmp_path: Path) -> None:
     contract = _benchmark_contract(source)
     source.write_text(source.read_text(encoding="utf-8") + "tampered\n", encoding="utf-8")
 
+    work = tmp_path / "work"
+    artifacts = tmp_path / "artifacts"
     with pytest.raises(DataContractError, match=r"byte count|SHA-256"):
         run_benchmark(
             source,
-            tmp_path / "work",
-            tmp_path / "artifacts",
+            work,
+            artifacts,
             contract=contract,
             autoencoder_epochs=1,
             require_clean_git=False,
@@ -646,13 +657,16 @@ def test_benchmark_rejects_source_hash_mismatch(tmp_path: Path) -> None:
 
 def test_benchmark_rejects_missing_split_windows(tmp_path: Path) -> None:
     source = _sample_csv(tmp_path / "short.csv", periods=180)
+    work = tmp_path / "work"
+    artifacts = tmp_path / "artifacts"
+    contract = _benchmark_contract(source)
 
     with pytest.raises(ValueError, match=r"calibration.*holdout|missing.*split"):
         run_benchmark(
             source,
-            tmp_path / "work",
-            tmp_path / "artifacts",
-            contract=_benchmark_contract(source),
+            work,
+            artifacts,
+            contract=contract,
             autoencoder_epochs=1,
             require_clean_git=False,
         )
@@ -671,12 +685,15 @@ def test_benchmark_rejects_stale_work_directory(
         lambda _: SimpleNamespace(total=20 * GIB, used=1 * GIB, free=19 * GIB),
     )
 
+    missing = tmp_path / "missing.csv"
+    artifacts = tmp_path / "artifacts"
+    contract = replace(PHASE1, dataset_sha256="fixture")
     with pytest.raises(FileExistsError, match="nonempty"):
         run_benchmark(
-            tmp_path / "missing.csv",
+            missing,
             work_dir,
-            tmp_path / "artifacts",
-            contract=replace(PHASE1, dataset_sha256="fixture"),
+            artifacts,
+            contract=contract,
             autoencoder_epochs=1,
             require_clean_git=False,
         )
@@ -692,21 +709,28 @@ def test_full_contract_rejects_epoch_override_before_dataset_access(
         lambda _: SimpleNamespace(total=20 * GIB, used=1 * GIB, free=19 * GIB),
     )
 
+    missing = tmp_path / "missing.csv"
+    work = tmp_path / "work"
+    artifacts = tmp_path / "artifacts"
     with pytest.raises(ValueError, match="epoch override"):
         run_benchmark(
-            tmp_path / "missing.csv",
-            tmp_path / "work",
-            tmp_path / "artifacts",
+            missing,
+            work,
+            artifacts,
             autoencoder_epochs=1,
             require_clean_git=False,
         )
 
+    copied = tmp_path / "copied-full-dataset.csv"
+    work_copy = tmp_path / "work-copy"
+    artifacts_copy = tmp_path / "artifacts-copy"
+    contract_copy = replace(PHASE1, dataset_path="copied-full-dataset.csv")
     with pytest.raises(ValueError, match="epoch override"):
         run_benchmark(
-            tmp_path / "copied-full-dataset.csv",
-            tmp_path / "work-copy",
-            tmp_path / "artifacts-copy",
-            contract=replace(PHASE1, dataset_path="copied-full-dataset.csv"),
+            copied,
+            work_copy,
+            artifacts_copy,
+            contract=contract_copy,
             autoencoder_epochs=1,
             require_clean_git=False,
         )
@@ -724,12 +748,16 @@ def test_full_identity_rejects_mutated_contract_epochs_before_dataset_access(
         lambda _: SimpleNamespace(total=20 * GIB, used=1 * GIB, free=19 * GIB),
     )
 
+    missing = tmp_path / "missing.csv"
+    work = tmp_path / "work"
+    artifacts = tmp_path / "artifacts"
+    contract = replace(PHASE1, autoencoder_epochs=1)
     with pytest.raises(ValueError, match="model settings"):
         run_benchmark(
-            tmp_path / "missing.csv",
-            tmp_path / "work",
-            tmp_path / "artifacts",
-            contract=replace(PHASE1, autoencoder_epochs=1),
+            missing,
+            work,
+            artifacts,
+            contract=contract,
             autoencoder_epochs=override,
             require_clean_git=False,
         )
@@ -747,12 +775,16 @@ def test_full_identity_rejects_float_contract_epochs_before_dataset_access(
         lambda _: SimpleNamespace(total=20 * GIB, used=1 * GIB, free=19 * GIB),
     )
 
+    missing = tmp_path / "missing.csv"
+    work = tmp_path / "work"
+    artifacts = tmp_path / "artifacts"
+    contract = replace(PHASE1, autoencoder_epochs=20.0)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="positive built-in int"):
         run_benchmark(
-            tmp_path / "missing.csv",
-            tmp_path / "work",
-            tmp_path / "artifacts",
-            contract=replace(PHASE1, autoencoder_epochs=20.0),  # type: ignore[arg-type]
+            missing,
+            work,
+            artifacts,
+            contract=contract,
             autoencoder_epochs=override,
             require_clean_git=False,
         )
@@ -852,12 +884,16 @@ def test_runner_rejects_non_phase1_hardcoded_model_settings_before_dataset_acces
         lambda _: SimpleNamespace(total=20 * GIB, used=1 * GIB, free=19 * GIB),
     )
 
+    missing = tmp_path / "missing.csv"
+    work = tmp_path / "work"
+    artifacts = tmp_path / "artifacts"
+    contract = replace(PHASE1, **{field_name: changed_value})
     with pytest.raises(ValueError, match="model settings"):
         run_benchmark(
-            tmp_path / "missing.csv",
-            tmp_path / "work",
-            tmp_path / "artifacts",
-            contract=replace(PHASE1, **{field_name: changed_value}),
+            missing,
+            work,
+            artifacts,
+            contract=contract,
             require_clean_git=False,
         )
 

@@ -27,8 +27,10 @@ def test_robust_detector_excludes_zero_mad_features() -> None:
 
 
 def test_robust_detector_rejects_training_with_only_zero_mad_features() -> None:
+    detector = RobustStatisticalDetector()
+    matrix = np.array([[2.0, 2.0], [2.0, 2.0]])
     with pytest.raises(ValueError, match="all training features have zero MAD"):
-        RobustStatisticalDetector().fit(np.array([[2.0, 2.0], [2.0, 2.0]]))
+        detector.fit(matrix)
 
 
 def test_isolation_forest_is_deterministic() -> None:
@@ -62,8 +64,10 @@ def test_isolation_forest_returns_negative_score_samples() -> None:
 
 @pytest.mark.parametrize("detector", [RobustStatisticalDetector, IsolationForestDetector])
 def test_detectors_reject_scoring_before_fit(detector: type[object]) -> None:
+    instance = detector()  # type: ignore[operator]
+    data = np.array([[0.0]])
     with pytest.raises(RuntimeError, match="fit"):
-        detector().score(np.array([[0.0]]))  # type: ignore[attr-defined]
+        instance.score(data)  # type: ignore[attr-defined]
 
 
 def test_detector_constructors_reject_fitted_state_injection() -> None:
@@ -99,8 +103,9 @@ def test_fit_returns_fresh_detector_and_leaves_original_unfitted(
 def test_detectors_reject_invalid_training_matrices(
     detector: type[object], values: np.ndarray
 ) -> None:
+    instance = detector()  # type: ignore[operator]
     with pytest.raises(ValueError):
-        detector().fit(values)  # type: ignore[attr-defined]
+        instance.fit(values)  # type: ignore[attr-defined]
 
 
 @pytest.mark.parametrize("detector", [RobustStatisticalDetector, IsolationForestDetector])

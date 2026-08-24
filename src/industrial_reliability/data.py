@@ -75,9 +75,14 @@ _FLOAT_COLUMNS = (
 _EPOCH = datetime(1970, 1, 1)
 
 
+def _resolve_path(path: Path) -> Path:
+    return path.resolve()
+
+
 def sha256_file(path: Path) -> str:
     """Hash a file without loading it into memory."""
-    with path.open("rb") as handle:
+    resolved_path = _resolve_path(path)
+    with resolved_path.open("rb") as handle:
         return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
@@ -168,17 +173,9 @@ def _manifest_payload(
     )
 
 
-def prepare_dataset(
-    source: Path,
-    output_dir: Path,
-    contract: Phase1Contract = PHASE1,
-) -> PreparationManifest:
-    """Validate source identity and write one Parquet file per 1 Hz segment."""
-    if output_dir.exists():
-        raise FileExistsError(f"destination already exists: {output_dir}")
+def _validate_source_file(source: Path, contract: Phase1Contract) -> tuple[int, str]:
     if source.name.lower().endswith(".crdownload"):
         raise DataContractError("refusing to read a partial download")
-
     dataset_bytes = source.stat().st_size
     if dataset_bytes != contract.dataset_bytes:
         raise DataContractError(
@@ -187,13 +184,15 @@ def prepare_dataset(
     dataset_sha256 = sha256_file(source)
     if dataset_sha256 != contract.dataset_sha256:
         raise DataContractError("source SHA-256 does not match contract")
+    return dataset_bytes, dataset_sha256
 
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.tmp-", dir=output_dir.parent))
-    segments_dir = temporary / "segments"
-    segments_dir.mkdir()
 
-    reader: pacsv.CSVStreamingReader | None = None
+def _process_csv_batches(
+    reader: pacsv.CSVStreamingReader,
+    segments_dir: Path,
+    temporary: Path,
+    contract: Phase1Contract,
+) -> tuple[list[SegmentManifest], int, int]:
     writer: pq.ParquetWriter | None = None
     segment_id = 0
     segment_path: Path | None = None
@@ -231,17 +230,6 @@ def prepare_dataset(
         segment_rows = 0
 
     try:
-        reader = pacsv.open_csv(
-            source,
-            read_options=pacsv.ReadOptions(block_size=1 << 20, use_threads=False),
-            convert_options=pacsv.ConvertOptions(
-                column_types=_column_types(),
-                timestamp_parsers=["%Y-%m-%d %H:%M:%S"],
-            ),
-        )
-        if tuple(reader.schema.names) != contract.source_columns:
-            raise DataContractError("source header or column order does not match contract")
-
         for batch in reader:
             timestamps = _validate_batch(batch)
             if not len(timestamps):
@@ -282,6 +270,54 @@ def prepare_dataset(
             previous_timestamp = int(timestamps[-1])
 
         close_segment()
+    finally:
+        if writer is not None:
+            with suppress(Exception):
+                writer.close()
+
+    return segments, total_rows, gap_count
+
+
+def prepare_dataset(
+    source: Path,
+    output_dir: Path,
+    contract: Phase1Contract = PHASE1,
+) -> PreparationManifest:
+    """Validate source identity and write one Parquet file per 1 Hz segment."""
+    resolved_source = _resolve_path(source)
+    resolved_output_dir = _resolve_path(output_dir)
+    if resolved_output_dir.exists():
+        raise FileExistsError(f"destination already exists: {output_dir}")
+
+    dataset_bytes, dataset_sha256 = _validate_source_file(resolved_source, contract)
+
+    resolved_output_dir.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(
+        tempfile.mkdtemp(
+            prefix=f".{resolved_output_dir.name}.tmp-",
+            dir=resolved_output_dir.parent,
+        )
+    )
+    segments_dir = temporary / "segments"
+    segments_dir.mkdir()
+
+    reader: pacsv.CSVStreamingReader | None = None
+    try:
+        reader = pacsv.open_csv(
+            resolved_source,
+            read_options=pacsv.ReadOptions(block_size=1 << 20, use_threads=False),
+            convert_options=pacsv.ConvertOptions(
+                column_types=_column_types(),
+                timestamp_parsers=["%Y-%m-%d %H:%M:%S"],
+            ),
+        )
+        if tuple(reader.schema.names) != contract.source_columns:
+            raise DataContractError("source header or column order does not match contract")
+
+        segments, total_rows, gap_count = _process_csv_batches(
+            reader, segments_dir, temporary, contract
+        )
+
         if total_rows != contract.dataset_rows:
             raise DataContractError(
                 f"source row count {total_rows} does not match contract {contract.dataset_rows}"
@@ -319,26 +355,24 @@ def prepare_dataset(
         (temporary / "manifest.json").write_bytes(
             _canonical_json({**payload, "manifest_sha256": manifest_sha256}) + b"\n"
         )
-        temporary.rename(output_dir)
+        temporary.rename(resolved_output_dir)
         return manifest
     except (pa.ArrowInvalid, pa.ArrowKeyError) as error:
         raise DataContractError(f"source timestamp or value is malformed: {error}") from error
     finally:
         primary_error = sys.exception()
-        cleanup_error: BaseException | None = None
-        for resource in (reader, writer):
-            if resource is None:
-                continue
+        cleanup_error: Exception | None = None
+        if reader is not None:
             try:
-                resource.close()
-            except BaseException as error:
+                reader.close()
+            except Exception as error:
                 cleanup_error = cleanup_error or error
-                with suppress(BaseException):
-                    resource.close()
+                with suppress(Exception):
+                    reader.close()
         try:
             if temporary.exists():
                 shutil.rmtree(temporary)
-        except BaseException as error:
+        except Exception as error:
             cleanup_error = cleanup_error or error
         if primary_error is None and cleanup_error is not None:
             raise cleanup_error

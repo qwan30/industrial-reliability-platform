@@ -98,13 +98,12 @@ def test_score_decision_and_envelope_serialization() -> None:
     assert "champion-statistical-v1" in json_str
     assert resp.success is True
 
-    err_resp = ErrorResponseV1.model_validate(
-        {
-            "success": False,
-            "data": None,
-            "error": {"code": "SCORING_CONTRACT_MISMATCH", "message": "Model mismatch"},
-        }
-    )
+    err_payload = {
+        "success": False,
+        "data": None,
+        "error": {"code": "SCORING_CONTRACT_MISMATCH", "message": "Model mismatch"},
+    }
+    err_resp = ErrorResponseV1.model_validate(err_payload)
     assert err_resp.success is False
     assert err_resp.error.code == "SCORING_CONTRACT_MISMATCH"
 
@@ -133,36 +132,38 @@ def test_replay_command_validation() -> None:
     assert start_cmd.speed == 100
 
     # START without range must fail
+    bad_start = {
+        "message_id": msg_id,
+        "replay_session_id": session_id,
+        "source_dataset_sha256": "a" * 64,
+        "contract_sha256": "b" * 64,
+        "source_timestamp": datetime(2020, 3, 1, 0, 0),
+        "emitted_at": now_utc,
+        "command_id": cmd_id,
+        "action": "START",
+        "speed": 100,
+        "range_start": None,
+        "range_end": None,
+    }
     with pytest.raises(ValidationError, match="requires range_start and range_end"):
-        ReplayCommandV1(
-            message_id=msg_id,
-            replay_session_id=session_id,
-            source_dataset_sha256="a" * 64,
-            contract_sha256="b" * 64,
-            source_timestamp=datetime(2020, 3, 1, 0, 0),
-            emitted_at=now_utc,
-            command_id=cmd_id,
-            action="START",
-            speed=100,
-            range_start=None,
-            range_end=None,
-        )
+        ReplayCommandV1.model_validate(bad_start)
 
     # PAUSE with range must fail
+    bad_pause = {
+        "message_id": msg_id,
+        "replay_session_id": session_id,
+        "source_dataset_sha256": "a" * 64,
+        "contract_sha256": "b" * 64,
+        "source_timestamp": datetime(2020, 3, 1, 0, 0),
+        "emitted_at": now_utc,
+        "command_id": cmd_id,
+        "action": "PAUSE",
+        "speed": 100,
+        "range_start": datetime(2020, 3, 1, 0, 0),
+        "range_end": datetime(2020, 3, 1, 1, 0),
+    }
     with pytest.raises(ValidationError, match="must not specify range_start"):
-        ReplayCommandV1(
-            message_id=msg_id,
-            replay_session_id=session_id,
-            source_dataset_sha256="a" * 64,
-            contract_sha256="b" * 64,
-            source_timestamp=datetime(2020, 3, 1, 0, 0),
-            emitted_at=now_utc,
-            command_id=cmd_id,
-            action="PAUSE",
-            speed=100,
-            range_start=datetime(2020, 3, 1, 0, 0),
-            range_end=datetime(2020, 3, 1, 1, 0),
-        )
+        ReplayCommandV1.model_validate(bad_pause)
 
 
 def test_replay_status_validation() -> None:
@@ -185,18 +186,19 @@ def test_replay_status_validation() -> None:
     assert status.error_code is None
 
     # FAILED without error_code must fail
+    bad_failed = {
+        "message_id": msg_id,
+        "replay_session_id": session_id,
+        "source_dataset_sha256": "a" * 64,
+        "contract_sha256": "b" * 64,
+        "source_timestamp": datetime(2020, 3, 1, 0, 0),
+        "emitted_at": now_utc,
+        "state": "FAILED",
+        "last_sequence": 10,
+        "error_code": None,
+    }
     with pytest.raises(ValidationError, match="FAILED state requires non-empty error_code"):
-        ReplayStatusV1(
-            message_id=msg_id,
-            replay_session_id=session_id,
-            source_dataset_sha256="a" * 64,
-            contract_sha256="b" * 64,
-            source_timestamp=datetime(2020, 3, 1, 0, 0),
-            emitted_at=now_utc,
-            state="FAILED",
-            last_sequence=10,
-            error_code=None,
-        )
+        ReplayStatusV1.model_validate(bad_failed)
 
 
 def test_telemetry_event_validation() -> None:
@@ -233,32 +235,33 @@ def test_telemetry_event_validation() -> None:
     assert te.comp == 1
 
     # Non-binary digital value must fail
+    bad_te = {
+        "message_id": msg_id,
+        "replay_session_id": session_id,
+        "source_dataset_sha256": "a" * 64,
+        "contract_sha256": "b" * 64,
+        "source_timestamp": datetime(2020, 3, 1, 0, 0),
+        "emitted_at": now_utc,
+        "machine_id": "compressor-01",
+        "sequence": 1,
+        "tp2": 1.0,
+        "tp3": 2.0,
+        "h1": 3.0,
+        "dv_pressure": 4.0,
+        "reservoirs": 5.0,
+        "oil_temperature": 6.0,
+        "motor_current": 7.0,
+        "comp": 2,
+        "dv_electric": 0,
+        "towers": 1,
+        "mpg": 0,
+        "lps": 1,
+        "pressure_switch": 0,
+        "oil_level": 1,
+        "caudal_impulses": 0,
+    }
     with pytest.raises(ValidationError):
-        TelemetryEventV1(
-            message_id=msg_id,
-            replay_session_id=session_id,
-            source_dataset_sha256="a" * 64,
-            contract_sha256="b" * 64,
-            source_timestamp=datetime(2020, 3, 1, 0, 0),
-            emitted_at=now_utc,
-            machine_id="compressor-01",
-            sequence=1,
-            tp2=1.0,
-            tp3=2.0,
-            h1=3.0,
-            dv_pressure=4.0,
-            reservoirs=5.0,
-            oil_temperature=6.0,
-            motor_current=7.0,
-            comp=2,  # type: ignore[arg-type]
-            dv_electric=0,
-            towers=1,
-            mpg=0,
-            lps=1,
-            pressure_switch=0,
-            oil_level=1,
-            caudal_impulses=0,
-        )
+        TelemetryEventV1.model_validate(bad_te)
 
 
 def test_quarantine_record_validation() -> None:

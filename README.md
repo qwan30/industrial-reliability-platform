@@ -2,7 +2,7 @@
 
 Production-oriented industrial anomaly detection and reliability intelligence platform.
 
-> **Status:** Phase 0 — repository scaffold and CI quality pipeline.
+> **Status:** Phase 1 offline ML feasibility — **NOT FEASIBLE** on the frozen MetroPT holdout; no model met the predeclared gate. This is offline evidence, not production readiness. See the [aggregate Phase 1 result](docs/results/phase-1-offline-ml-feasibility.md).
 > Master specification: `docs/superpowers/specs/2026-08-23-industrial-reliability-intelligence-platform-design.md`
 
 ## Development setup

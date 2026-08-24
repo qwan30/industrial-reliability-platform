@@ -94,6 +94,15 @@ services:
       postgres:
         condition: service_healthy
 
+  operator-console:
+    build:
+      context: ./apps/operator-console
+      dockerfile: Dockerfile
+    ports: ["127.0.0.1:5173:80"]
+    depends_on:
+      scoring-api:
+        condition: service_healthy
+
 volumes:
   kafka-data:
   postgres-data:

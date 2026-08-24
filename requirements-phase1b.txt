@@ -19,7 +19,7 @@ pandas-stubs==2.3.3.260113
 pandas==2.3.3
 pathspec==1.1.1
 pluggy==1.6.0
-pyarrow==23.0.1
+pyarrow==25.0.1
 Pygments==2.21.0
 pyproject_hooks==1.2.0
 pytest-cov==7.1.0

@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
 
 from industrial_reliability.champion import (
     ChampionIntegrityError,
+    ChampionScorer,
     ScoringContractError,
     load_champion,
 )
@@ -52,6 +54,39 @@ def _make_feature_vector(
                 datetime(2020, 2, 25, 0, 25),
                 datetime(2020, 2, 25, 0, 30),
             ),
+        ),
+    )
+
+
+def golden_case_to_feature_vector(case: dict[str, Any], scorer: ChampionScorer) -> FeatureVectorV1:
+    w_start = datetime.fromisoformat(case["window_start"])
+    w_end = datetime.fromisoformat(case["window_end"])
+    step = (w_end - w_start) / 6
+    bin_ends = (
+        w_start + step * 1,
+        w_start + step * 2,
+        w_start + step * 3,
+        w_start + step * 4,
+        w_start + step * 5,
+        w_end,
+    )
+    return FeatureVectorV1(
+        schema_version="feature-vector-v1",
+        message_id=uuid4(),
+        replay_session_id=uuid4(),
+        source_dataset_sha256=scorer.source_dataset_sha256,
+        contract_sha256=scorer.contract_sha256,
+        source_timestamp=w_end,
+        emitted_at=datetime.now(UTC),
+        window_id=uuid4(),
+        machine_id="compressor-01",
+        window_start=w_start,
+        window_end=w_end,
+        feature_names=tuple(case["feature_names"]),
+        feature_values=tuple(case["feature_values"]),
+        coverage=CoverageEvidenceV1(
+            observations_by_bin=(30, 30, 30, 30, 30, 30),
+            bin_ends=bin_ends,
         ),
     )
 
@@ -103,34 +138,7 @@ def test_all_golden_cases_match_package(tmp_path: Path) -> None:
 
     golden_data = json.loads((pkg_dir / "golden-cases.json").read_text(encoding="utf-8"))
     for case in golden_data["cases"]:
-        w_start = datetime.fromisoformat(case["window_start"])
-        w_end = datetime.fromisoformat(case["window_end"])
-        fv = FeatureVectorV1(
-            schema_version="feature-vector-v1",
-            message_id=uuid4(),
-            replay_session_id=uuid4(),
-            source_dataset_sha256=scorer.source_dataset_sha256,
-            contract_sha256=scorer.contract_sha256,
-            source_timestamp=w_end,
-            emitted_at=datetime.now(UTC),
-            window_id=uuid4(),
-            machine_id="compressor-01",
-            window_start=w_start,
-            window_end=w_end,
-            feature_names=tuple(case["feature_names"]),
-            feature_values=tuple(case["feature_values"]),
-            coverage=CoverageEvidenceV1(
-                observations_by_bin=(30, 30, 30, 30, 30, 30),
-                bin_ends=(
-                    w_start + (w_end - w_start) / 6 * 1,
-                    w_start + (w_end - w_start) / 6 * 2,
-                    w_start + (w_end - w_start) / 6 * 3,
-                    w_start + (w_end - w_start) / 6 * 4,
-                    w_start + (w_end - w_start) / 6 * 5,
-                    w_end,
-                ),
-            ),
-        )
+        fv = golden_case_to_feature_vector(case, scorer)
         scored = scorer.score(fv)
         assert scored.score == pytest.approx(case["expected_score"], abs=1e-9)
         assert scored.is_anomaly == case["expected_is_anomaly"]

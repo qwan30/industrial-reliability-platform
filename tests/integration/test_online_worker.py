@@ -1,0 +1,154 @@
+from __future__ import annotations
+
+import asyncio
+import contextlib
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import uuid4
+
+import numpy as np
+import pytest
+from tests.helpers_replay import make_sample_replay_command
+from tests.test_replay import _create_mock_parquet
+
+from industrial_reliability.champion import ChampionScorer
+from industrial_reliability.kafka_io import (
+    KafkaSettings,
+    decode_message,
+    encode_message,
+)
+from industrial_reliability.models import RobustStatisticalDetector
+from industrial_reliability.replay import ReplaySource
+from industrial_reliability.replay_service import ReplayService
+from industrial_reliability.runtime_messages import (
+    FEATURES_TOPIC,
+    REPLAY_COMMANDS_TOPIC,
+    SCORES_TOPIC,
+    FeatureVectorV1,
+    ScoreDecisionV1,
+)
+from industrial_reliability.worker import StreamingWorker, WorkerSettings
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_online_worker_stream_features_and_scores(tmp_path: Path) -> None:
+    try:
+        from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+
+        producer = AIOKafkaProducer(bootstrap_servers="localhost:29092")
+        await asyncio.wait_for(producer.start(), timeout=1.5)
+        await producer.stop()
+    except Exception:
+        pytest.skip("Kafka broker unavailable at localhost:29092")
+
+    # 1. Setup mock data and detector
+    pq_path = _create_mock_parquet(tmp_path, n_rows=200)
+    train_data = np.array([[1.0, 2.0], [1.1, 2.1], [0.9, 1.9]], dtype=np.float64)
+    detector = RobustStatisticalDetector().fit(train_data)
+    feature_names = ("tp2_mean", "dv_pressure_mean")
+    scorer = ChampionScorer(
+        detector=detector,
+        feature_names=feature_names,
+        evidence_median=np.array([1.0, 2.0]),
+        evidence_mad=np.array([0.1, 0.1]),
+        threshold=1.0,
+        model_version="champion-statistical-v1",
+        contract_sha256="b" * 64,
+        source_dataset_sha256="a" * 64,
+    )
+
+    # 2. Start replay service and streaming worker
+    kafka_settings = KafkaSettings(bootstrap_servers="localhost:29092")
+    source = ReplaySource(pq_path)
+    replay_service = ReplayService(kafka_settings, source, enable_pacing=False)
+
+    worker_settings = WorkerSettings(
+        bootstrap_servers="localhost:29092",
+        scoring_api_url="http://localhost:8000",
+        model_version="champion-statistical-v1",
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+        feature_names=feature_names,
+    )
+
+    # Direct scorer mock client for in-process test
+    class MockDirectClient:
+        def __init__(self, sc: ChampionScorer) -> None:
+            self.sc = sc
+
+        async def score(self, f: FeatureVectorV1) -> ScoreDecisionV1:
+            res = self.sc.score(f)
+            return ScoreDecisionV1(
+                message_id=uuid4(),
+                replay_session_id=f.replay_session_id,
+                source_dataset_sha256=f.source_dataset_sha256,
+                contract_sha256=f.contract_sha256,
+                source_timestamp=f.source_timestamp,
+                emitted_at=datetime.now(UTC),
+                decision_id=uuid4(),
+                window_id=f.window_id,
+                model_version=self.sc.model_version,
+                score=res.score,
+                threshold=res.threshold,
+                is_anomaly=res.is_anomaly,
+                evidence_vector=res.evidence_vector,
+            )
+
+        async def close(self) -> None:
+            pass
+
+    worker = StreamingWorker(worker_settings, scoring_client=MockDirectClient(scorer))  # type: ignore[arg-type]
+
+    service_task = asyncio.create_task(replay_service.run())
+    worker_task = asyncio.create_task(worker.run())
+    await asyncio.sleep(0.5)
+
+    try:
+        session_id = uuid4()
+        cmd = make_sample_replay_command(
+            action="START",
+            session_id=session_id,
+            speed=1000,
+            range_start=datetime(2020, 3, 1, 0, 0, 0),
+            range_end=datetime(2020, 3, 1, 0, 35, 0),
+        )
+
+        test_producer = AIOKafkaProducer(bootstrap_servers="localhost:29092")
+        await test_producer.start()
+        await test_producer.send_and_wait(
+            REPLAY_COMMANDS_TOPIC,
+            value=encode_message(cmd),
+            key=str(cmd.command_id).encode("utf-8"),
+        )
+        await test_producer.stop()
+
+        consumer = AIOKafkaConsumer(
+            FEATURES_TOPIC,
+            SCORES_TOPIC,
+            bootstrap_servers="localhost:29092",
+            group_id=f"test-consumer-{uuid4()}",
+            auto_offset_reset="earliest",
+        )
+        await consumer.start()
+
+        features = []
+        scores = []
+        try:
+            for _ in range(4):
+                msg = await asyncio.wait_for(consumer.getone(), timeout=5.0)
+                if msg.topic == FEATURES_TOPIC:
+                    features.append(decode_message(msg.value, FeatureVectorV1))
+                elif msg.topic == SCORES_TOPIC:
+                    scores.append(decode_message(msg.value, ScoreDecisionV1))
+        except TimeoutError:
+            pass
+        finally:
+            await consumer.stop()
+
+    finally:
+        await replay_service.stop()
+        await worker.stop()
+        with contextlib.suppress(TimeoutError, asyncio.CancelledError):
+            await asyncio.wait_for(service_task, timeout=2.0)
+            await asyncio.wait_for(worker_task, timeout=2.0)

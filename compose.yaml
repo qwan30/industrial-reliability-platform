@@ -24,5 +24,52 @@ services:
       timeout: 5s
       retries: 20
 
+  scoring-api:
+    build: .
+    command: ["python", "-m", "uvicorn", "industrial_reliability.api:create_app_from_env", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["127.0.0.1:8000:8000"]
+    volumes: ["./artifacts/champion:/runtime/champion:ro"]
+    environment:
+      CHAMPION_PACKAGE_DIR: /runtime/champion
+      CHAMPION_MANIFEST_SHA256: ${CHAMPION_MANIFEST_SHA256:-}
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  replay-producer:
+    build: .
+    command: ["python", "-m", "industrial_reliability.replay_service"]
+    volumes:
+      - "./data/processed/phase1b:/runtime/data:ro"
+      - "./artifacts/champion:/runtime/champion:ro"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CLIENT_ID: industrial-reliability
+      REPLAY_PARQUET_PATH: /runtime/data/metropt3/telemetry.parquet
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  streaming-worker:
+    build: .
+    command: ["python", "-m", "industrial_reliability.worker"]
+    volumes:
+      - "./artifacts/champion:/runtime/champion:ro"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SCORING_API_URL: http://scoring-api:8000
+      CHAMPION_PACKAGE_DIR: /runtime/champion
+      CHAMPION_MANIFEST_SHA256: ${CHAMPION_MANIFEST_SHA256:-}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      scoring-api:
+        condition: service_healthy
+
 volumes:
   kafka-data:

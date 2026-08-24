@@ -49,6 +49,8 @@ checkpoints/
 *.pt
 *.pth
 *.onnx
+*.db
+*.sqlite
 
 # =========================
 # IDE / OS

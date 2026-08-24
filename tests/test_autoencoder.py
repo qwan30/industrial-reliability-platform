@@ -69,6 +69,15 @@ def test_autoencoder_scaler_is_train_only_and_provenance_is_read_only() -> None:
     np.testing.assert_array_equal(detector.scaler_scale, scale_before)
 
 
+def test_autoencoder_constructor_rejects_fitted_state_injection() -> None:
+    with pytest.raises(TypeError):
+        DenseAutoencoderDetector(
+            epochs=1,
+            _scaler=object(),  # type: ignore[arg-type]
+            _model=object(),  # type: ignore[arg-type]
+        )
+
+
 @pytest.mark.parametrize("method", ["score", "contributions"])
 def test_autoencoder_rejects_scoring_before_fit(method: str) -> None:
     detector = DenseAutoencoderDetector(epochs=1)

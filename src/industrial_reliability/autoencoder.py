@@ -42,8 +42,8 @@ class DenseAutoencoderDetector:
     """Fit the frozen Phase 1 dense autoencoder and return reconstruction errors."""
 
     epochs: int = PHASE1.autoencoder_epochs
-    _scaler: StandardScaler | None = field(default=None, repr=False)
-    _model: nn.Sequential | None = field(default=None, repr=False)
+    _scaler: StandardScaler | None = field(default=None, init=False, repr=False)
+    _model: nn.Sequential | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if isinstance(self.epochs, bool) or not isinstance(self.epochs, int) or self.epochs < 1:
@@ -73,7 +73,10 @@ class DenseAutoencoderDetector:
                 loss.backward()
                 optimizer.step()
         model.eval()
-        return cast(Self, DenseAutoencoderDetector(epochs=self.epochs, _scaler=scaler, _model=model))
+        fitted = cast(Self, DenseAutoencoderDetector(epochs=self.epochs))
+        object.__setattr__(fitted, "_scaler", scaler)
+        object.__setattr__(fitted, "_model", model)
+        return fitted
 
     @property
     def scaler_mean(self) -> NDArray[np.float64]:

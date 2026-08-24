@@ -846,6 +846,49 @@ def test_cli_parses_the_reproducible_command(
     assert "run-id" in capsys.readouterr().out
 
 
+def test_cli_publishes_completed_run_when_publish_dir_is_supplied(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "artifacts" / "run-id"
+    publish_dir = tmp_path / "published"
+    calls: list[tuple[Path, Path]] = []
+
+    def run_spy(**kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(run_dir=run_dir)
+
+    def publish_spy(completed_run: Path, output_dir: Path) -> tuple[Path, Path]:
+        calls.append((completed_run, output_dir))
+        output_dir.mkdir(parents=True)
+        json_path = output_dir / "phase1-benchmark.json"
+        markdown_path = output_dir / "phase1-benchmark.md"
+        json_path.write_text("{}\n", encoding="utf-8")
+        markdown_path.write_text("# fixture\n", encoding="utf-8")
+        return json_path, markdown_path
+
+    monkeypatch.setattr(benchmark, "run_benchmark", run_spy)
+    monkeypatch.setattr(benchmark, "publish_aggregate_results", publish_spy)
+
+    assert (
+        benchmark.main(
+            [
+                "--dataset",
+                "data/raw/metropt/dataset_train.csv",
+                "--work-dir",
+                "data/interim/phase1",
+                "--artifact-dir",
+                "artifacts/phase1",
+                "--publish-dir",
+                str(publish_dir),
+            ]
+        )
+        == 0
+    )
+    assert calls == [(run_dir, publish_dir)]
+    assert (publish_dir / "phase1-benchmark.json").read_text(encoding="utf-8") == "{}\n"
+    assert (publish_dir / "phase1-benchmark.md").read_text(encoding="utf-8") == "# fixture\n"
+
+
 @pytest.mark.slow
 def test_full_dataset_contract() -> None:
     source = Path("data/raw/metropt/dataset_train.csv")

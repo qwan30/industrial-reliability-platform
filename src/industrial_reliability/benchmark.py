@@ -782,12 +782,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--dataset", required=True, type=Path)
     parser.add_argument("--work-dir", required=True, type=Path)
     parser.add_argument("--artifact-dir", required=True, type=Path)
+    parser.add_argument("--publish-dir", type=Path)
     arguments = parser.parse_args(argv)
     result = run_benchmark(
         dataset=arguments.dataset,
         work_dir=arguments.work_dir,
         artifact_dir=arguments.artifact_dir,
     )
+    if arguments.publish_dir is not None:
+        publish_aggregate_results(result.run_dir, arguments.publish_dir)
     print(result.run_dir)
     return 0
 

@@ -53,15 +53,15 @@ def _valid_feature_vector_payload() -> dict[str, object]:
 
 
 def test_feature_vector_rejects_extra_or_nonfinite_values() -> None:
-    payload = _valid_feature_vector_payload()
-    payload["feature_values"] = (float("nan"), 4.56)
+    payload_nan = _valid_feature_vector_payload()
+    payload_nan["feature_values"] = (float("nan"), 4.56)
     with pytest.raises(ValidationError):
-        FeatureVectorV1.model_validate(payload)
+        FeatureVectorV1.model_validate(payload_nan)
 
-    payload = _valid_feature_vector_payload()
-    payload["extra_field"] = "not_allowed"
+    payload_extra = _valid_feature_vector_payload()
+    payload_extra["extra_field"] = "not_allowed"
     with pytest.raises(ValidationError):
-        FeatureVectorV1.model_validate(payload)
+        FeatureVectorV1.model_validate(payload_extra)
 
 
 def test_score_request_requires_matching_feature_lengths() -> None:
@@ -110,15 +110,20 @@ def test_score_decision_and_envelope_serialization() -> None:
 
 
 def test_replay_command_validation() -> None:
+    msg_id = uuid4()
+    session_id = uuid4()
+    cmd_id = uuid4()
+    now_utc = datetime.now(UTC)
+
     # Valid START command
     start_cmd = ReplayCommandV1(
-        message_id=uuid4(),
-        replay_session_id=uuid4(),
+        message_id=msg_id,
+        replay_session_id=session_id,
         source_dataset_sha256="a" * 64,
         contract_sha256="b" * 64,
         source_timestamp=datetime(2020, 3, 1, 0, 0),
-        emitted_at=datetime.now(UTC),
-        command_id=uuid4(),
+        emitted_at=now_utc,
+        command_id=cmd_id,
         action="START",
         speed=100,
         range_start=datetime(2020, 3, 1, 0, 0),
@@ -130,13 +135,13 @@ def test_replay_command_validation() -> None:
     # START without range must fail
     with pytest.raises(ValidationError, match="requires range_start and range_end"):
         ReplayCommandV1(
-            message_id=uuid4(),
-            replay_session_id=uuid4(),
+            message_id=msg_id,
+            replay_session_id=session_id,
             source_dataset_sha256="a" * 64,
             contract_sha256="b" * 64,
             source_timestamp=datetime(2020, 3, 1, 0, 0),
-            emitted_at=datetime.now(UTC),
-            command_id=uuid4(),
+            emitted_at=now_utc,
+            command_id=cmd_id,
             action="START",
             speed=100,
             range_start=None,
@@ -146,13 +151,13 @@ def test_replay_command_validation() -> None:
     # PAUSE with range must fail
     with pytest.raises(ValidationError, match="must not specify range_start"):
         ReplayCommandV1(
-            message_id=uuid4(),
-            replay_session_id=uuid4(),
+            message_id=msg_id,
+            replay_session_id=session_id,
             source_dataset_sha256="a" * 64,
             contract_sha256="b" * 64,
             source_timestamp=datetime(2020, 3, 1, 0, 0),
-            emitted_at=datetime.now(UTC),
-            command_id=uuid4(),
+            emitted_at=now_utc,
+            command_id=cmd_id,
             action="PAUSE",
             speed=100,
             range_start=datetime(2020, 3, 1, 0, 0),
@@ -161,14 +166,18 @@ def test_replay_command_validation() -> None:
 
 
 def test_replay_status_validation() -> None:
+    msg_id = uuid4()
+    session_id = uuid4()
+    now_utc = datetime.now(UTC)
+
     # Valid RUNNING status
     status = ReplayStatusV1(
-        message_id=uuid4(),
-        replay_session_id=uuid4(),
+        message_id=msg_id,
+        replay_session_id=session_id,
         source_dataset_sha256="a" * 64,
         contract_sha256="b" * 64,
         source_timestamp=datetime(2020, 3, 1, 0, 0),
-        emitted_at=datetime.now(UTC),
+        emitted_at=now_utc,
         state="RUNNING",
         last_sequence=10,
     )
@@ -178,12 +187,12 @@ def test_replay_status_validation() -> None:
     # FAILED without error_code must fail
     with pytest.raises(ValidationError, match="FAILED state requires non-empty error_code"):
         ReplayStatusV1(
-            message_id=uuid4(),
-            replay_session_id=uuid4(),
+            message_id=msg_id,
+            replay_session_id=session_id,
             source_dataset_sha256="a" * 64,
             contract_sha256="b" * 64,
             source_timestamp=datetime(2020, 3, 1, 0, 0),
-            emitted_at=datetime.now(UTC),
+            emitted_at=now_utc,
             state="FAILED",
             last_sequence=10,
             error_code=None,
@@ -191,13 +200,17 @@ def test_replay_status_validation() -> None:
 
 
 def test_telemetry_event_validation() -> None:
+    msg_id = uuid4()
+    session_id = uuid4()
+    now_utc = datetime.now(UTC)
+
     te = TelemetryEventV1(
-        message_id=uuid4(),
-        replay_session_id=uuid4(),
+        message_id=msg_id,
+        replay_session_id=session_id,
         source_dataset_sha256="a" * 64,
         contract_sha256="b" * 64,
         source_timestamp=datetime(2020, 3, 1, 0, 0),
-        emitted_at=datetime.now(UTC),
+        emitted_at=now_utc,
         machine_id="compressor-01",
         sequence=1,
         tp2=1.0,
@@ -222,12 +235,12 @@ def test_telemetry_event_validation() -> None:
     # Non-binary digital value must fail
     with pytest.raises(ValidationError):
         TelemetryEventV1(
-            message_id=uuid4(),
-            replay_session_id=uuid4(),
+            message_id=msg_id,
+            replay_session_id=session_id,
             source_dataset_sha256="a" * 64,
             contract_sha256="b" * 64,
             source_timestamp=datetime(2020, 3, 1, 0, 0),
-            emitted_at=datetime.now(UTC),
+            emitted_at=now_utc,
             machine_id="compressor-01",
             sequence=1,
             tp2=1.0,

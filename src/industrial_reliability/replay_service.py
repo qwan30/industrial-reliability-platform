@@ -17,7 +17,6 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 from industrial_reliability.kafka_io import (
     KafkaSettings,
-    MessageDecodeError,
     decode_message,
     encode_message,
 )
@@ -39,6 +38,7 @@ from industrial_reliability.runtime_messages import (
 )
 
 logger = logging.getLogger(__name__)
+PRODUCER_NOT_STARTED = "Producer not started"
 
 
 @dataclass
@@ -98,21 +98,21 @@ class ReplayService:
 
     async def publish_telemetry(self, event: TelemetryEventV1) -> None:
         if self.producer is None:
-            raise RuntimeError("Producer not started")
+            raise RuntimeError(PRODUCER_NOT_STARTED)
         payload = encode_message(event)
         key = event.machine_id.encode("utf-8")
         await self.producer.send_and_wait(TELEMETRY_TOPIC, value=payload, key=key)
 
     async def publish_status(self, status: ReplayStatusV1) -> None:
         if self.producer is None:
-            raise RuntimeError("Producer not started")
+            raise RuntimeError(PRODUCER_NOT_STARTED)
         payload = encode_message(status)
         key = str(status.replay_session_id).encode("utf-8")
         await self.producer.send_and_wait(REPLAY_STATUS_TOPIC, value=payload, key=key)
 
     async def publish_quarantine(self, record: QuarantineRecordV1) -> None:
         if self.producer is None:
-            raise RuntimeError("Producer not started")
+            raise RuntimeError(PRODUCER_NOT_STARTED)
         payload = encode_message(record)
         key = record.payload_sha256.encode("utf-8")
         await self.producer.send_and_wait(QUARANTINE_TOPIC, value=payload, key=key)
@@ -137,7 +137,7 @@ class ReplayService:
 
         try:
             command = decode_message(raw_bytes, ReplayCommandV1)
-        except (MessageDecodeError, Exception) as err:
+        except Exception as err:
             payload_hash = hashlib.sha256(raw_bytes).hexdigest()
             quarantine = QuarantineRecordV1(
                 message_id=uuid4(),
@@ -158,77 +158,86 @@ class ReplayService:
 
         await self.handle_command(command)
 
-    async def handle_command(self, command: ReplayCommandV1) -> None:
-        if command.action == "START":
-            if self.active_session and not self.active_session.task.done():
-                ctrl = ReplayController.created(
-                    command.replay_session_id,
-                    command.source_dataset_sha256,
-                    command.contract_sha256,
-                )
-                failed_ctrl = ctrl.mark_failed(
-                    error_code="REPLAY_ALREADY_ACTIVE",
-                    last_sequence=0,
-                    source_timestamp=command.source_timestamp,
-                )
-                await self.publish_status(failed_ctrl.status())
-                return
-
+    async def _handle_start_command(self, command: ReplayCommandV1) -> None:
+        if self.active_session and not self.active_session.task.done():
             ctrl = ReplayController.created(
                 command.replay_session_id,
                 command.source_dataset_sha256,
                 command.contract_sha256,
-            ).apply(command)
-
-            pause_event = asyncio.Event()
-            pause_event.set()
-            stop_event = asyncio.Event()
-
-            task = asyncio.create_task(
-                self._run_replay_session(ctrl, pause_event, stop_event),
-                name=f"replay-{command.replay_session_id}",
             )
-            self.active_session = RunningSession(
-                controller=ctrl,
-                task=task,
-                pause_event=pause_event,
-                stop_event=stop_event,
+            failed_ctrl = ctrl.mark_failed(
+                error_code="REPLAY_ALREADY_ACTIVE",
+                last_sequence=0,
+                source_timestamp=command.source_timestamp,
             )
+            await self.publish_status(failed_ctrl.status())
+            return
+
+        ctrl = ReplayController.created(
+            command.replay_session_id,
+            command.source_dataset_sha256,
+            command.contract_sha256,
+        ).apply(command)
+
+        pause_event = asyncio.Event()
+        pause_event.set()
+        stop_event = asyncio.Event()
+
+        task = asyncio.create_task(
+            self._run_replay_session(ctrl, pause_event, stop_event),
+            name=f"replay-{command.replay_session_id}",
+        )
+        self.active_session = RunningSession(
+            controller=ctrl,
+            task=task,
+            pause_event=pause_event,
+            stop_event=stop_event,
+        )
+        await self.publish_status(ctrl.status())
+
+    async def _handle_pause_command(self, command: ReplayCommandV1) -> None:
+        if (
+            self.active_session
+            and self.active_session.controller.session_id == command.replay_session_id
+            and not self.active_session.task.done()
+        ):
+            self.active_session.pause_event.clear()
+            ctrl = self.active_session.controller.apply(command)
+            self.active_session.controller = ctrl
             await self.publish_status(ctrl.status())
 
+    async def _handle_resume_command(self, command: ReplayCommandV1) -> None:
+        if (
+            self.active_session
+            and self.active_session.controller.session_id == command.replay_session_id
+            and not self.active_session.task.done()
+        ):
+            ctrl = self.active_session.controller.apply(command)
+            self.active_session.controller = ctrl
+            self.active_session.pause_event.set()
+            await self.publish_status(ctrl.status())
+
+    async def _handle_stop_command(self, command: ReplayCommandV1) -> None:
+        if (
+            self.active_session
+            and self.active_session.controller.session_id == command.replay_session_id
+            and not self.active_session.task.done()
+        ):
+            self.active_session.stop_event.set()
+            self.active_session.pause_event.set()
+            ctrl = self.active_session.controller.apply(command)
+            self.active_session.controller = ctrl
+            await self.publish_status(ctrl.status())
+
+    async def handle_command(self, command: ReplayCommandV1) -> None:
+        if command.action == "START":
+            await self._handle_start_command(command)
         elif command.action == "PAUSE":
-            if (
-                self.active_session
-                and self.active_session.controller.session_id == command.replay_session_id
-                and not self.active_session.task.done()
-            ):
-                self.active_session.pause_event.clear()
-                ctrl = self.active_session.controller.apply(command)
-                self.active_session.controller = ctrl
-                await self.publish_status(ctrl.status())
-
+            await self._handle_pause_command(command)
         elif command.action == "RESUME":
-            if (
-                self.active_session
-                and self.active_session.controller.session_id == command.replay_session_id
-                and not self.active_session.task.done()
-            ):
-                ctrl = self.active_session.controller.apply(command)
-                self.active_session.controller = ctrl
-                self.active_session.pause_event.set()
-                await self.publish_status(ctrl.status())
-
+            await self._handle_resume_command(command)
         elif command.action == "STOP":
-            if (
-                self.active_session
-                and self.active_session.controller.session_id == command.replay_session_id
-                and not self.active_session.task.done()
-            ):
-                self.active_session.stop_event.set()
-                self.active_session.pause_event.set()
-                ctrl = self.active_session.controller.apply(command)
-                self.active_session.controller = ctrl
-                await self.publish_status(ctrl.status())
+            await self._handle_stop_command(command)
 
     async def _run_replay_session(
         self,
@@ -241,7 +250,6 @@ class ReplayService:
         last_ts = ctrl.range_start or datetime(2020, 1, 1)
 
         try:
-            # Construct start command for iteration
             start_cmd = ReplayCommandV1(
                 message_id=uuid4(),
                 replay_session_id=ctrl.session_id,
@@ -265,7 +273,6 @@ class ReplayService:
                 if stop_event.is_set():
                     return
 
-                # Handle pacing
                 if self.enable_pacing and prev_ts is not None and event.source_timestamp > prev_ts:
                     delay = pace_seconds(prev_ts, event.source_timestamp, ctrl.speed)
                     if delay > 0:
@@ -297,8 +304,10 @@ def run_certification(
     speeds: list[int],
     output_dir: Path,
 ) -> dict[str, object]:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    source = ReplaySource(parquet_path)
+    safe_out = output_dir.resolve()
+    safe_out.mkdir(parents=True, exist_ok=True)
+    safe_pq = parquet_path.resolve()
+    source = ReplaySource(safe_pq)
     results: dict[str, object] = {"speeds": speeds, "streams": {}}
 
     logical_hashes: set[str] = set()
@@ -337,12 +346,12 @@ def run_certification(
             "event_count": len(events),
             "logical_stream_sha256": logical_hash,
         }
-        (output_dir / f"stream_speed_{speed}.json").write_text(
+        (safe_out / f"stream_speed_{speed}.json").write_text(
             json.dumps(dumped, indent=2), encoding="utf-8"
         )
 
     results["streams_identical"] = len(logical_hashes) == 1
-    (output_dir / "certification_summary.json").write_text(
+    (safe_out / "certification_summary.json").write_text(
         json.dumps(results, indent=2), encoding="utf-8"
     )
     return results
@@ -364,16 +373,16 @@ def main() -> None:
     if args.certify_range_start and args.certify_range_end:
         print(f"Running Phase 3 replay certification on {args.parquet}...")
         res = run_certification(
-            args.parquet,
+            args.parquet.resolve(),
             args.certify_range_start,
             args.certify_range_end,
             args.speeds,
-            args.output,
+            args.output.resolve(),
         )
         print("Certification results:", json.dumps(res, indent=2))
     else:
         settings = KafkaSettings.from_env()
-        source = ReplaySource(args.parquet)
+        source = ReplaySource(args.parquet.resolve())
         service = ReplayService(settings, source)
         asyncio.run(service.run())
 

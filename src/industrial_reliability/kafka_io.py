@@ -30,7 +30,7 @@ def decode_message[MessageT: FrozenMessage](
 ) -> MessageT:
     try:
         return message_type.model_validate_json(payload)
-    except (UnicodeDecodeError, ValidationError, ValueError) as error:
+    except (ValidationError, ValueError) as error:
         raise MessageDecodeError(f"Failed to decode {message_type.__name__}: {error}") from error
 
 

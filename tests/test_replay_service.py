@@ -3,18 +3,16 @@ from __future__ import annotations
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from tests.test_replay import _create_mock_parquet
 
 from industrial_reliability.kafka_io import KafkaSettings, encode_message
 from industrial_reliability.replay import ReplaySource
 from industrial_reliability.replay_service import (
     ReplayService,
     main,
-    run_certification,
 )
 from industrial_reliability.runtime_messages import (
     QuarantineRecordV1,
@@ -22,6 +20,7 @@ from industrial_reliability.runtime_messages import (
     ReplayStatusV1,
     TelemetryEventV1,
 )
+from tests.test_replay import _create_mock_parquet
 
 
 class MockRecord:

@@ -10,6 +10,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 HEX_64_PATTERN = r"^[0-9a-f]{64}$"
+ERR_SOURCE_TS_NAIVE = "source_timestamp must be timezone-naive"
+ERR_EMITTED_AT_UTC = "emitted_at must be timezone-aware UTC"
 
 REPLAY_COMMANDS_TOPIC = "irp.replay.commands.v1"
 REPLAY_STATUS_TOPIC = "irp.replay.status.v1"
@@ -69,11 +71,11 @@ class FeatureVectorV1(FrozenMessage):
     @model_validator(mode="after")
     def validate_feature_vector(self) -> FeatureVectorV1:
         if self.source_timestamp.tzinfo is not None:
-            raise ValueError("source_timestamp must be timezone-naive")
+            raise ValueError(ERR_SOURCE_TS_NAIVE)
         if self.window_start.tzinfo is not None or self.window_end.tzinfo is not None:
             raise ValueError("window_start and window_end must be timezone-naive")
         if self.emitted_at.tzinfo is None:
-            raise ValueError("emitted_at must be timezone-aware UTC")
+            raise ValueError(ERR_EMITTED_AT_UTC)
 
         if not (self.window_start < self.window_end == self.source_timestamp):
             raise ValueError(
@@ -129,9 +131,9 @@ class ScoreDecisionV1(FrozenMessage):
     @model_validator(mode="after")
     def validate_decision(self) -> ScoreDecisionV1:
         if self.source_timestamp.tzinfo is not None:
-            raise ValueError("source_timestamp must be timezone-naive")
+            raise ValueError(ERR_SOURCE_TS_NAIVE)
         if self.emitted_at.tzinfo is None:
-            raise ValueError("emitted_at must be timezone-aware UTC")
+            raise ValueError(ERR_EMITTED_AT_UTC)
         if not math.isfinite(self.score) or not math.isfinite(self.threshold):
             raise ValueError("score and threshold must be finite numbers")
         return self
@@ -154,6 +156,22 @@ class ErrorResponseV1(FrozenMessage):
     error: ApiErrorV1
 
 
+def _validate_start_command(cmd: ReplayCommandV1) -> None:
+    if cmd.range_start is None or cmd.range_end is None:
+        raise ValueError("START action requires range_start and range_end")
+    if cmd.range_start.tzinfo is not None or cmd.range_end.tzinfo is not None:
+        raise ValueError("range_start and range_end must be timezone-naive")
+    if cmd.range_start >= cmd.range_end:
+        raise ValueError("range_start must be strictly earlier than range_end")
+    if cmd.source_timestamp != cmd.range_start:
+        raise ValueError("source_timestamp must equal range_start for START action")
+
+
+def _validate_control_command(cmd: ReplayCommandV1) -> None:
+    if cmd.range_start is not None or cmd.range_end is not None:
+        raise ValueError(f"{cmd.action} action must not specify range_start or range_end")
+
+
 class ReplayCommandV1(FrozenMessage):
     schema_version: Literal["replay-command-v1"] = "replay-command-v1"
     message_id: UUID
@@ -171,22 +189,14 @@ class ReplayCommandV1(FrozenMessage):
     @model_validator(mode="after")
     def validate_command(self) -> ReplayCommandV1:
         if self.source_timestamp.tzinfo is not None:
-            raise ValueError("source_timestamp must be timezone-naive")
+            raise ValueError(ERR_SOURCE_TS_NAIVE)
         if self.emitted_at.tzinfo is None:
-            raise ValueError("emitted_at must be timezone-aware UTC")
+            raise ValueError(ERR_EMITTED_AT_UTC)
 
         if self.action == "START":
-            if self.range_start is None or self.range_end is None:
-                raise ValueError("START action requires range_start and range_end")
-            if self.range_start.tzinfo is not None or self.range_end.tzinfo is not None:
-                raise ValueError("range_start and range_end must be timezone-naive")
-            if self.range_start >= self.range_end:
-                raise ValueError("range_start must be strictly earlier than range_end")
-            if self.source_timestamp != self.range_start:
-                raise ValueError("source_timestamp must equal range_start for START action")
+            _validate_start_command(self)
         else:
-            if self.range_start is not None or self.range_end is not None:
-                raise ValueError(f"{self.action} action must not specify range_start or range_end")
+            _validate_control_command(self)
 
         return self
 
@@ -206,9 +216,9 @@ class ReplayStatusV1(FrozenMessage):
     @model_validator(mode="after")
     def validate_status(self) -> ReplayStatusV1:
         if self.source_timestamp.tzinfo is not None:
-            raise ValueError("source_timestamp must be timezone-naive")
+            raise ValueError(ERR_SOURCE_TS_NAIVE)
         if self.emitted_at.tzinfo is None:
-            raise ValueError("emitted_at must be timezone-aware UTC")
+            raise ValueError(ERR_EMITTED_AT_UTC)
 
         if self.state in ("STOPPED", "COMPLETED", "FAILED") and (
             self.last_sequence is None or self.last_sequence < 0
@@ -254,9 +264,9 @@ class TelemetryEventV1(FrozenMessage):
     @model_validator(mode="after")
     def validate_telemetry(self) -> TelemetryEventV1:
         if self.source_timestamp.tzinfo is not None:
-            raise ValueError("source_timestamp must be timezone-naive")
+            raise ValueError(ERR_SOURCE_TS_NAIVE)
         if self.emitted_at.tzinfo is None:
-            raise ValueError("emitted_at must be timezone-aware UTC")
+            raise ValueError(ERR_EMITTED_AT_UTC)
 
         analog_fields = [
             self.tp2,
@@ -292,7 +302,7 @@ class QuarantineRecordV1(FrozenMessage):
     @model_validator(mode="after")
     def validate_quarantine(self) -> QuarantineRecordV1:
         if self.source_timestamp.tzinfo is not None:
-            raise ValueError("source_timestamp must be timezone-naive")
+            raise ValueError(ERR_SOURCE_TS_NAIVE)
         if self.emitted_at.tzinfo is None:
-            raise ValueError("emitted_at must be timezone-aware UTC")
+            raise ValueError(ERR_EMITTED_AT_UTC)
         return self

@@ -1,0 +1,162 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from uuid import UUID, uuid4
+
+import pandas as pd
+import pytest
+
+from industrial_reliability.replay import (
+    ReplayContractError,
+    ReplayController,
+    ReplaySource,
+    pace_seconds,
+)
+from industrial_reliability.runtime_messages import ReplayCommandV1
+
+
+def _create_mock_parquet(path: Path, n_rows: int = 20) -> Path:
+    base_ts = datetime(2020, 3, 1, 0, 0, 0)
+    timestamps = [base_ts + timedelta(seconds=10 * i) for i in range(n_rows)]
+    data = {
+        "timestamp": timestamps,
+        "tp2": [1.0 + i for i in range(n_rows)],
+        "tp3": [2.0 + i for i in range(n_rows)],
+        "h1": [3.0 + i for i in range(n_rows)],
+        "dv_pressure": [4.0 + i for i in range(n_rows)],
+        "reservoirs": [5.0 + i for i in range(n_rows)],
+        "oil_temperature": [6.0 + i for i in range(n_rows)],
+        "motor_current": [7.0 + i for i in range(n_rows)],
+        "comp": [1 if i % 2 == 0 else 0 for i in range(n_rows)],
+        "dv_electric": [0 for _ in range(n_rows)],
+        "towers": [1 for _ in range(n_rows)],
+        "mpg": [0 for _ in range(n_rows)],
+        "lps": [1 for _ in range(n_rows)],
+        "pressure_switch": [0 for _ in range(n_rows)],
+        "oil_level": [1 for _ in range(n_rows)],
+        "caudal_impulses": [0 for _ in range(n_rows)],
+    }
+    df = pd.DataFrame(data)
+    pq_path = path / "telemetry.parquet"
+    df.to_parquet(pq_path, index=False)
+    return pq_path
+
+
+def _start_command(
+    session_id: UUID,
+    range_start: datetime,
+    range_end: datetime,
+    speed: int = 1,
+) -> ReplayCommandV1:
+    return ReplayCommandV1(
+        message_id=uuid4(),
+        replay_session_id=session_id,
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+        source_timestamp=range_start,
+        emitted_at=datetime.now(UTC),
+        command_id=uuid4(),
+        action="START",
+        speed=speed,  # type: ignore[arg-type]
+        range_start=range_start,
+        range_end=range_end,
+    )
+
+
+def test_pacing_changes_only_wall_clock_delay() -> None:
+    previous = datetime(2020, 3, 1, 0, 0, 0)
+    current = datetime(2020, 3, 1, 0, 0, 10)
+    assert pace_seconds(previous, current, 1) == 10.0
+    assert pace_seconds(previous, current, 100) == 0.1
+    assert pace_seconds(previous, current, 1000) == 0.01
+
+    with pytest.raises(ReplayContractError):
+        pace_seconds(previous, current, 50)  # Invalid speed
+
+    with pytest.raises(ReplayContractError):
+        pace_seconds(current, previous, 1)  # Non-increasing time
+
+
+def test_same_range_has_same_stream_at_every_speed(tmp_path: Path) -> None:
+    pq_path = _create_mock_parquet(tmp_path, n_rows=15)
+    source = ReplaySource(pq_path)
+    session_id = uuid4()
+    range_start = datetime(2020, 3, 1, 0, 0, 0)
+    range_end = datetime(2020, 3, 1, 0, 2, 0)  # 12 rows (0 to 110s)
+
+    streams = [
+        list(source.iter_events(_start_command(session_id, range_start, range_end, speed=speed)))
+        for speed in (1, 100, 1000)
+    ]
+
+    identities = [
+        [
+            (
+                event.sequence,
+                event.message_id,
+                event.source_timestamp,
+                event.tp2,
+                event.comp,
+            )
+            for event in stream
+        ]
+        for stream in streams
+    ]
+    assert len(identities[0]) == 12
+    assert identities[0] == identities[1] == identities[2]
+
+
+def test_replay_controller_state_machine() -> None:
+    session_id = uuid4()
+    range_start = datetime(2020, 3, 1, 0, 0, 0)
+    range_end = datetime(2020, 3, 1, 0, 2, 0)
+
+    ctrl = ReplayController.created(session_id, "a" * 64, "b" * 64)
+    assert ctrl.state == "CREATED"
+
+    # Valid START
+    cmd_start = _start_command(session_id, range_start, range_end, speed=100)
+    ctrl = ctrl.apply(cmd_start)
+    assert ctrl.state == "RUNNING"
+    assert ctrl.speed == 100
+
+    # PAUSE
+    cmd_pause = ReplayCommandV1(
+        message_id=uuid4(),
+        replay_session_id=session_id,
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+        source_timestamp=datetime(2020, 3, 1, 0, 0, 30),
+        emitted_at=datetime.now(UTC),
+        command_id=uuid4(),
+        action="PAUSE",
+        speed=100,
+    )
+    ctrl = ctrl.apply(cmd_pause)
+    assert ctrl.state == "PAUSED"
+
+    # RESUME
+    cmd_resume = ReplayCommandV1(
+        message_id=uuid4(),
+        replay_session_id=session_id,
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+        source_timestamp=datetime(2020, 3, 1, 0, 0, 30),
+        emitted_at=datetime.now(UTC),
+        command_id=uuid4(),
+        action="RESUME",
+        speed=1000,
+    )
+    ctrl = ctrl.apply(cmd_resume)
+    assert ctrl.state == "RUNNING"
+    assert ctrl.speed == 1000
+
+    # Complete
+    ctrl = ctrl.mark_completed(12, range_end)
+    assert ctrl.state == "COMPLETED"
+    assert ctrl.last_sequence == 12
+
+    status = ctrl.status()
+    assert status.state == "COMPLETED"
+    assert status.last_sequence == 12

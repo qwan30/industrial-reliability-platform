@@ -1,4 +1,4 @@
-"""Frozen, extra-forbid Pydantic v2 schemas for runtime scoring messages."""
+"""Frozen, extra-forbid Pydantic v2 schemas for runtime scoring and Kafka replay messages."""
 
 from __future__ import annotations
 
@@ -10,6 +10,13 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 HEX_64_PATTERN = r"^[0-9a-f]{64}$"
+
+REPLAY_COMMANDS_TOPIC = "irp.replay.commands.v1"
+REPLAY_STATUS_TOPIC = "irp.replay.status.v1"
+TELEMETRY_TOPIC = "irp.telemetry.v1"
+FEATURES_TOPIC = "irp.features.v1"
+SCORES_TOPIC = "irp.scores.v1"
+QUARANTINE_TOPIC = "irp.quarantine.v1"
 
 
 class FrozenMessage(BaseModel):
@@ -145,3 +152,147 @@ class ErrorResponseV1(FrozenMessage):
     success: Literal[False] = False
     data: None = None
     error: ApiErrorV1
+
+
+class ReplayCommandV1(FrozenMessage):
+    schema_version: Literal["replay-command-v1"] = "replay-command-v1"
+    message_id: UUID
+    replay_session_id: UUID
+    source_dataset_sha256: str = Field(pattern=HEX_64_PATTERN)
+    contract_sha256: str = Field(pattern=HEX_64_PATTERN)
+    source_timestamp: datetime
+    emitted_at: datetime
+    command_id: UUID
+    action: Literal["START", "PAUSE", "RESUME", "STOP"]
+    speed: Literal[1, 100, 1000]
+    range_start: datetime | None = None
+    range_end: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_command(self) -> ReplayCommandV1:
+        if self.source_timestamp.tzinfo is not None:
+            raise ValueError("source_timestamp must be timezone-naive")
+        if self.emitted_at.tzinfo is None:
+            raise ValueError("emitted_at must be timezone-aware UTC")
+
+        if self.action == "START":
+            if self.range_start is None or self.range_end is None:
+                raise ValueError("START action requires range_start and range_end")
+            if self.range_start.tzinfo is not None or self.range_end.tzinfo is not None:
+                raise ValueError("range_start and range_end must be timezone-naive")
+            if self.range_start >= self.range_end:
+                raise ValueError("range_start must be strictly earlier than range_end")
+            if self.source_timestamp != self.range_start:
+                raise ValueError("source_timestamp must equal range_start for START action")
+        else:
+            if self.range_start is not None or self.range_end is not None:
+                raise ValueError(f"{self.action} action must not specify range_start or range_end")
+
+        return self
+
+
+class ReplayStatusV1(FrozenMessage):
+    schema_version: Literal["replay-status-v1"] = "replay-status-v1"
+    message_id: UUID
+    replay_session_id: UUID
+    source_dataset_sha256: str = Field(pattern=HEX_64_PATTERN)
+    contract_sha256: str = Field(pattern=HEX_64_PATTERN)
+    source_timestamp: datetime
+    emitted_at: datetime
+    state: Literal["CREATED", "RUNNING", "PAUSED", "STOPPED", "COMPLETED", "FAILED"]
+    last_sequence: int | None = None
+    error_code: str | None = None
+
+    @model_validator(mode="after")
+    def validate_status(self) -> ReplayStatusV1:
+        if self.source_timestamp.tzinfo is not None:
+            raise ValueError("source_timestamp must be timezone-naive")
+        if self.emitted_at.tzinfo is None:
+            raise ValueError("emitted_at must be timezone-aware UTC")
+
+        if self.state in ("STOPPED", "COMPLETED", "FAILED") and (
+            self.last_sequence is None or self.last_sequence < 0
+        ):
+            raise ValueError(f"{self.state} state requires non-negative last_sequence")
+
+        if self.state == "FAILED":
+            if not self.error_code:
+                raise ValueError("FAILED state requires non-empty error_code")
+        else:
+            if self.error_code is not None:
+                raise ValueError(f"{self.state} state must have error_code=None")
+
+        return self
+
+
+class TelemetryEventV1(FrozenMessage):
+    schema_version: Literal["telemetry-event-v1"] = "telemetry-event-v1"
+    message_id: UUID
+    replay_session_id: UUID
+    source_dataset_sha256: str = Field(pattern=HEX_64_PATTERN)
+    contract_sha256: str = Field(pattern=HEX_64_PATTERN)
+    source_timestamp: datetime
+    emitted_at: datetime
+    machine_id: str = Field(min_length=1, max_length=128)
+    sequence: int = Field(gt=0)
+    tp2: float
+    tp3: float
+    h1: float
+    dv_pressure: float
+    reservoirs: float
+    oil_temperature: float
+    motor_current: float
+    comp: Literal[0, 1]
+    dv_electric: Literal[0, 1]
+    towers: Literal[0, 1]
+    mpg: Literal[0, 1]
+    lps: Literal[0, 1]
+    pressure_switch: Literal[0, 1]
+    oil_level: Literal[0, 1]
+    caudal_impulses: Literal[0, 1]
+
+    @model_validator(mode="after")
+    def validate_telemetry(self) -> TelemetryEventV1:
+        if self.source_timestamp.tzinfo is not None:
+            raise ValueError("source_timestamp must be timezone-naive")
+        if self.emitted_at.tzinfo is None:
+            raise ValueError("emitted_at must be timezone-aware UTC")
+
+        analog_fields = [
+            self.tp2,
+            self.tp3,
+            self.h1,
+            self.dv_pressure,
+            self.reservoirs,
+            self.oil_temperature,
+            self.motor_current,
+        ]
+        for val in analog_fields:
+            if not math.isfinite(val):
+                raise ValueError("Analog telemetry values must be finite")
+
+        return self
+
+
+class QuarantineRecordV1(FrozenMessage):
+    schema_version: Literal["quarantine-record-v1"] = "quarantine-record-v1"
+    message_id: UUID
+    replay_session_id: UUID | None = None
+    source_dataset_sha256: str = Field(pattern=HEX_64_PATTERN)
+    contract_sha256: str = Field(pattern=HEX_64_PATTERN)
+    source_timestamp: datetime
+    emitted_at: datetime
+    original_topic: str = Field(min_length=1, max_length=256)
+    partition: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    payload_sha256: str = Field(pattern=HEX_64_PATTERN)
+    error_code: str = Field(min_length=1, max_length=128)
+    error_detail: str = Field(min_length=1, max_length=1024)
+
+    @model_validator(mode="after")
+    def validate_quarantine(self) -> QuarantineRecordV1:
+        if self.source_timestamp.tzinfo is not None:
+            raise ValueError("source_timestamp must be timezone-naive")
+        if self.emitted_at.tzinfo is None:
+            raise ValueError("emitted_at must be timezone-aware UTC")
+        return self

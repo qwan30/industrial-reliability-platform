@@ -12,6 +12,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 keywords = ["predictive-maintenance", "time-series", "anomaly-detection", "data-science"]
 dependencies = [
+  "aiokafka>=0.12,<1",
   "fastapi>=0.115,<1",
   "joblib>=1.4,<2",
   "numpy>=2.2,<3",
@@ -30,6 +31,7 @@ dev = [
   "mypy>=1.15,<2",
   "pandas-stubs>=2.2,<3",
   "pytest>=8.3,<9",
+  "pytest-asyncio>=1.1,<2",
   "pytest-cov>=6,<8",
   "ruff>=0.11,<1",
 ]

@@ -16,6 +16,7 @@ dependencies = [
   "pandas>=2.2,<3",
   "pyarrow>=19,<24",
   "scikit-learn>=1.6,<2",
+  "torch>=2.7,<3",
 ]
 
 [project.optional-dependencies]

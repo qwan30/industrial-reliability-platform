@@ -1,0 +1,125 @@
+{
+  "schema_version": "phase1b-benchmark-v1",
+  "run_id": "phase1b-run-6050e71c7543",
+  "timestamp": "2026-08-24T20:06:25.271753",
+  "verdict": "NOT FEASIBLE",
+  "selected_model": null,
+  "contract_sha256": "149e164748522fe6dfa844a8de70b29ee1259122962e036ff6a563c1120047d8",
+  "source_dataset_sha256": "aab991a970e58210de853bb8078ce0e63abb4d9412fdc5c79792dae3d8e1721a",
+  "models": {
+    "statistical": {
+      "threshold": 3503.9794954828394,
+      "valid_holdout_decisions": 41990,
+      "anomalous_decisions": 1012,
+      "time_in_alert": 0.024100976422957845,
+      "pr_auc": 0.05033338180034994,
+      "detected_events": 3,
+      "total_events": 4,
+      "false_episodes": 811,
+      "false_episodes_per_day": 5.707499450186936,
+      "feasible": false,
+      "event_results": [
+        {
+          "event_id": "metropt3-1",
+          "detected": false,
+          "first_detection_time": null,
+          "lead_seconds_to_source_start": null
+        },
+        {
+          "event_id": "metropt3-2",
+          "detected": true,
+          "first_detection_time": "2020-05-29T23:20:00",
+          "lead_seconds_to_source_start": 600.0
+        },
+        {
+          "event_id": "metropt3-3",
+          "detected": true,
+          "first_detection_time": "2020-06-05T09:10:00",
+          "lead_seconds_to_source_start": 3000.0
+        },
+        {
+          "event_id": "metropt3-4",
+          "detected": true,
+          "first_detection_time": "2020-07-15T12:50:00",
+          "lead_seconds_to_source_start": 6000.0
+        }
+      ]
+    },
+    "isolation_forest": {
+      "threshold": 0.6273901593029505,
+      "valid_holdout_decisions": 41990,
+      "anomalous_decisions": 6576,
+      "time_in_alert": 0.15660871636103835,
+      "pr_auc": 0.38330316610384313,
+      "detected_events": 4,
+      "total_events": 4,
+      "false_episodes": 1868,
+      "false_episodes_per_day": 13.146250274906532,
+      "feasible": false,
+      "event_results": [
+        {
+          "event_id": "metropt3-1",
+          "detected": true,
+          "first_detection_time": "2020-04-17T09:30:00",
+          "lead_seconds_to_source_start": 52200.0
+        },
+        {
+          "event_id": "metropt3-2",
+          "detected": true,
+          "first_detection_time": "2020-05-29T21:35:00",
+          "lead_seconds_to_source_start": 6900.0
+        },
+        {
+          "event_id": "metropt3-3",
+          "detected": true,
+          "first_detection_time": "2020-06-05T09:10:00",
+          "lead_seconds_to_source_start": 3000.0
+        },
+        {
+          "event_id": "metropt3-4",
+          "detected": true,
+          "first_detection_time": "2020-07-15T12:40:00",
+          "lead_seconds_to_source_start": 6600.0
+        }
+      ]
+    },
+    "autoencoder": {
+      "threshold": 0.4772572627313677,
+      "valid_holdout_decisions": 41990,
+      "anomalous_decisions": 13301,
+      "time_in_alert": 0.3167658966420576,
+      "pr_auc": 0.22953050972571692,
+      "detected_events": 4,
+      "total_events": 4,
+      "false_episodes": 4358,
+      "false_episodes_per_day": 30.66989223663954,
+      "feasible": false,
+      "event_results": [
+        {
+          "event_id": "metropt3-1",
+          "detected": true,
+          "first_detection_time": "2020-04-17T09:25:00",
+          "lead_seconds_to_source_start": 52500.0
+        },
+        {
+          "event_id": "metropt3-2",
+          "detected": true,
+          "first_detection_time": "2020-05-29T22:50:00",
+          "lead_seconds_to_source_start": 2400.0
+        },
+        {
+          "event_id": "metropt3-3",
+          "detected": true,
+          "first_detection_time": "2020-06-05T09:10:00",
+          "lead_seconds_to_source_start": 3000.0
+        },
+        {
+          "event_id": "metropt3-4",
+          "detected": true,
+          "first_detection_time": "2020-07-15T00:10:00",
+          "lead_seconds_to_source_start": 51600.0
+        }
+      ]
+    }
+  }
+}

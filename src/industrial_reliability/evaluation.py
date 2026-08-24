@@ -6,14 +6,41 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import pairwise
-from typing import Literal, cast
+from typing import Literal, Protocol, cast
 
 import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike, NDArray
 from sklearn.metrics import average_precision_score
 
-from industrial_reliability.contracts import Event, Phase1Contract
+from industrial_reliability.contracts import Event
+
+
+class EvaluationPolicy(Protocol):
+    @property
+    def stride_seconds(self) -> int: ...
+
+    @property
+    def event_horizon_seconds(self) -> int: ...
+
+    @property
+    def threshold_quantile(self) -> float: ...
+
+    @property
+    def threshold_method(self) -> str: ...
+
+    @property
+    def anomaly_inclusive(self) -> bool: ...
+
+    @property
+    def min_detected_events(self) -> int: ...
+
+    @property
+    def max_false_episodes_per_day(self) -> float: ...
+
+    @property
+    def max_time_in_alert(self) -> float: ...
+
 
 type QuantileMethod = Literal[
     "inverted_cdf",
@@ -70,7 +97,7 @@ class EvaluationResult:
     feasible: bool
 
 
-def _validate_contract(contract: Phase1Contract) -> None:
+def _validate_contract(contract: EvaluationPolicy) -> None:
     if contract.stride_seconds <= 0:
         raise ValueError("stride_seconds must be positive")
     if contract.event_horizon_seconds < 0:
@@ -123,14 +150,14 @@ def _validated_scores(
 
 
 def _anomalies(
-    scores: NDArray[np.float64], threshold: float, contract: Phase1Contract
+    scores: NDArray[np.float64], threshold: float, contract: EvaluationPolicy
 ) -> NDArray[np.bool_]:
     if contract.anomaly_inclusive:
         return scores >= threshold
     return scores > threshold
 
 
-def calibrate_threshold(calibration_scores: ArrayLike, contract: Phase1Contract) -> float:
+def calibrate_threshold(calibration_scores: ArrayLike, contract: EvaluationPolicy) -> float:
     """Select the frozen quantile using calibration scores only."""
     values = np.asarray(calibration_scores, dtype=np.float64)
     if values.ndim != 1 or values.size == 0:
@@ -154,7 +181,7 @@ def calibrate_threshold(calibration_scores: ArrayLike, contract: Phase1Contract)
 def build_episodes(
     scores: pd.DataFrame,
     threshold: float,
-    contract: Phase1Contract,
+    contract: EvaluationPolicy,
 ) -> tuple[Episode, ...]:
     """Merge adjacent anomalous decisions into immutable evaluation episodes."""
     _validate_contract(contract)
@@ -192,7 +219,7 @@ def build_episodes(
 def _episode_matches_event(
     episode: Episode,
     event: Event,
-    contract: Phase1Contract,
+    contract: EvaluationPolicy,
 ) -> bool:
     horizon_start = event.source_start - timedelta(seconds=contract.event_horizon_seconds)
     detected_in_horizon = horizon_start <= episode.detection_time < event.source_end
@@ -233,7 +260,7 @@ def evaluate(
     episodes: Sequence[Episode],
     threshold: float,
     events: Sequence[Event],
-    contract: Phase1Contract,
+    contract: EvaluationPolicy,
 ) -> EvaluationResult:
     """Evaluate one untouched holdout score sequence against frozen event semantics."""
     _validate_contract(contract)

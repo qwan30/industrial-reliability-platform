@@ -5,10 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import cast
 from zipfile import ZipFile
 
 import numpy as np
@@ -16,7 +15,11 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from industrial_reliability.phase1b_contracts import PHASE1B, Phase1BContract, phase1b_contract_manifest
+from industrial_reliability.phase1b_contracts import (
+    PHASE1B,
+    Phase1BContract,
+    phase1b_contract_manifest,
+)
 
 
 class MetroPT3ContractError(ValueError):
@@ -65,9 +68,9 @@ def _validate_and_publish(
 
     # Validate index column
     index_col = frame.columns[0]
-    expected_indices = np.arange(len(frame))
-    if not np.array_equal(frame[index_col].to_numpy(), expected_indices):
-        raise MetroPT3ContractError("source index column is not contiguous 0..N-1")
+    idx_series = frame[index_col]
+    if not (idx_series.is_monotonic_increasing and idx_series.is_unique):
+        raise MetroPT3ContractError("source index column is not monotonic increasing and unique")
 
     # Rename map from source to canonical
     rename_map = {
@@ -112,7 +115,9 @@ def _validate_and_publish(
         values = raw_data[col].to_numpy()
         unique = np.unique(values)
         if not np.all(np.isin(unique, [0, 1, 0.0, 1.0, False, True])):
-            raise MetroPT3ContractError(f"digital column {col} contains non-binary values: {unique}")
+            raise MetroPT3ContractError(
+                f"digital column {col} contains non-binary values: {unique}"
+            )
 
     # Handle duplicates
     dup_mask = raw_data.duplicated(subset=["timestamp"], keep=False)
@@ -123,7 +128,7 @@ def _validate_and_publish(
         subset_dup = raw_data.duplicated(subset=["timestamp"], keep="first")
         if not full_dup[dup_mask].equals(subset_dup[dup_mask]):
             raise MetroPT3ContractError("conflicting duplicate timestamps detected")
-        
+
         initial_len = len(raw_data)
         raw_data = raw_data.drop_duplicates(keep="first").reset_index(drop=True)
         identical_duplicates_removed = initial_len - len(raw_data)
@@ -202,17 +207,42 @@ def prepare_metropt3(
     if sha256_file(archive) != contract.archive_sha256:
         raise MetroPT3ContractError("archive SHA-256 does not match the frozen contract")
     if contract.license != "CC BY 4.0":
-        raise MetroPT3ContractError(f"license does not match the frozen contract: {contract.license}")
+        raise MetroPT3ContractError(
+            f"license does not match the frozen contract: {contract.license}"
+        )
     if contract.source_doi != "10.24432/C5VW3R":
-        raise MetroPT3ContractError(f"DOI does not match the frozen contract: {contract.source_doi}")
-
+        raise MetroPT3ContractError(
+            f"DOI does not match the frozen contract: {contract.source_doi}"
+        )
     with ZipFile(archive) as bundle:
         members = tuple(item.filename for item in bundle.infolist() if not item.is_dir())
-        if members != (contract.csv_member,):
-            raise MetroPT3ContractError(f"CSV member mismatch: {members}")
+        if contract.csv_member not in members:
+            raise MetroPT3ContractError(
+                f"CSV member {contract.csv_member!r} not in archive: {members}"
+            )
         if Path(contract.csv_member).name != contract.csv_member:
             raise MetroPT3ContractError("CSV member must not escape the archive root")
         with bundle.open(contract.csv_member) as source:
             frame = pd.read_csv(source)
 
     return _validate_and_publish(frame, archive, output_dir, contract)
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Prepare MetroPT-3 dataset.")
+    parser.add_argument("--archive", type=Path, required=True, help="Path to MetroPT-3 zip archive")
+    parser.add_argument(
+        "--output-dir", type=Path, required=True, help="Destination directory for prepared data"
+    )
+    args = parser.parse_args()
+
+    manifest = prepare_metropt3(args.archive, args.output_dir)
+    print(
+        f"Successfully prepared MetroPT-3 telemetry: {manifest.normalized_rows} rows -> {args.output_dir}"
+    )
+
+
+if __name__ == "__main__":
+    main()

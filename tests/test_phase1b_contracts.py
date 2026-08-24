@@ -10,8 +10,7 @@ from industrial_reliability.phase1b_contracts import (
 def test_phase1b_freezes_source_and_leakage_boundaries() -> None:
     assert PHASE1B.source_doi == "10.24432/C5VW3R"
     assert (
-        PHASE1B.archive_sha256
-        == "aab991a970e58210de853bb8078ce0e63abb4d9412fdc5c79792dae3d8e1721a"
+        PHASE1B.archive_sha256 == "aab991a970e58210de853bb8078ce0e63abb4d9412fdc5c79792dae3d8e1721a"
     )
     assert PHASE1B.expected_rows == 1_516_948
     assert PHASE1B.license == "CC BY 4.0"

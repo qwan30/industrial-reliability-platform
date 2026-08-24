@@ -1,32 +1,36 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pytest
 
 from industrial_reliability.causal_features import TelemetrySample
 from industrial_reliability.phase1b_contracts import PHASE1B
 from industrial_reliability.phase1b_features import (
-    FeatureContractError,
     build_phase1b_features,
     fit_active_feature_names,
     iter_phase1b_windows,
 )
 
 
-def _generate_samples_for_bins(counts: tuple[int, ...], start_bin: datetime) -> list[TelemetrySample]:
+def _generate_samples_for_bins(
+    counts: tuple[int, ...], start_bin: datetime
+) -> list[TelemetrySample]:
     samples = []
     for bin_idx, count in enumerate(counts):
         bin_end = start_bin + timedelta(minutes=5 * (bin_idx + 1))
         for obs_idx in range(count):
             # timestamps within (bin_end - 5m, bin_end]
-            ts = bin_end - timedelta(minutes=5) + timedelta(seconds=int(obs_idx * (300 / max(count, 1)))) + timedelta(seconds=1)
+            ts = (
+                bin_end
+                - timedelta(minutes=5)
+                + timedelta(seconds=int(obs_idx * (300 / max(count, 1))))
+                + timedelta(seconds=1)
+            )
             analog = (1.0 + bin_idx, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0)
             digital = (1, 0, 1, 0, 1, 0, 1)  # 7 digital predictor columns
             samples.append(TelemetrySample(ts, analog, digital))
@@ -56,10 +60,12 @@ def test_invalid_bin_closes_segment_without_filling() -> None:
 
 
 def test_fit_active_feature_names_removes_constant_columns() -> None:
-    df = pd.DataFrame({
-        "f_const": [1.0, 1.0, 1.0],
-        "f_varying": [1.0, 2.0, 3.0],
-    })
+    df = pd.DataFrame(
+        {
+            "f_const": [1.0, 1.0, 1.0],
+            "f_varying": [1.0, 2.0, 3.0],
+        }
+    )
     active, removed = fit_active_feature_names(df, ("f_const", "f_varying"))
     assert active == ("f_varying",)
     assert removed == ("f_const",)

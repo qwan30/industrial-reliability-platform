@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from dataclasses import asdict, dataclass
@@ -31,7 +30,6 @@ from industrial_reliability.models import (
 from industrial_reliability.phase1b_contracts import (
     PHASE1B,
     Phase1BContract,
-    phase1b_contract_manifest,
     phase1b_evaluation_events,
 )
 from industrial_reliability.phase1b_data import sha256_file
@@ -117,15 +115,17 @@ def evaluate_candidate_holdout(
     feature_matrix = holdout_df[list(active_features)].to_numpy(dtype=np.float64)
     scores = fitted.detector.score(feature_matrix)
 
-    scores_df = pd.DataFrame({
-        "model_id": fitted.model_id,
-        "split": "holdout",
-        "window_start": holdout_df["window_start"].to_numpy(),
-        "window_end": holdout_df["window_end"].to_numpy(),
-        "score": scores,
-        "threshold": fitted.threshold,
-        "is_anomaly": scores >= fitted.threshold,
-    })
+    scores_df = pd.DataFrame(
+        {
+            "model_id": fitted.model_id,
+            "split": "holdout",
+            "window_start": holdout_df["window_start"].to_numpy(),
+            "window_end": holdout_df["window_end"].to_numpy(),
+            "score": scores,
+            "threshold": fitted.threshold,
+            "is_anomaly": scores >= fitted.threshold,
+        }
+    )
 
     events = phase1b_evaluation_events()
     episodes = build_episodes(scores_df, fitted.threshold, contract)
@@ -240,7 +240,9 @@ def run_phase1b_benchmark(
     # Model selection ladder (simplest passing model)
     passing_candidates = [cr for cr in candidate_results if cr.evaluation.feasible]
     selected = passing_candidates[0] if passing_candidates else None
-    verdict: Literal["FEASIBLE", "NOT FEASIBLE"] = "FEASIBLE" if selected is not None else "NOT FEASIBLE"
+    verdict: Literal["FEASIBLE", "NOT FEASIBLE"] = (
+        "FEASIBLE" if selected is not None else "NOT FEASIBLE"
+    )
     selected_model = selected.model_id if selected else None
 
     # Write private run manifest
@@ -255,8 +257,7 @@ def run_phase1b_benchmark(
         "prepared_output_sha256": data_manifest["output_sha256"],
         "feature_output_sha256": feat_manifest["output_sha256"],
         "models": {
-            cr.model_id: _serialize_candidate_evaluation(cr.evaluation)
-            for cr in candidate_results
+            cr.model_id: _serialize_candidate_evaluation(cr.evaluation) for cr in candidate_results
         },
     }
 
@@ -342,17 +343,54 @@ def publish_phase1b_results(
             f"| `{model_id}` | {m['detected_events']}/{m['total_events']} | {m['false_episodes_per_day']:.3f} | {m['time_in_alert'] * 100:.2f}% | {m['pr_auc']:.4f} | `{m['feasible']}` |"
         )
 
-    lines.extend([
-        "",
-        "## Individual Event Detections",
-        "",
-        "| Model | Event ID | Detected | Lead Time (seconds) |",
-        "|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Individual Event Detections",
+            "",
+            "| Model | Event ID | Detected | Lead Time (seconds) |",
+            "|---|---|---|---|",
+        ]
+    )
     for model_id, m in run_manifest["models"].items():
         for er in m["event_results"]:
-            lead = f"{er['lead_seconds_to_source_start']:.0f}" if er["lead_seconds_to_source_start"] is not None else "N/A"
+            lead = (
+                f"{er['lead_seconds_to_source_start']:.0f}"
+                if er["lead_seconds_to_source_start"] is not None
+                else "N/A"
+            )
             lines.append(f"| `{model_id}` | `{er['event_id']}` | `{er['detected']}` | {lead} |")
 
     report_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return metrics_file, report_file
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run Phase 1B benchmark.")
+    parser.add_argument(
+        "--prepared-dir", type=Path, required=True, help="Directory with prepared telemetry"
+    )
+    parser.add_argument("--features", type=Path, required=True, help="Path to features.parquet")
+    parser.add_argument(
+        "--artifact-dir", type=Path, required=True, help="Directory for private artifacts"
+    )
+    parser.add_argument(
+        "--publish-dir", type=Path, required=True, help="Directory for published metrics/report"
+    )
+    args = parser.parse_args()
+
+    result = run_phase1b_benchmark(
+        prepared_dir=args.prepared_dir,
+        feature_path=args.features,
+        artifact_dir=args.artifact_dir,
+    )
+    publish_phase1b_results(result.run_dir, args.publish_dir)
+    print(
+        f"Phase 1B benchmark complete: Verdict = {result.verdict}, Selected Model = {result.selected_model}"
+    )
+
+
+if __name__ == "__main__":
+    main()

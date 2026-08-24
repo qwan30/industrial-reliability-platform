@@ -6,26 +6,40 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import pairwise
-from typing import Literal, cast
+from typing import Literal, Protocol, cast
 
 import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike, NDArray
 from sklearn.metrics import average_precision_score
 
-from industrial_reliability.contracts import Event, Phase1Contract
-from typing import Protocol
+from industrial_reliability.contracts import Event
 
 
 class EvaluationPolicy(Protocol):
-    stride_seconds: int
-    event_horizon_seconds: int
-    threshold_quantile: float
-    threshold_method: str
-    anomaly_inclusive: bool
-    min_detected_events: int
-    max_false_episodes_per_day: float
-    max_time_in_alert: float
+    @property
+    def stride_seconds(self) -> int: ...
+
+    @property
+    def event_horizon_seconds(self) -> int: ...
+
+    @property
+    def threshold_quantile(self) -> float: ...
+
+    @property
+    def threshold_method(self) -> str: ...
+
+    @property
+    def anomaly_inclusive(self) -> bool: ...
+
+    @property
+    def min_detected_events(self) -> int: ...
+
+    @property
+    def max_false_episodes_per_day(self) -> float: ...
+
+    @property
+    def max_time_in_alert(self) -> float: ...
 
 
 type QuantileMethod = Literal[

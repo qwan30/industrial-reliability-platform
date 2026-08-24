@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterator, Literal, Sequence, cast
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -17,11 +18,14 @@ import pyarrow.parquet as pq
 from industrial_reliability.causal_features import (
     CoverageEvidence,
     TelemetrySample,
-    _all_candidate_statistics,
     compute_feature_values,
     get_candidate_feature_names,
 )
-from industrial_reliability.phase1b_contracts import PHASE1B, Phase1BContract, phase1b_contract_manifest
+from industrial_reliability.phase1b_contracts import (
+    PHASE1B,
+    Phase1BContract,
+    phase1b_contract_manifest,
+)
 from industrial_reliability.phase1b_data import sha256_file
 
 
@@ -52,7 +56,9 @@ class Phase1BFeatureManifest:
     manifest_sha256: str
 
 
-def _get_split_for_timestamp(ts: datetime, contract: Phase1BContract) -> Literal["train", "calibration", "holdout"] | None:
+def _get_split_for_timestamp(
+    ts: datetime, contract: Phase1BContract
+) -> Literal["train", "calibration", "holdout"] | None:
     if contract.train.start <= ts < contract.train.end:
         return "train"
     if contract.calibration.start <= ts < contract.calibration.end:
@@ -90,7 +96,9 @@ def iter_phase1b_windows(
 
         samples: list[TelemetrySample] = [
             TelemetrySample(
-                timestamp=timestamps[i].to_pydatetime() if hasattr(timestamps[i], "to_pydatetime") else timestamps[i],
+                timestamp=timestamps[i].to_pydatetime()
+                if hasattr(timestamps[i], "to_pydatetime")
+                else timestamps[i],
                 analog=tuple(float(x) for x in analog_vals[i]),
                 digital=tuple(int(x) for x in digital_vals[i]),
             )
@@ -179,7 +187,7 @@ def iter_phase1b_windows(
             )
 
             yield Phase1BWindow(
-                split=cast(Literal["train", "calibration", "holdout"], split),
+                split=split,
                 window_start=window_start,
                 window_end=window_end,
                 feature_names=candidate_names,
@@ -221,9 +229,9 @@ def build_phase1b_features(
     candidate_names = get_candidate_feature_names(analog_cols, digital_cols)
 
     # Convert windows to DataFrame
-    records = []
+    records: list[dict[str, Any]] = []
     for w in windows:
-        rec = {
+        rec: dict[str, Any] = {
             "split": w.split,
             "window_start": w.window_start,
             "window_end": w.window_end,
@@ -240,7 +248,7 @@ def build_phase1b_features(
     active_names, removed_names = fit_active_feature_names(train_df, candidate_names)
 
     # Filter to active features
-    final_cols = ["split", "window_start", "window_end"] + list(active_names)
+    final_cols = ["split", "window_start", "window_end", *active_names]
     final_df = full_features_df[final_cols].copy()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -249,8 +257,7 @@ def build_phase1b_features(
     output_sha256 = sha256_file(output_path)
 
     split_counts = tuple(
-        (s, int((final_df["split"] == s).sum()))
-        for s in ("train", "calibration", "holdout")
+        (s, int((final_df["split"] == s).sum())) for s in ("train", "calibration", "holdout")
     )
     rejection_counts = (
         ("train_constant_removed", len(removed_names)),
@@ -258,9 +265,11 @@ def build_phase1b_features(
     )
 
     contract_manifest = phase1b_contract_manifest()
+    contract_sha256_str = str(contract_manifest["contract_sha256"])
+    data_manifest_sha256_str = str(data_manifest["manifest_sha256"])
     manifest_dict = {
-        "contract_sha256": contract_manifest["contract_sha256"],
-        "data_manifest_sha256": data_manifest["manifest_sha256"],
+        "contract_sha256": contract_sha256_str,
+        "data_manifest_sha256": data_manifest_sha256_str,
         "output_sha256": output_sha256,
         "candidate_feature_names": list(candidate_names),
         "active_feature_names": list(active_names),
@@ -277,8 +286,8 @@ def build_phase1b_features(
     manifest_path.write_text(json.dumps(manifest_dict, indent=2), encoding="utf-8")
 
     return Phase1BFeatureManifest(
-        contract_sha256=contract_manifest["contract_sha256"],
-        data_manifest_sha256=data_manifest["manifest_sha256"],
+        contract_sha256=contract_sha256_str,
+        data_manifest_sha256=data_manifest_sha256_str,
         output_sha256=output_sha256,
         candidate_feature_names=candidate_names,
         active_feature_names=active_names,
@@ -287,3 +296,25 @@ def build_phase1b_features(
         rejection_counts=rejection_counts,
         manifest_sha256=manifest_sha256,
     )
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Build Phase 1B MetroPT-3 features.")
+    parser.add_argument(
+        "--prepared-dir", type=Path, required=True, help="Directory with prepared telemetry.parquet"
+    )
+    parser.add_argument(
+        "--output", type=Path, required=True, help="Path for output features.parquet"
+    )
+    args = parser.parse_args()
+
+    manifest = build_phase1b_features(args.prepared_dir, args.output)
+    print(
+        f"Successfully generated Phase 1B features: {len(manifest.active_feature_names)} active features -> {args.output}"
+    )
+
+
+if __name__ == "__main__":
+    main()

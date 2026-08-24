@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Sequence
 
 import numpy as np
 
@@ -40,7 +40,10 @@ def get_candidate_feature_names(
 
 
 def _all_candidate_statistics(
-    analog: np.ndarray, digital: np.ndarray, analog_cols: tuple[str, ...], digital_cols: tuple[str, ...]
+    analog: np.ndarray,
+    digital: np.ndarray,
+    analog_cols: tuple[str, ...],
+    digital_cols: tuple[str, ...],
 ) -> dict[str, float]:
     stats: dict[str, float] = {}
 

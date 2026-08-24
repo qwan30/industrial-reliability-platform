@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from industrial_reliability.phase1b_contracts import PHASE1B, Phase1BContract
+from industrial_reliability.phase1b_contracts import PHASE1B
 from industrial_reliability.phase1b_data import (
     MetroPT3ContractError,
     prepare_metropt3,
@@ -17,7 +17,9 @@ from industrial_reliability.phase1b_data import (
 )
 
 
-def _create_synthetic_csv(rows: int = 10, conflicting_dup: bool = False, identical_dup: bool = False) -> bytes:
+def _create_synthetic_csv(
+    rows: int = 10, conflicting_dup: bool = False, identical_dup: bool = False
+) -> bytes:
     start = datetime(2020, 2, 1, 0, 0, 0)
     data = []
     for i in range(rows):
@@ -70,7 +72,9 @@ def _create_synthetic_zip(
     conflicting_dup: bool = False,
     identical_dup: bool = False,
 ) -> Path:
-    csv_bytes = _create_synthetic_csv(rows=rows, conflicting_dup=conflicting_dup, identical_dup=identical_dup)
+    csv_bytes = _create_synthetic_csv(
+        rows=rows, conflicting_dup=conflicting_dup, identical_dup=identical_dup
+    )
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(member_name, csv_bytes)
     return zip_path
@@ -121,12 +125,16 @@ def test_prepare_metropt3_fails_closed_on_identity_mismatch(tmp_path: Path) -> N
         prepare_metropt3(zip_path, tmp_path / "out1", contract_wrong_hash)
 
     # License mismatch
-    contract_wrong_lic = replace(PHASE1B, archive_sha256=zip_sha, license="GPL-3.0", expected_rows=10)
+    contract_wrong_lic = replace(
+        PHASE1B, archive_sha256=zip_sha, license="GPL-3.0", expected_rows=10
+    )
     with pytest.raises(MetroPT3ContractError, match="license"):
         prepare_metropt3(zip_path, tmp_path / "out2", contract_wrong_lic)
 
     # DOI mismatch
-    contract_wrong_doi = replace(PHASE1B, archive_sha256=zip_sha, source_doi="wrong-doi", expected_rows=10)
+    contract_wrong_doi = replace(
+        PHASE1B, archive_sha256=zip_sha, source_doi="wrong-doi", expected_rows=10
+    )
     with pytest.raises(MetroPT3ContractError, match="DOI"):
         prepare_metropt3(zip_path, tmp_path / "out3", contract_wrong_doi)
 

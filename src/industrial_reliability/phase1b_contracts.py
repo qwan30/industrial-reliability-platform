@@ -65,6 +65,8 @@ class Phase1BContract:
     autoencoder_epochs: int = 20
 
 
+DEFAULT_CONDITION = "air leak / high stress"
+
 PHASE1B = Phase1BContract(
     contract_version="phase1b-contract-v1",
     source_url="https://archive.ics.uci.edu/static/public/791/metropt%2B3%2Bdataset.zip",
@@ -165,25 +167,25 @@ PHASE1B = Phase1BContract(
             event_id="metropt3-1",
             source_start_minute=datetime(2020, 4, 18, 0, 0),
             source_end_minute=datetime(2020, 4, 18, 23, 59),
-            condition="air leak / high stress",
+            condition=DEFAULT_CONDITION,
         ),
         MetroPT3Event(
             event_id="metropt3-2",
             source_start_minute=datetime(2020, 5, 29, 23, 30),
             source_end_minute=datetime(2020, 5, 30, 6, 0),
-            condition="air leak / high stress",
+            condition=DEFAULT_CONDITION,
         ),
         MetroPT3Event(
             event_id="metropt3-3",
             source_start_minute=datetime(2020, 6, 5, 10, 0),
             source_end_minute=datetime(2020, 6, 7, 14, 30),
-            condition="air leak / high stress",
+            condition=DEFAULT_CONDITION,
         ),
         MetroPT3Event(
             event_id="metropt3-4",
             source_start_minute=datetime(2020, 7, 15, 14, 30),
             source_end_minute=datetime(2020, 7, 15, 19, 0),
-            condition="air leak / high stress",
+            condition=DEFAULT_CONDITION,
         ),
     ),
 )

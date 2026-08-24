@@ -178,16 +178,18 @@ def run_phase1b_benchmark(
     artifact_dir: Path,
     contract: Phase1BContract = PHASE1B,
 ) -> Phase1BBenchmarkResult:
-    prep_manifest_file = prepared_dir / "manifest.json"
-    feat_manifest_file = feature_path.parent / "feature_manifest.json"
-    if not prep_manifest_file.exists() or not feat_manifest_file.exists():
+    resolved_prep = prepared_dir.resolve()
+    resolved_feat = feature_path.resolve()
+    prep_manifest_file = (resolved_prep / "manifest.json").resolve()
+    feat_manifest_file = (resolved_feat.parent / "feature_manifest.json").resolve()
+    if not prep_manifest_file.is_file() or not feat_manifest_file.is_file():
         raise FileNotFoundError("Prerequisite manifest files missing")
 
     data_manifest = json.loads(prep_manifest_file.read_text(encoding="utf-8"))
     feat_manifest = json.loads(feat_manifest_file.read_text(encoding="utf-8"))
 
     active_features = tuple(feat_manifest["active_feature_names"])
-    features_df = pq.read_table(feature_path).to_pandas()
+    features_df = pq.read_table(resolved_feat).to_pandas()
 
     train_df = features_df[features_df["split"] == "train"]
     calib_df = features_df[features_df["split"] == "calibration"]
@@ -197,15 +199,15 @@ def run_phase1b_benchmark(
     calib_matrix = calib_df[list(active_features)].to_numpy(dtype=np.float64)
 
     run_id = f"phase1b-run-{uuid.uuid4().hex[:12]}"
-    run_dir = artifact_dir / run_id
+    run_dir = (artifact_dir.resolve() / run_id).resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
-    models_dir = run_dir / "models"
+    models_dir = (run_dir / "models").resolve()
     models_dir.mkdir(parents=True, exist_ok=True)
 
     # Save evidence baseline (train median & MAD)
     train_median = np.median(train_matrix, axis=0)
     train_mad = np.median(np.abs(train_matrix - train_median), axis=0)
-    evidence_baseline_path = run_dir / "evidence-baseline.npz"
+    evidence_baseline_path = (run_dir / "evidence-baseline.npz").resolve()
     np.savez_compressed(
         evidence_baseline_path,
         feature_names=np.array(active_features),
@@ -224,7 +226,7 @@ def run_phase1b_benchmark(
             contract=contract,
         )
         # Save model joblib
-        model_path = models_dir / f"{model_id}.joblib"
+        model_path = (models_dir / f"{model_id}.joblib").resolve()
         joblib.dump(fitted.detector, model_path)
 
         res = evaluate_candidate_holdout(fitted, holdout_df, active_features, contract)
@@ -233,7 +235,7 @@ def run_phase1b_benchmark(
 
     # Save combined scores
     combined_scores = pd.concat(all_scores, ignore_index=True)
-    scores_path = run_dir / "scores.parquet"
+    scores_path = (run_dir / "scores.parquet").resolve()
     table = pa.Table.from_pandas(combined_scores, preserve_index=False)
     pq.write_table(table, scores_path, compression="snappy")
 
@@ -261,7 +263,7 @@ def run_phase1b_benchmark(
         },
     }
 
-    manifest_path = run_dir / "run_manifest.json"
+    manifest_path = (run_dir / "run_manifest.json").resolve()
     manifest_path.write_text(json.dumps(run_manifest, indent=2), encoding="utf-8")
 
     # If FEASIBLE, write champion-manifest.json
@@ -284,7 +286,7 @@ def run_phase1b_benchmark(
                 "evidence_baseline": sha256_file(evidence_baseline_path),
             },
         }
-        (run_dir / "champion-manifest.json").write_text(
+        (run_dir / "champion-manifest.json").resolve().write_text(
             json.dumps(champion_manifest, indent=2), encoding="utf-8"
         )
 
@@ -302,15 +304,17 @@ def publish_phase1b_results(
     run_dir: Path,
     output_dir: Path,
 ) -> tuple[Path, Path]:
-    manifest_file = run_dir / "run_manifest.json"
-    if not manifest_file.exists():
-        raise FileNotFoundError(f"run_manifest.json missing in {run_dir}")
+    resolved_run_dir = run_dir.resolve()
+    manifest_file = (resolved_run_dir / "run_manifest.json").resolve()
+    if not manifest_file.is_file():
+        raise FileNotFoundError(f"run_manifest.json missing in {resolved_run_dir}")
 
     run_manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
-    output_dir.mkdir(parents=True, exist_ok=True)
+    resolved_output = output_dir.resolve()
+    resolved_output.mkdir(parents=True, exist_ok=True)
 
-    metrics_file = output_dir / "phase-1b-metrics.json"
-    report_file = output_dir / "phase-1b-metropt3-fresh-validation.md"
+    metrics_file = (resolved_output / "phase-1b-metrics.json").resolve()
+    report_file = (resolved_output / "phase-1b-metropt3-fresh-validation.md").resolve()
 
     published_metrics = {
         "schema_version": "phase1b-benchmark-v1",

@@ -114,9 +114,7 @@ def _validated_scores(
     if any(current <= previous for previous, current in pairwise(ends)):
         raise ValueError("window_end must be strictly increasing")
 
-    starts = tuple(
-        _as_naive_datetime(value, "window_start") for value in scores["window_start"]
-    )
+    starts = tuple(_as_naive_datetime(value, "window_start") for value in scores["window_start"])
     if any(current <= previous for previous, current in pairwise(starts)):
         raise ValueError("window_start must be strictly increasing")
     if any(start > end for start, end in zip(starts, ends, strict=True)):
@@ -220,7 +218,10 @@ def _validated_episodes(episodes: Sequence[Episode]) -> tuple[Episode, ...]:
     for index, episode in enumerate(result):
         if episode.decision_count <= 0 or episode.detection_time > episode.last_detection_time:
             raise ValueError("episode fields are inconsistent")
-        if episode.detection_time.tzinfo is not None or episode.last_detection_time.tzinfo is not None:
+        if (
+            episode.detection_time.tzinfo is not None
+            or episode.last_detection_time.tzinfo is not None
+        ):
             raise ValueError("episode times must be naive")
         if index and episode.detection_time <= result[index - 1].last_detection_time:
             raise ValueError("episodes must be strictly ordered and non-overlapping")

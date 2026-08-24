@@ -106,9 +106,7 @@ def _extract_with_rejections(
         selected = candidates[accepted]
         statistics = {
             "last": values.to_numpy()[selected],
-            "active_ratio": values.rolling(window, min_periods=window)
-            .mean()
-            .to_numpy()[selected],
+            "active_ratio": values.rolling(window, min_periods=window).mean().to_numpy()[selected],
             "transition_count": changes.rolling(window - 1, min_periods=window - 1)
             .sum()
             .to_numpy()[selected],
@@ -148,10 +146,15 @@ def _load_data_manifest(prepared_dir: Path, contract_sha256: str) -> dict[str, o
     manifest = cast(dict[str, object], json.loads(manifest_path.read_text(encoding="utf-8")))
     stored_hash = manifest.get("manifest_sha256")
     payload = {key: value for key, value in manifest.items() if key != "manifest_sha256"}
-    if not isinstance(stored_hash, str) or hashlib.sha256(_canonical_json(payload)).hexdigest() != stored_hash:
+    if (
+        not isinstance(stored_hash, str)
+        or hashlib.sha256(_canonical_json(payload)).hexdigest() != stored_hash
+    ):
         raise DataContractError("prepared data manifest SHA-256 does not match its payload")
     if manifest.get("contract_sha256") != contract_sha256:
-        raise DataContractError("prepared data contract SHA-256 does not match the feature contract")
+        raise DataContractError(
+            "prepared data contract SHA-256 does not match the feature contract"
+        )
     return manifest
 
 
@@ -210,7 +213,9 @@ def build_features(
         raise DataContractError("prepared data manifest segments must be a list")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    windows_by_split = {split.name: 0 for split in (contract.train, contract.calibration, contract.holdout)}
+    windows_by_split = {
+        split.name: 0 for split in (contract.train, contract.calibration, contract.holdout)
+    }
     rejected = {"split_boundary": 0, "timestamp_gap": 0}
     writer: pq.ParquetWriter | None = None
     temporary_path: Path | None = None

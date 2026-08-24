@@ -22,11 +22,7 @@ BASE_TIME = datetime(2022, 1, 1, 6)
 def score_frame(offsets: list[int], scores: list[float]) -> pd.DataFrame:
     """Return schema-valid synthetic score frames."""
     frame = _score_frame(offsets, scores)
-    return frame.assign(
-        window_start=[
-            end - timedelta(seconds=1) for end in frame["window_end"]
-        ]
-    )
+    return frame.assign(window_start=[end - timedelta(seconds=1) for end in frame["window_end"]])
 
 
 def event(

@@ -123,12 +123,8 @@ def _validate_batch(batch: pa.RecordBatch) -> npt.NDArray[np.int64]:
         if not np.isin(values, (0, 1)).all():
             raise DataContractError(f"{column} must contain only binary values")
 
-    longitude = batch.column(batch.schema.get_field_index("gpsLong")).to_numpy(
-        zero_copy_only=False
-    )
-    latitude = batch.column(batch.schema.get_field_index("gpsLat")).to_numpy(
-        zero_copy_only=False
-    )
+    longitude = batch.column(batch.schema.get_field_index("gpsLong")).to_numpy(zero_copy_only=False)
+    latitude = batch.column(batch.schema.get_field_index("gpsLat")).to_numpy(zero_copy_only=False)
     quality = batch.column(batch.schema.get_field_index("gpsQuality")).to_numpy(
         zero_copy_only=False
     )
@@ -193,9 +189,7 @@ def prepare_dataset(
         raise DataContractError("source SHA-256 does not match contract")
 
     output_dir.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(
-        tempfile.mkdtemp(prefix=f".{output_dir.name}.tmp-", dir=output_dir.parent)
-    )
+    temporary = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.tmp-", dir=output_dir.parent))
     segments_dir = temporary / "segments"
     segments_dir.mkdir()
 
@@ -264,7 +258,10 @@ def prepare_dataset(
                     close_segment()
 
             boundaries = [
-                *(int(index) + 1 for index in np.flatnonzero(deltas > contract.gap_max_delta_seconds)),
+                *(
+                    int(index) + 1
+                    for index in np.flatnonzero(deltas > contract.gap_max_delta_seconds)
+                ),
                 len(timestamps),
             ]
             start_index = 0

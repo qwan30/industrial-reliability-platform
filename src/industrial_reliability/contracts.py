@@ -65,9 +65,7 @@ class Phase1Contract:
     threshold_data_policy: str = "calibration_only"
     holdout_policy: str = "evaluate_once_no_retuning"
     evaluation_policy: str = "event_level_and_window_metrics"
-    reporting_policy: str = (
-        "absolute_event_detections_per_event_lead_false_episodes_per_day_window_pr_auc_time_in_alert"
-    )
+    reporting_policy: str = "absolute_event_detections_per_event_lead_false_episodes_per_day_window_pr_auc_time_in_alert"
     model_selection_policy: str = (
         "simplest_model_meeting_gate_ties_statistical_then_isolation_forest_then_autoencoder"
     )
@@ -145,13 +143,9 @@ ANALOG_STATISTICS = ("last", "mean", "std", "min", "max", "delta")
 DIGITAL_STATISTICS = ("last", "active_ratio", "transition_count")
 PREDICTOR_COLUMNS = ANALOG_COLUMNS + DIGITAL_COLUMNS
 FEATURE_COLUMNS = tuple(
-    f"{column}__{statistic}"
-    for column in ANALOG_COLUMNS
-    for statistic in ANALOG_STATISTICS
+    f"{column}__{statistic}" for column in ANALOG_COLUMNS for statistic in ANALOG_STATISTICS
 ) + tuple(
-    f"{column}__{statistic}"
-    for column in DIGITAL_COLUMNS
-    for statistic in DIGITAL_STATISTICS
+    f"{column}__{statistic}" for column in DIGITAL_COLUMNS for statistic in DIGITAL_STATISTICS
 )
 
 

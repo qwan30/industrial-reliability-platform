@@ -102,9 +102,7 @@ def test_excluded_columns_cannot_affect_features() -> None:
 
     pd.testing.assert_frame_equal(before, after)
     assert not any(
-        feature.startswith(f"{column}__")
-        for column in excluded
-        for feature in before.columns
+        feature.startswith(f"{column}__") for column in excluded for feature in before.columns
     )
 
 
@@ -140,8 +138,7 @@ def test_segment_anchor_resets_after_prepared_gap(tmp_path: Path) -> None:
     table = pq.read_table(output).to_pandas()
 
     assert table["window_end"].tolist() == [
-        start + timedelta(seconds=offset)
-        for offset in (59, 69, 79, 89, 99, 160, 170, 180, 190)
+        start + timedelta(seconds=offset) for offset in (59, 69, 79, 89, 99, 160, 170, 180, 190)
     ]
     assert manifest.total_windows == 9
     assert manifest.windows_by_split == {"train": 9, "calibration": 0, "holdout": 0}
@@ -265,7 +262,9 @@ def test_build_features_does_not_overwrite_destination_created_after_precheck(
         output.write_bytes(b"racing owner bytes")
         return manifest
 
-    monkeypatch.setattr(features_module, "_load_data_manifest", load_manifest_then_create_destination)
+    monkeypatch.setattr(
+        features_module, "_load_data_manifest", load_manifest_then_create_destination
+    )
 
     with pytest.raises(FileExistsError):
         build_features(prepared, output, contract)

@@ -56,10 +56,7 @@ def _write_source_with_cross_batch_delta(
     write_sample_csv(
         path,
         [
-            start
-            + timedelta(
-                seconds=index if index < boundary else index + delta_seconds - 1
-            )
+            start + timedelta(seconds=index if index < boundary else index + delta_seconds - 1)
             for index in range(row_count)
         ],
     )
@@ -94,7 +91,10 @@ def test_prepare_dataset_splits_at_gap(tmp_path: Path, sample_csv: Path) -> None
         "segments/segment-0000.parquet",
         "segments/segment-0001.parquet",
     ]
-    assert [pq.read_table(output / segment.path).num_rows for segment in manifest.segments] == [3, 3]
+    assert [pq.read_table(output / segment.path).num_rows for segment in manifest.segments] == [
+        3,
+        3,
+    ]
 
 
 def test_prepare_dataset_splits_at_gap_between_real_arrow_batches(tmp_path: Path) -> None:
@@ -170,7 +170,9 @@ def test_prepare_dataset_rejects_wrong_header_order(tmp_path: Path, sample_csv: 
         csv.writer(handle, lineterminator="\n").writerows(rows)
 
     with pytest.raises(DataContractError, match="header"):
-        prepare_dataset(sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv))
+        prepare_dataset(
+            sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv)
+        )
 
 
 def test_prepare_dataset_rejects_wrong_row_count(tmp_path: Path, sample_csv: Path) -> None:
@@ -187,7 +189,9 @@ def test_prepare_dataset_rejects_malformed_timestamp(tmp_path: Path, sample_csv:
     _rewrite_cell(sample_csv, 1, "timestamp", "not-a-timestamp")
 
     with pytest.raises(DataContractError, match="timestamp"):
-        prepare_dataset(sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv))
+        prepare_dataset(
+            sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv)
+        )
 
 
 def test_prepare_dataset_rejects_non_binary_digital_value(
@@ -197,7 +201,9 @@ def test_prepare_dataset_rejects_non_binary_digital_value(
     _rewrite_cell(sample_csv, 1, "COMP", 2)
 
     with pytest.raises(DataContractError, match="binary"):
-        prepare_dataset(sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv))
+        prepare_dataset(
+            sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv)
+        )
 
 
 def test_prepare_dataset_rejects_non_monotonic_timestamp(
@@ -207,7 +213,9 @@ def test_prepare_dataset_rejects_non_monotonic_timestamp(
     _rewrite_cell(sample_csv, 2, "timestamp", "2022-01-01 06:00:01")
 
     with pytest.raises(DataContractError, match="strictly increasing"):
-        prepare_dataset(sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv))
+        prepare_dataset(
+            sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv)
+        )
 
 
 @pytest.mark.parametrize(
@@ -223,7 +231,9 @@ def test_prepare_dataset_rejects_gps_sentinel_disagreement(
     _rewrite_cell(sample_csv, 0, column, value)
 
     with pytest.raises(DataContractError, match="GPS sentinel"):
-        prepare_dataset(sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv))
+        prepare_dataset(
+            sample_csv, tmp_path / "prepared", contract=_contract_after_edit(sample_csv)
+        )
 
 
 def test_prepare_dataset_allows_valid_coordinates_with_zero_speed(

@@ -108,7 +108,7 @@ def make_segment(seconds: int) -> pd.DataFrame:
     for offset, column in enumerate(PHASE1.analog_columns, start=1):
         frame[column] = index + offset
     for column in ("COMP", "DV_eletric", "Towers", "MPG"):
-        frame[column] = (index.astype(np.int64) % 2)
+        frame[column] = index.astype(np.int64) % 2
     frame.update(
         {
             "LPS": np.zeros(seconds, dtype=np.int64),

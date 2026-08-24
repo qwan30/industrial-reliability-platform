@@ -43,13 +43,17 @@ def test_isolation_forest_is_deterministic() -> None:
 def test_isolation_forest_returns_negative_score_samples() -> None:
     train = seeded_training_matrix()
     values = train[:3]
-    expected = -IsolationForest(
-        n_estimators=PHASE1.isolation_forest_estimators,
-        max_samples=PHASE1.isolation_forest_max_samples,
-        contamination=PHASE1.isolation_forest_contamination,
-        random_state=PHASE1.random_seed,
-        n_jobs=PHASE1.isolation_forest_n_jobs,
-    ).fit(train).score_samples(values)
+    expected = (
+        -IsolationForest(
+            n_estimators=PHASE1.isolation_forest_estimators,
+            max_samples=PHASE1.isolation_forest_max_samples,
+            contamination=PHASE1.isolation_forest_contamination,
+            random_state=PHASE1.random_seed,
+            n_jobs=PHASE1.isolation_forest_n_jobs,
+        )
+        .fit(train)
+        .score_samples(values)
+    )
 
     actual = IsolationForestDetector().fit(train).score(values)
 

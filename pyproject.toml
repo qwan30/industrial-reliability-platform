@@ -12,22 +12,28 @@ license = "MIT"
 license-files = ["LICENSE"]
 keywords = ["predictive-maintenance", "time-series", "anomaly-detection", "data-science"]
 dependencies = [
+  "fastapi>=0.115,<1",
+  "joblib>=1.4,<2",
   "numpy>=2.2,<3",
   "pandas>=2.2,<3",
+  "pydantic>=2.10,<3",
   "pyarrow>=19,<24",
   "scikit-learn>=1.6,<2",
   "torch>=2.7,<3",
+  "uvicorn>=0.34,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
   "build>=1.2,<2",
+  "httpx>=0.28,<1",
   "mypy>=1.15,<2",
   "pandas-stubs>=2.2,<3",
   "pytest>=8.3,<9",
   "pytest-cov>=6,<8",
   "ruff>=0.11,<1",
 ]
+
 
 [tool.setuptools.packages.find]
 where = ["src"]

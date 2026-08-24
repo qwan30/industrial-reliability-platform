@@ -56,7 +56,10 @@ def test_telemetry_rejects_nonbinary_state_or_sequence_zero() -> None:
 
 
 def test_phase2_message_json_remains_unchanged() -> None:
-    assert FeatureVectorV1.model_validate_json(FROZEN_PHASE2_JSON).model_dump_json() == FROZEN_PHASE2_JSON
+    assert (
+        FeatureVectorV1.model_validate_json(FROZEN_PHASE2_JSON).model_dump_json()
+        == FROZEN_PHASE2_JSON
+    )
 ```
 
 - [ ] **Step 2: Run tests and observe missing replay types**
@@ -172,7 +175,9 @@ def runtime_id(kind: str, replay_session_id: UUID, identity: str) -> UUID:
 
 def encode_message(message: FrozenMessage) -> bytes:
     payload = message.model_dump(mode="json")
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(
+        "utf-8"
+    )
 
 
 def decode_message(payload: bytes, message_type: type[MessageT]) -> MessageT:
@@ -215,7 +220,15 @@ Expected: only reusable boundary primitives and their direct dependency change a
 def test_same_range_has_same_stream_at_every_speed(source: ReplaySource) -> None:
     streams = [tuple(source.iter_events(start_command(speed=speed))) for speed in (1, 100, 1000)]
     identities = [
-        tuple((event.sequence, event.message_id, event.source_timestamp, event.model_dump(exclude={"emitted_at"})) for event in stream)
+        tuple(
+            (
+                event.sequence,
+                event.message_id,
+                event.source_timestamp,
+                event.model_dump(exclude={"emitted_at"}),
+            )
+            for event in stream
+        )
         for stream in streams
     ]
     assert identities[0] == identities[1] == identities[2]
@@ -300,7 +313,9 @@ Expected: this commit has no Kafka service loop or Compose changes.
 ```python
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_kafka_replay_is_ordered_and_reports_completion(kafka_bootstrap: str, replay_fixture: Path) -> None:
+async def test_kafka_replay_is_ordered_and_reports_completion(
+    kafka_bootstrap: str, replay_fixture: Path
+) -> None:
     command = start_command(speed=1000, rows=12)
     await publish_command(kafka_bootstrap, command)
     telemetry = await consume_exact(kafka_bootstrap, TELEMETRY_TOPIC, count=12)
@@ -337,11 +352,15 @@ class ReplayService:
             await self.producer.stop()
 
     async def _publish(self, topic: str, message: FrozenMessage, key: UUID) -> None:
-        await self.producer.send_and_wait(topic, encode_message(message), key=str(key).encode("ascii"))
+        await self.producer.send_and_wait(
+            topic, encode_message(message), key=str(key).encode("ascii")
+        )
 
     async def _handle_start(self, record: ConsumerRecord, command: ReplayCommandV1) -> None:
         controller = ReplayController.created(command.replay_session_id).apply(command)
-        task = asyncio.create_task(self._run_session(controller), name=f"replay-{command.replay_session_id}")
+        task = asyncio.create_task(
+            self._run_session(controller), name=f"replay-{command.replay_session_id}"
+        )
         self.sessions[command.replay_session_id] = RunningSession(controller, task)
         await self._publish_status(controller.status("RUNNING"))
         await self.consumer.commit(offset_after(record))

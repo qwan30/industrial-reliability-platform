@@ -57,7 +57,9 @@ def test_mlflow_service_is_local_and_persistent() -> None:
     assert service["environment"]["MLFLOW_BACKEND_STORE_URI"].startswith("postgresql+psycopg://")
     assert service["build"]["dockerfile"] == "docker/mlflow.Dockerfile"
     assert "mlflow-artifacts" in json.dumps(service["volumes"])
-    core = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
+    core = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "dependencies"
+    ]
     assert all(not dependency.startswith("mlflow") for dependency in core)
 ```
 
@@ -231,8 +233,12 @@ def test_import_candidate_logs_existing_evidence_and_stops_at_candidate(
     assert fake_mlflow.aliases == []
 
 
-def test_reproduction_never_calls_holdout_benchmark(fake_mlflow: FakeMlflow, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(phase1b_benchmark, "run_phase1b_benchmark", Mock(side_effect=AssertionError("holdout")))
+def test_reproduction_never_calls_holdout_benchmark(
+    fake_mlflow: FakeMlflow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        phase1b_benchmark, "run_phase1b_benchmark", Mock(side_effect=AssertionError("holdout"))
+    )
     result = reproduce_candidate(reproduction_request_fixture(), mlflow_client=fake_mlflow)
     assert fake_mlflow.tags[result.run_id]["lifecycle_state"] == "reproduction"
 
@@ -284,19 +290,25 @@ def import_candidate(request: ImportCandidateRequest) -> CandidateResult:
             input_example=evidence.golden_feature_frame.head(1),
         )
         log_allowlisted_evidence(evidence)
-        return CandidateResult(run.info.run_id, model_info.model_uri, evidence.package_manifest_sha256)
+        return CandidateResult(
+            run.info.run_id, model_info.model_uri, evidence.package_manifest_sha256
+        )
 
 
 def reproduce_candidate(request: ReproductionRequest) -> ReproductionResult:
     evidence = verify_phase1b_and_package_evidence(request)
-    table = pq.read_table(request.features_path, filters=[("split", "in", ["train", "calibration"])])
+    table = pq.read_table(
+        request.features_path, filters=[("split", "in", ["train", "calibration"])]
+    )
     frame = table.to_pandas()
     fitted = fit_phase1b_candidate(
         model_id=evidence.model_id,
         train_features=ordered_features(frame, "train", evidence.feature_names),
         calibration_features=ordered_features(frame, "calibration", evidence.feature_names),
     )
-    calibration_scores = fitted.detector.score(ordered_features(frame, "calibration", evidence.feature_names))
+    calibration_scores = fitted.detector.score(
+        ordered_features(frame, "calibration", evidence.feature_names)
+    )
     golden_scores = fitted.detector.score(evidence.golden_feature_frame.to_numpy(dtype=np.float64))
     return log_reproduction_run(evidence, fitted.threshold, calibration_scores, golden_scores)
 ```
@@ -351,7 +363,9 @@ Expected: FAIL because `promote_candidate` is not defined.
 - [ ] **Step 3: Implement verify-register-alias-receipt ordering**
 
 ```python
-def promote_candidate(request: PromotionRequest, *, mlflow_client: MlflowClient) -> PromotionReceiptV1:
+def promote_candidate(
+    request: PromotionRequest, *, mlflow_client: MlflowClient
+) -> PromotionReceiptV1:
     run = require_candidate_run(mlflow_client, request.run_id)
     provenance = download_and_verify_provenance(mlflow_client, run.info.run_id)
     verify_expected_identities(request, provenance)
@@ -398,7 +412,9 @@ git commit -m "feat: add explicit champion promotion"
 - [ ] **Step 1: Write readiness and read-route tests**
 
 ```python
-def test_readyz_fails_closed_on_registry_alias_mismatch(client: TestClient, mlflow: FakeMlflow) -> None:
+def test_readyz_fails_closed_on_registry_alias_mismatch(
+    client: TestClient, mlflow: FakeMlflow
+) -> None:
     mlflow.alias_run_id = "different-run"
     response = client.get("/readyz")
     assert response.status_code == 503
@@ -409,9 +425,16 @@ def test_model_provenance_returns_allowlisted_identity(client: TestClient) -> No
     response = client.get("/v1/models/model-v1/provenance")
     assert response.status_code == 200
     assert set(response.json()["data"]) == {
-        "model_version", "mlflow_run_id", "registered_model_version", "dataset_sha256",
-        "contract_sha256", "feature_schema_sha256", "source_git_sha",
-        "champion_package_sha256", "alert_policy_sha256", "metrics",
+        "model_version",
+        "mlflow_run_id",
+        "registered_model_version",
+        "dataset_sha256",
+        "contract_sha256",
+        "feature_schema_sha256",
+        "source_git_sha",
+        "champion_package_sha256",
+        "alert_policy_sha256",
+        "metrics",
     }
 ```
 
@@ -494,12 +517,18 @@ THRESHOLD_ATOL = 1e-9
 CALIBRATION_SCORE_ATOL = 1e-6
 GOLDEN_SCORE_ATOL = 1e-6
 REPRODUCTION_IDENTITIES = (
-    "dataset_sha256", "contract_sha256", "feature_schema_sha256", "source_git_sha",
-    "model_id", "model_parameter_sha256",
+    "dataset_sha256",
+    "contract_sha256",
+    "feature_schema_sha256",
+    "source_git_sha",
+    "model_id",
+    "model_parameter_sha256",
 )
 
 
-def evaluate_phase7(first: RunEvidence, second: RunEvidence, receipt: PromotionReceiptV1) -> Phase7Gate:
+def evaluate_phase7(
+    first: RunEvidence, second: RunEvidence, receipt: PromotionReceiptV1
+) -> Phase7Gate:
     require_equal_identities(first, second, REPRODUCTION_IDENTITIES)
     threshold_delta = abs(first.threshold - second.threshold)
     calibration_delta = max_abs_delta(first.calibration_scores, second.calibration_scores)

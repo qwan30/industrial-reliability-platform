@@ -55,7 +55,9 @@ def test_rca_report_rejects_citations_outside_bundle() -> None:
         RcaReportV1.model_validate(
             {
                 **valid_rca_payload(),
-                "observations": [{"claim": "Score exceeded threshold", "evidence_ids": ["invented"]}],
+                "observations": [
+                    {"claim": "Score exceeded threshold", "evidence_ids": ["invented"]}
+                ],
                 "evidence_ids": ["ev-score-1"],
             }
         )
@@ -136,7 +138,9 @@ def test_gather_evidence_calls_only_fixed_tools(fake_store: FakeRuntimeStore) ->
     assert len(bundle.bundle_sha256) == 64
 
 
-def test_bundle_is_deterministic_and_contains_no_raw_telemetry(fake_store: FakeRuntimeStore) -> None:
+def test_bundle_is_deterministic_and_contains_no_raw_telemetry(
+    fake_store: FakeRuntimeStore,
+) -> None:
     first = gather_evidence("alert-1", fake_store)
     second = gather_evidence("alert-1", fake_store)
     assert first == second
@@ -236,18 +240,22 @@ def test_missing_key_returns_evidence_only(monkeypatch, evidence_bundle) -> None
 
 
 def test_unknown_provider_citation_rejects_entire_draft(evidence_bundle, fake_openai) -> None:
-    fake_openai.return_structured({
-        "summary": "Alert exceeded the threshold.",
-        "observations": [{"claim": "A bearing failed", "evidence_ids": ["invented"]}],
-        "uncertainty": ["No mechanical inspection evidence is available."],
-        "next_checks": ["Inspect the compressor."],
-    })
+    fake_openai.return_structured(
+        {
+            "summary": "Alert exceeded the threshold.",
+            "observations": [{"claim": "A bearing failed", "evidence_ids": ["invented"]}],
+            "uncertainty": ["No mechanical inspection evidence is available."],
+            "next_checks": ["Inspect the compressor."],
+        }
+    )
     report = generator(fake_openai).generate(evidence_bundle)
     assert report.status == "UNAVAILABLE"
     assert all("invented" not in item.evidence_ids for item in report.observations)
 
 
-def test_secret_never_appears_in_repr_or_error(monkeypatch, evidence_bundle, failing_openai) -> None:
+def test_secret_never_appears_in_repr_or_error(
+    monkeypatch, evidence_bundle, failing_openai
+) -> None:
     monkeypatch.setenv("RCA_OPENAI_API_KEY", "secret-test-key")
     report = generator(failing_openai).generate(evidence_bundle)
     assert "secret-test-key" not in repr(report)
@@ -354,7 +362,9 @@ def test_same_bundle_persists_one_report(runtime_store, complete_report) -> None
     assert runtime_store.count("rca_reports") == 1
 
 
-def test_missing_provider_returns_200_without_hiding_evidence(client, seeded_alert, monkeypatch) -> None:
+def test_missing_provider_returns_200_without_hiding_evidence(
+    client, seeded_alert, monkeypatch
+) -> None:
     monkeypatch.delenv("RCA_OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("RCA_OPENAI_MODEL", raising=False)
     response = client.post(f"/v1/alerts/{seeded_alert.alert_id}/rca")
@@ -366,7 +376,9 @@ def test_missing_provider_returns_200_without_hiding_evidence(client, seeded_ale
     assert seeded_alert.store.count("rca_reports") == 0
 
 
-def test_provider_recovery_after_fallback_persists_complete(client, seeded_alert, provider_spy) -> None:
+def test_provider_recovery_after_fallback_persists_complete(
+    client, seeded_alert, provider_spy
+) -> None:
     first = client.post(f"/v1/alerts/{seeded_alert.alert_id}/rca")
     assert first.json()["data"]["status"] == "UNAVAILABLE"
     provider_spy.configure_complete()
@@ -414,8 +426,10 @@ def generate_rca(alert_id: str) -> ApiEnvelope[RcaReportV1]:
     if existing is not None:
         return success(existing)
     generator = OpenAiRcaGenerator.from_env()
-    report = generator.generate(bundle) if generator else evidence_only_report(
-        bundle, "provider_not_configured"
+    report = (
+        generator.generate(bundle)
+        if generator
+        else evidence_only_report(bundle, "provider_not_configured")
     )
     if report.status == "COMPLETE":
         store.save_complete_rca(report)

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -12,14 +11,10 @@ from industrial_reliability.alert_consumer import (
     AlertOutboxDispatcher,
     ProcessOutcome,
 )
-from industrial_reliability.alert_policy import LockedAlertPolicyV1
 from industrial_reliability.alert_state import AlertState
 from industrial_reliability.kafka_io import encode_message
 from industrial_reliability.persistence import OutboxRow, RuntimeStore
-from industrial_reliability.runtime_messages import (
-    EvidenceValueV1,
-    ScoreDecisionV1,
-)
+from tests.test_persistence import _make_decision, _make_policy
 
 
 class MockKafkaRecord:
@@ -27,54 +22,6 @@ class MockKafkaRecord:
         self.value = value
         self.topic = topic
         self.offset = offset
-
-
-def _make_policy() -> LockedAlertPolicyV1:
-    return LockedAlertPolicyV1(
-        schema_version="alert-policy-v1",
-        source_split="calibration",
-        source_scores_sha256="a" * 64,
-        source_dataset_sha256="b" * 64,
-        contract_sha256="c" * 64,
-        model_id="statistical",
-        model_version="champion-statistical-v1",
-        threshold=1.0,
-        stride_seconds=300,
-        persistence_decisions=1,
-        cooldown_decisions=1,
-        merge_gap_seconds=300,
-        calibration_false_episodes_per_day=0.1,
-        calibration_time_in_alert=0.01,
-        policy_sha256="d" * 64,
-    )
-
-
-def _make_decision(
-    session_id: UUID,
-    is_anomaly: bool = True,
-    contract_sha256: str = "c" * 64,
-) -> ScoreDecisionV1:
-    return ScoreDecisionV1(
-        message_id=uuid4(),
-        replay_session_id=session_id,
-        source_dataset_sha256="b" * 64,
-        contract_sha256=contract_sha256,
-        source_timestamp=datetime(2020, 4, 18, 0, 5),
-        emitted_at=datetime.now(UTC),
-        decision_id=uuid4(),
-        window_id=uuid4(),
-        model_version="champion-statistical-v1",
-        score=1.5 if is_anomaly else 0.4,
-        threshold=1.0,
-        is_anomaly=is_anomaly,
-        evidence_vector=(
-            EvidenceValueV1(
-                feature_name="tp2_mean",
-                feature_value=1.5,
-                robust_deviation=0.5,
-            ),
-        ),
-    )
 
 
 @pytest.mark.asyncio

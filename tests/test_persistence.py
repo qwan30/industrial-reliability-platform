@@ -41,14 +41,18 @@ def _make_policy() -> LockedAlertPolicyV1:
     )
 
 
-def _make_decision(session_id: UUID, is_anomaly: bool = True) -> ScoreDecisionV1:
+def _make_decision(
+    session_id: UUID,
+    is_anomaly: bool = True,
+    contract_sha256: str = "c" * 64,
+) -> ScoreDecisionV1:
     decision_id = uuid4()
     window_id = uuid4()
     return ScoreDecisionV1(
         message_id=uuid4(),
         replay_session_id=session_id,
         source_dataset_sha256="b" * 64,
-        contract_sha256="c" * 64,
+        contract_sha256=contract_sha256,
         source_timestamp=datetime(2020, 4, 18, 0, 5),
         emitted_at=datetime.now(UTC),
         decision_id=decision_id,

@@ -104,6 +104,51 @@ def _build_evidence_snapshot(
     )
 
 
+def _emit_anomaly_result(
+    state: AlertState,
+    decision: ScoreDecisionV1,
+    policy: LockedAlertPolicyV1,
+    action: AlertAction,
+    alert_id: UUID,
+    first_det: datetime,
+    new_anomaly_streak: int,
+    new_anomaly_decision_ids: tuple[UUID, ...],
+) -> TransitionResult:
+    last_det = decision.source_timestamp
+    event = AlertEventV1(
+        schema_version="alert-event-v1",
+        message_id=uuid4(),
+        replay_session_id=decision.replay_session_id,
+        source_dataset_sha256=decision.source_dataset_sha256,
+        contract_sha256=decision.contract_sha256,
+        source_timestamp=decision.source_timestamp,
+        emitted_at=datetime.now(UTC),
+        alert_id=alert_id,
+        machine_id=state.machine_id,
+        action=action,
+        first_detection=first_det,
+        last_detection=last_det,
+        decision_ids=new_anomaly_decision_ids,
+        policy_sha256=policy.policy_sha256,
+    )
+    evidence = _build_evidence_snapshot(alert_id, decision)
+    new_state = AlertState(
+        replay_session_id=state.replay_session_id,
+        machine_id=state.machine_id,
+        active_alert_id=alert_id,
+        previous_alert_id=state.previous_alert_id,
+        first_detection=first_det,
+        last_detection=last_det,
+        resolved_at=None,
+        anomaly_decision_ids=new_anomaly_decision_ids,
+        anomaly_streak=new_anomaly_streak,
+        normal_streak=0,
+        last_decision_id=decision.decision_id,
+        last_source_timestamp=decision.source_timestamp,
+    )
+    return TransitionResult(state=new_state, event=event, evidence=evidence)
+
+
 def _handle_anomaly_trigger(
     state: AlertState,
     decision: ScoreDecisionV1,
@@ -146,41 +191,16 @@ def _handle_anomaly_trigger(
         if is_reopen
         else decision.source_timestamp
     )
-    last_det = decision.source_timestamp
-
-    event = AlertEventV1(
-        schema_version="alert-event-v1",
-        message_id=uuid4(),
-        replay_session_id=decision.replay_session_id,
-        source_dataset_sha256=decision.source_dataset_sha256,
-        contract_sha256=decision.contract_sha256,
-        source_timestamp=decision.source_timestamp,
-        emitted_at=datetime.now(UTC),
-        alert_id=alert_id,
-        machine_id=state.machine_id,
-        action=action,
-        first_detection=first_det,
-        last_detection=last_det,
-        decision_ids=new_anomaly_decision_ids,
-        policy_sha256=policy.policy_sha256,
+    return _emit_anomaly_result(
+        state,
+        decision,
+        policy,
+        action,
+        alert_id,
+        first_det,
+        new_anomaly_streak,
+        new_anomaly_decision_ids,
     )
-    evidence = _build_evidence_snapshot(alert_id, decision)
-
-    new_state = AlertState(
-        replay_session_id=state.replay_session_id,
-        machine_id=state.machine_id,
-        active_alert_id=alert_id,
-        previous_alert_id=state.previous_alert_id,
-        first_detection=first_det,
-        last_detection=last_det,
-        resolved_at=None,
-        anomaly_decision_ids=new_anomaly_decision_ids,
-        anomaly_streak=new_anomaly_streak,
-        normal_streak=0,
-        last_decision_id=decision.decision_id,
-        last_source_timestamp=decision.source_timestamp,
-    )
-    return TransitionResult(state=new_state, event=event, evidence=evidence)
 
 
 def _handle_anomaly_update(
@@ -193,41 +213,16 @@ def _handle_anomaly_update(
     alert_id = state.active_alert_id
     assert alert_id is not None
     first_det = state.first_detection or decision.source_timestamp
-    last_det = decision.source_timestamp
-
-    event = AlertEventV1(
-        schema_version="alert-event-v1",
-        message_id=uuid4(),
-        replay_session_id=decision.replay_session_id,
-        source_dataset_sha256=decision.source_dataset_sha256,
-        contract_sha256=decision.contract_sha256,
-        source_timestamp=decision.source_timestamp,
-        emitted_at=datetime.now(UTC),
-        alert_id=alert_id,
-        machine_id=state.machine_id,
-        action="UPDATED",
-        first_detection=first_det,
-        last_detection=last_det,
-        decision_ids=new_anomaly_decision_ids,
-        policy_sha256=policy.policy_sha256,
+    return _emit_anomaly_result(
+        state,
+        decision,
+        policy,
+        "UPDATED",
+        alert_id,
+        first_det,
+        new_anomaly_streak,
+        new_anomaly_decision_ids,
     )
-    evidence = _build_evidence_snapshot(alert_id, decision)
-
-    new_state = AlertState(
-        replay_session_id=state.replay_session_id,
-        machine_id=state.machine_id,
-        active_alert_id=alert_id,
-        previous_alert_id=state.previous_alert_id,
-        first_detection=first_det,
-        last_detection=last_det,
-        resolved_at=None,
-        anomaly_decision_ids=new_anomaly_decision_ids,
-        anomaly_streak=new_anomaly_streak,
-        normal_streak=0,
-        last_decision_id=decision.decision_id,
-        last_source_timestamp=decision.source_timestamp,
-    )
-    return TransitionResult(state=new_state, event=event, evidence=evidence)
 
 
 def _handle_normal(

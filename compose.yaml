@@ -103,6 +103,22 @@ services:
       scoring-api:
         condition: service_healthy
 
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/mlflow.Dockerfile
+    command: ["/bin/sh", "-c", "exec mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri \"$$MLFLOW_BACKEND_STORE_URI\" --artifacts-destination /mlartifacts --serve-artifacts"]
+    environment:
+      MLFLOW_BACKEND_STORE_URI: postgresql+psycopg://irp:${POSTGRES_PASSWORD:-irp_password}@postgres:5432/irp
+    volumes:
+      - mlflow-artifacts:/mlartifacts
+    ports:
+      - "127.0.0.1:5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   kafka-data:
   postgres-data:
+  mlflow-artifacts:

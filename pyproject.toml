@@ -37,6 +37,9 @@ dev = [
   "pytest-cov>=6,<8",
   "ruff>=0.11,<1",
 ]
+mlops = [
+  "mlflow>=3,<4",
+]
 
 
 [tool.setuptools.packages.find]

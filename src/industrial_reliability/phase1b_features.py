@@ -206,9 +206,7 @@ def fit_active_feature_names(
     return active, removed
 
 
-def _windows_to_dataframe(
-    windows: list[Phase1BWindow], candidate_names: tuple[str, ...]
-) -> pd.DataFrame:
+def _windows_to_dataframe(windows: list[Phase1BWindow]) -> pd.DataFrame:
     records: list[dict[str, Any]] = []
     for w in windows:
         rec: dict[str, Any] = {
@@ -219,7 +217,8 @@ def _windows_to_dataframe(
         for name, val in zip(w.feature_names, w.feature_values, strict=True):
             rec[name] = val
         records.append(rec)
-    return pd.DataFrame(records)
+    df = pd.DataFrame(records)
+    return df.sort_values(by="window_start").reset_index(drop=True)
 
 
 def build_phase1b_features(
@@ -244,7 +243,7 @@ def build_phase1b_features(
     digital_cols = tuple(c for c in contract.digital_columns if c in contract.predictor_columns)
     candidate_names = get_candidate_feature_names(analog_cols, digital_cols)
 
-    full_features_df = _windows_to_dataframe(windows, candidate_names)
+    full_features_df = _windows_to_dataframe(windows)
     train_df = full_features_df[full_features_df["split"] == "train"]
     if train_df.empty:
         raise FeatureContractError("No valid train feature windows generated")

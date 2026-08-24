@@ -201,7 +201,7 @@ class StreamingWorker:
         try:
             decision = await self.scoring_client.score(feature)
         except (RetryableScoringError, PermanentScoringError) as err:
-            logger.error("Scoring failed for feature %s: %s", feature.window_id, err)
+            logger.exception("Scoring failed for feature %s", feature.window_id)
             error_code = (
                 "SCORING_RETRY_EXHAUSTED"
                 if isinstance(err, RetryableScoringError)

@@ -9,7 +9,7 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import joblib
 import numpy as np
@@ -68,15 +68,18 @@ def get_dependency_versions() -> dict[str, str]:
     }
 
 
-mlflow: Any
-MlflowClient: Any
-try:
+if TYPE_CHECKING:
     import mlflow
     import mlflow.pyfunc
-    from mlflow import MlflowClient as MlflowClient
-except ImportError:
-    mlflow = None
-    MlflowClient = None
+    from mlflow import MlflowClient
+else:
+    try:
+        import mlflow
+        import mlflow.pyfunc
+        from mlflow import MlflowClient
+    except ImportError:
+        mlflow = None
+        MlflowClient = None
 
 __all__ = ["MlflowClient", "import_candidate", "promote_candidate", "reproduce_candidate"]
 

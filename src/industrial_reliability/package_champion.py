@@ -30,6 +30,7 @@ DETECTOR_FILENAME = "detector.joblib"
 BASELINE_FILENAME = "evidence-baseline.npz"
 GOLDEN_CASES_FILENAME = "golden-cases.json"
 MANIFEST_FILENAME = "manifest.json"
+SCORES_PARQUET_FILENAME = "scores.parquet"
 HEX_64_PATTERN = r"^[0-9a-f]{64}$"
 
 
@@ -84,7 +85,7 @@ class ChampionManifest(BaseModel):
     @classmethod
     def validate_artifact_hashes(cls, v: Mapping[str, str]) -> Mapping[str, str]:
         required = {DETECTOR_FILENAME, BASELINE_FILENAME, GOLDEN_CASES_FILENAME}
-        allowed = required | {"scores.parquet"}
+        allowed = required | {SCORES_PARQUET_FILENAME}
         if not required <= set(v.keys()) or not set(v.keys()) <= allowed:
             raise ValueError(f"artifact_sha256 must contain {required} and only allow {allowed}")
         for key, hash_val in v.items():
@@ -142,13 +143,13 @@ def _verify_phase1b_artifacts(
     expected_model = artifact_hashes.get("model_binary")
     expected_baseline = artifact_hashes.get("evidence_baseline")
 
-    scores_file = (resolved_run / "scores.parquet").resolve()
+    scores_file = (resolved_run / SCORES_PARQUET_FILENAME).resolve()
     baseline_file = (resolved_run / BASELINE_FILENAME).resolve()
     model_id = champion_dict.get("model_id")
     model_file = (resolved_run / "models" / f"{model_id}.joblib").resolve()
 
     if not scores_file.is_file() or sha256_file(scores_file) != expected_scores:
-        raise ChampionPackageError("scores.parquet missing or SHA-256 mismatch")
+        raise ChampionPackageError(f"{SCORES_PARQUET_FILENAME} missing or SHA-256 mismatch")
     if not baseline_file.is_file() or sha256_file(baseline_file) != expected_baseline:
         raise ChampionPackageError(f"{BASELINE_FILENAME} missing or SHA-256 mismatch")
     if not model_file.is_file() or sha256_file(model_file) != expected_model:
@@ -320,7 +321,7 @@ def build_champion_package(
     model_id = champion["model_id"]
     model_src = (resolved_run / "models" / f"{model_id}.joblib").resolve()
     baseline_src = (resolved_run / BASELINE_FILENAME).resolve()
-    scores_src = (resolved_run / "scores.parquet").resolve()
+    scores_src = (resolved_run / SCORES_PARQUET_FILENAME).resolve()
 
     golden = select_golden_cases(scores_src, features_path, champion, baseline_src)
 

@@ -202,6 +202,7 @@ def test_package_manifest_validates_role_combinations() -> None:
     assert m_res.package_role == "RESEARCH_CANDIDATE"
 
     # Invalid combination: CHAMPION with NOT_FEASIBLE
+    prov = ThresholdProvenance()
     with pytest.raises(ValueError, match="invalid package role"):
         ChampionManifest(
             schema_version="champion-package-v1",
@@ -216,7 +217,7 @@ def test_package_manifest_validates_role_combinations() -> None:
             source_dataset_sha256="e" * 64,
             feature_names=("f1",),
             threshold=1.0,
-            threshold_provenance=ThresholdProvenance(),
+            threshold_provenance=prov,
             artifact_sha256=valid_hashes,
         )
 

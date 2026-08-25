@@ -10,6 +10,7 @@ import os
 import signal
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
@@ -145,27 +146,36 @@ class AlertService:
         if self.producer:
             await self.producer.stop()
 
+    async def _process_consumer_batch(self, batch: Any) -> None:
+        if self.consumer is None or self.alert_consumer is None:
+            return
+        for tp, messages in batch.items():
+            for record in messages:
+                outcome = await self.alert_consumer.process(record)
+                if outcome == ProcessOutcome.SESSION_FAILED:
+                    logger.error(
+                        "Session failed for record at offset %d; halting partition commit to preserve failed record",
+                        record.offset,
+                    )
+                    return
+                await self.consumer.commit({tp: record.offset + 1})
+
     async def _run_consumer_loop(self) -> None:
         if self.consumer is None or self.alert_consumer is None:
             return
-        while self._running:
-            try:
-                batch = await self.consumer.getmany(timeout_ms=1000, max_records=100)
-                for tp, messages in batch.items():
-                    for record in messages:
-                        outcome = await self.alert_consumer.process(record)
-                        if outcome == ProcessOutcome.SESSION_FAILED:
-                            logger.error(
-                                "Session failed for record at offset %d; halting partition commit to preserve failed record",
-                                record.offset,
-                            )
-                            break
-                        await self.consumer.commit({tp: record.offset + 1})
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                logger.exception("Error in alert consumer loop")
-                await asyncio.sleep(0.5)
+        try:
+            while self._running:
+                try:
+                    batch = await self.consumer.getmany(timeout_ms=1000, max_records=100)
+                    await self._process_consumer_batch(batch)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Error in alert consumer loop")
+                    await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            logger.debug("Alert consumer loop cancelled")
+            raise
 
 
 async def run_alert_service(settings: AlertServiceSettings) -> None:

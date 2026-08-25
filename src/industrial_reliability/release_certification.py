@@ -49,23 +49,51 @@ class ReleaseCertificationReportV1:
         return asdict(self)
 
 
+def _resolve_git_sha(git_sha: str | None) -> str:
+    if git_sha is not None:
+        return git_sha
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except Exception:
+        return ""
+
+
+def _collect_decision_gates(
+    artifact_dir: Path,
+    decision_gates: dict[str, str],
+    artifact_hashes: dict[str, str],
+) -> None:
+    p7a_file = artifact_dir / "phase-7a-airflow-decision.json"
+    if p7a_file.is_file():
+        data = json.loads(p7a_file.read_text(encoding="utf-8"))
+        decision_gates["airflow"] = data.get("decision", "NOT_ADOPTED")
+    elif Path("docs/decisions/2026-08-24-airflow-not-adopted.md").is_file():
+        decision_gates["airflow"] = "NOT_ADOPTED"
+
+    p10a_file = artifact_dir / "phase-10a-spark-decision.json"
+    if p10a_file.is_file():
+        data = json.loads(p10a_file.read_text(encoding="utf-8"))
+        decision_gates["spark"] = data.get("status", "N/A")
+        artifact_hashes["phase10a_spark"] = hashlib.sha256(p10a_file.read_bytes()).hexdigest()
+
+    p10b_file = artifact_dir / "phase-10b-openvino-decision.json"
+    if p10b_file.is_file():
+        data = json.loads(p10b_file.read_text(encoding="utf-8"))
+        decision_gates["openvino"] = data.get("status", "N/A")
+        artifact_hashes["phase10b_openvino"] = hashlib.sha256(p10b_file.read_bytes()).hexdigest()
+
+
 class ReleaseCertificationValidator:
     def __init__(self, artifact_dir: Path | str = Path("docs/results")) -> None:
         self.artifact_dir = Path(artifact_dir)
 
     def evaluate(self, git_sha: str | None = None) -> ReleaseCertificationReportV1:
-        if git_sha is not None:
-            resolved_sha = git_sha
-        else:
-            try:
-                resolved_sha = subprocess.run(
-                    ["git", "rev-parse", "HEAD"],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                ).stdout.strip()
-            except Exception:
-                resolved_sha = ""
+        resolved_sha = _resolve_git_sha(git_sha)
 
         if (
             not resolved_sha
@@ -120,28 +148,7 @@ class ReleaseCertificationValidator:
                 )
 
         # 2. Check Decision Gates
-        p7a_file = self.artifact_dir / "phase-7a-airflow-decision.json"
-        if not p7a_file.is_file():
-            adr = Path("docs/decisions/2026-08-24-airflow-not-adopted.md")
-            if adr.is_file():
-                decision_gates["airflow"] = "NOT_ADOPTED"
-        else:
-            data = json.loads(p7a_file.read_text(encoding="utf-8"))
-            decision_gates["airflow"] = data.get("decision", "NOT_ADOPTED")
-
-        p10a_file = self.artifact_dir / "phase-10a-spark-decision.json"
-        if p10a_file.is_file():
-            data = json.loads(p10a_file.read_text(encoding="utf-8"))
-            decision_gates["spark"] = data.get("status", "N/A")
-            artifact_hashes["phase10a_spark"] = hashlib.sha256(p10a_file.read_bytes()).hexdigest()
-
-        p10b_file = self.artifact_dir / "phase-10b-openvino-decision.json"
-        if p10b_file.is_file():
-            data = json.loads(p10b_file.read_text(encoding="utf-8"))
-            decision_gates["openvino"] = data.get("status", "N/A")
-            artifact_hashes["phase10b_openvino"] = hashlib.sha256(
-                p10b_file.read_bytes()
-            ).hexdigest()
+        _collect_decision_gates(self.artifact_dir, decision_gates, artifact_hashes)
 
         # 3. Check Phase 8 Observability & Fault drills
         p8_file = self.artifact_dir / "phase-8-live-fault-drills.json"
@@ -155,15 +162,12 @@ class ReleaseCertificationValidator:
             ).hexdigest()
 
         # 4. Check Phase 9 Grounded RCA
-        p9_file = (
-            self.artifact_dir / "phase-9-rca-live.json"
-            if (self.artifact_dir / "phase-9-rca-live.json").is_file()
-            else (
-                self.artifact_dir / "phase-9-rca-fallback.json"
-                if (self.artifact_dir / "phase-9-rca-fallback.json").is_file()
-                else self.artifact_dir / "phase-9-grounded-rca.json"
-            )
-        )
+        p9_candidates = [
+            self.artifact_dir / "phase-9-rca-live.json",
+            self.artifact_dir / "phase-9-rca-fallback.json",
+            self.artifact_dir / "phase-9-grounded-rca.json",
+        ]
+        p9_file = next((f for f in p9_candidates if f.is_file()), p9_candidates[-1])
         if p9_file.is_file():
             phases_passed.append("phase9_grounded_rca")
             artifact_hashes["phase9_rca"] = hashlib.sha256(p9_file.read_bytes()).hexdigest()

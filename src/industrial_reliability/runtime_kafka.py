@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Protocol, runtime_checkable
 
@@ -56,10 +57,13 @@ class InMemoryCommandProducer:
         self.started = False
 
     async def start(self) -> None:
+        await asyncio.sleep(0)
         self.started = True
 
     async def stop(self) -> None:
+        await asyncio.sleep(0)
         self.started = False
 
     async def publish_command(self, command: ReplayCommandV1) -> None:
+        await asyncio.sleep(0)
         self.commands.append(command)

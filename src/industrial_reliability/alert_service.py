@@ -13,8 +13,15 @@ from pathlib import Path
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
-from industrial_reliability.alert_consumer import AlertConsumer, AlertOutboxDispatcher
-from industrial_reliability.alert_policy import LockedAlertPolicyV1
+from industrial_reliability.alert_consumer import (
+    AlertConsumer,
+    AlertOutboxDispatcher,
+    ProcessOutcome,
+)
+from industrial_reliability.alert_policy import (
+    LockedAlertPolicyV1,
+    verify_policy_integrity,
+)
 from industrial_reliability.kafka_io import KafkaSettings
 from industrial_reliability.metrics import (
     RuntimeMetrics,
@@ -79,6 +86,7 @@ class AlertService:
         self.store = RuntimeStore(settings.database_url)
         policy_data = json.loads(settings.policy_path.read_text(encoding="utf-8"))
         self.policy = LockedAlertPolicyV1(**policy_data)
+        verify_policy_integrity(self.policy)
         self.producer: AIOKafkaProducer | None = None
         self.consumer: AIOKafkaConsumer | None = None
         self.alert_consumer: AlertConsumer | None = None
@@ -145,8 +153,14 @@ class AlertService:
                 batch = await self.consumer.getmany(timeout_ms=1000, max_records=100)
                 for tp, messages in batch.items():
                     for record in messages:
-                        await self.alert_consumer.process(record)
-                    await self.consumer.commit({tp: messages[-1].offset + 1})
+                        outcome = await self.alert_consumer.process(record)
+                        if outcome == ProcessOutcome.SESSION_FAILED:
+                            logger.error(
+                                "Session failed for record at offset %d; halting partition commit to preserve failed record",
+                                record.offset,
+                            )
+                            break
+                        await self.consumer.commit({tp: record.offset + 1})
             except asyncio.CancelledError:
                 break
             except Exception:

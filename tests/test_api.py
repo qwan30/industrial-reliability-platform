@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -169,3 +170,22 @@ def test_create_app_from_env_research_candidate(
     r = client.get("/healthz")
     assert r.status_code == 200
     assert r.json() == {"success": True, "data": {"status": "ok"}, "error": None}
+
+    # When producer is None, replay commands return 503
+    r_replay = client.post(
+        "/v1/replays",
+        json={
+            "speed": 100,
+            "range_start": "2020-03-01T00:00:00Z",
+            "range_end": "2020-03-02T00:00:00Z",
+        },
+    )
+    assert r_replay.status_code == 503
+    assert r_replay.json()["error"]["code"] == "PRODUCER_UNAVAILABLE"
+
+    r_cmd = client.post(
+        f"/v1/replays/{uuid4()}/commands",
+        json={"action": "PAUSE"},
+    )
+    assert r_cmd.status_code == 503
+    assert r_cmd.json()["error"]["code"] == "PRODUCER_UNAVAILABLE"

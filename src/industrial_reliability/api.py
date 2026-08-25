@@ -302,6 +302,18 @@ def create_app(
 
     @app.post("/v1/replays", status_code=202)
     def start_replay(body: StartReplayRequestV1) -> JSONResponse:
+        if producer is None:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {
+                        "code": "PRODUCER_UNAVAILABLE",
+                        "message": "Kafka replay command producer is not configured",
+                    },
+                },
+            )
         session_id = uuid4()
         now = datetime.now(UTC)
         ds_sha = "0" * 64
@@ -336,6 +348,18 @@ def create_app(
 
     @app.post("/v1/replays/{replay_session_id}/commands", status_code=202)
     def control_replay(replay_session_id: UUID, body: ReplayControlRequestV1) -> JSONResponse:
+        if producer is None:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {
+                        "code": "PRODUCER_UNAVAILABLE",
+                        "message": "Kafka replay command producer is not configured",
+                    },
+                },
+            )
         now = datetime.now(UTC)
         cmd = ReplayCommandV1(
             schema_version="replay-command-v1",

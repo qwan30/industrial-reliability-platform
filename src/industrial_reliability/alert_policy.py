@@ -56,6 +56,22 @@ class LockedAlertPolicyV1:
         return asdict(self)
 
 
+def compute_policy_sha256(policy_data: dict[str, Any]) -> str:
+    copy_payload = {k: v for k, v in policy_data.items() if k != "policy_sha256"}
+    canonical_json = json.dumps(
+        copy_payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
+def verify_policy_integrity(policy: LockedAlertPolicyV1) -> None:
+    expected_sha = compute_policy_sha256(policy.to_dict())
+    if policy.policy_sha256 != expected_sha:
+        raise ValueError(
+            f"Alert policy integrity check failed: expected self-hash {expected_sha}, got {policy.policy_sha256}"
+        )
+
+
 def _step_anomaly(
     ts: datetime,
     is_active: bool,
@@ -237,13 +253,20 @@ def lock_alert_policy(manifest_path: Path, output_path: Path) -> LockedAlertPoli
     ]
     if len(champion_calib) == 0:
         if is_research:
-            champion_calib = scores_df[scores_df["model_id"] == model_id]
+            # Strictly use train split fallback for research candidate — NEVER touch holdout!
+            champion_calib = scores_df[
+                (scores_df["model_id"] == model_id) & (scores_df["split"] == "train")
+            ]
+            if len(champion_calib) == 0:
+                raise ValueError(
+                    f"No calibration or train rows found for model {model_id} in {scores_file}"
+                )
         else:
             raise ValueError(
                 f"No calibration rows found for champion model {model_id} in {scores_file}"
             )
 
-    source_split = "calibration" if "calibration" in champion_calib["split"].values else "holdout"
+    source_split = "calibration" if "calibration" in champion_calib["split"].values else "train"
     selection = select_policy(champion_calib, allow_fallback=is_research)
 
     payload: dict[str, Any] = {

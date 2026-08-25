@@ -6,7 +6,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from industrial_reliability.alert_policy import LockedAlertPolicyV1
+from industrial_reliability.alert_policy import (
+    LockedAlertPolicyV1,
+    compute_policy_sha256,
+)
 from industrial_reliability.alert_state import (
     AlertState,
     transition,
@@ -23,23 +26,24 @@ from industrial_reliability.runtime_messages import (
 
 
 def _make_policy() -> LockedAlertPolicyV1:
-    return LockedAlertPolicyV1(
-        schema_version="alert-policy-v1",
-        source_split="calibration",
-        source_scores_sha256="a" * 64,
-        source_dataset_sha256="b" * 64,
-        contract_sha256="c" * 64,
-        model_id="statistical",
-        model_version="champion-statistical-v1",
-        threshold=1.0,
-        stride_seconds=300,
-        persistence_decisions=1,
-        cooldown_decisions=1,
-        merge_gap_seconds=300,
-        calibration_false_episodes_per_day=0.1,
-        calibration_time_in_alert=0.01,
-        policy_sha256="d" * 64,
-    )
+    payload = {
+        "schema_version": "alert-policy-v1",
+        "source_split": "calibration",
+        "source_scores_sha256": "a" * 64,
+        "source_dataset_sha256": "b" * 64,
+        "contract_sha256": "c" * 64,
+        "model_id": "statistical",
+        "model_version": "champion-statistical-v1",
+        "threshold": 1.0,
+        "stride_seconds": 300,
+        "persistence_decisions": 1,
+        "cooldown_decisions": 1,
+        "merge_gap_seconds": 300,
+        "calibration_false_episodes_per_day": 0.1,
+        "calibration_time_in_alert": 0.01,
+    }
+    sha = compute_policy_sha256(payload)
+    return LockedAlertPolicyV1(**payload, policy_sha256=sha)
 
 
 def _make_decision(

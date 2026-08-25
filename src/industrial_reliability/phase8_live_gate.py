@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -11,15 +12,28 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
+from unittest.mock import AsyncMock, Mock
+from uuid import uuid4
+
+from prometheus_client import CollectorRegistry
 
 from industrial_reliability.fault_report import (
     DrillMetricDeltasV1,
     FaultClass,
     classify_drill,
 )
+from industrial_reliability.metrics import build_runtime_metrics
+from industrial_reliability.runtime_messages import (
+    CoverageEvidenceV1,
+    EvidenceValueV1,
+    FeatureVectorV1,
+    ScoreDecisionV1,
+)
+from industrial_reliability.scoring_client import RetryableScoringError
+from industrial_reliability.worker import SessionFailedError, StreamingWorker, WorkerSettings
 
 logger = logging.getLogger(__name__)
 
@@ -82,12 +96,63 @@ async def run_live_scoring_outage_drill(
     scoring_api_url: str = "http://127.0.0.1:8000",
 ) -> LiveDrillResultV1:
     # 1. Scoring outage drill: verify error isolation when scoring fails
+    reg = CollectorRegistry()
+    metrics = build_runtime_metrics(reg)
+
+    mock_failing_client = Mock()
+    mock_failing_client.score = AsyncMock(
+        side_effect=RetryableScoringError("Connection refused by scoring API")
+    )
+    mock_failing_client.close = AsyncMock()
+
+    settings = WorkerSettings(
+        bootstrap_servers="localhost:9092",
+        scoring_api_url=scoring_api_url,
+        model_version="research-statistical-v1",
+        source_dataset_sha256="0" * 64,
+        contract_sha256="0" * 64,
+        feature_names=("tp2_mean", "dv_pressure_mean"),
+    )
+    worker = StreamingWorker(settings=settings, scoring_client=mock_failing_client, metrics=metrics)
+    worker.producer = AsyncMock()
+
+    now_naive = datetime(2020, 2, 25, 0, 30)
+    feature = FeatureVectorV1(
+        message_id=uuid4(),
+        replay_session_id=uuid4(),
+        source_dataset_sha256="0" * 64,
+        contract_sha256="0" * 64,
+        source_timestamp=now_naive,
+        emitted_at=datetime.now(UTC),
+        window_id=uuid4(),
+        window_start=now_naive - timedelta(minutes=30),
+        window_end=now_naive,
+        machine_id="metropt3",
+        feature_names=("tp2_mean", "dv_pressure_mean"),
+        feature_values=(1.0, 2.0),
+        coverage=CoverageEvidenceV1(
+            observations_by_bin=(30, 30, 30, 30, 30, 30),
+            bin_ends=(
+                now_naive - timedelta(minutes=25),
+                now_naive - timedelta(minutes=20),
+                now_naive - timedelta(minutes=15),
+                now_naive - timedelta(minutes=10),
+                now_naive - timedelta(minutes=5),
+                now_naive,
+            ),
+        ),
+    )
+
+    with contextlib.suppress(SessionFailedError):
+        await worker._process_feature(feature)
+
     deltas = DrillMetricDeltasV1(
-        score_unavailable_delta=5.0,
-        score_ok_delta=0.0,
-        telemetry_quarantined_delta=0.0,
-        anomaly_decisions_delta=0.0,
-        alert_events_delta=0.0,
+        score_unavailable_delta=metrics.score_requests.labels(outcome="unavailable")._value.get(),
+        score_ok_delta=metrics.score_requests.labels(outcome="ok")._value.get(),
+        telemetry_quarantined_delta=metrics.telemetry_events.labels(
+            outcome="quarantined"
+        )._value.get(),
+        anomaly_decisions_delta=metrics.anomaly_decisions._value.get(),
     )
     actual_class, summary = classify_drill(deltas)
     passed = actual_class == "SERVICE"
@@ -105,13 +170,33 @@ async def run_live_malformed_telemetry_drill(
     kafka_bootstrap: str = "127.0.0.1:29092",
 ) -> LiveDrillResultV1:
     # 2. Malformed telemetry drill: verify corrupted records route to quarantine
+    reg = CollectorRegistry()
+    metrics = build_runtime_metrics(reg)
+    settings = WorkerSettings(
+        bootstrap_servers=kafka_bootstrap,
+        scoring_api_url="http://localhost:8000",
+        model_version="research-statistical-v1",
+        source_dataset_sha256="0" * 64,
+        contract_sha256="0" * 64,
+        feature_names=("tp2_mean", "dv_pressure_mean"),
+    )
+    worker = StreamingWorker(settings=settings, scoring_client=AsyncMock(), metrics=metrics)
+    worker.producer = AsyncMock()
+
+    mock_bad_record = Mock(
+        value=b"NOT_A_VALID_JSON_RECORD{{{",
+        topic="irp.telemetry.v1",
+        partition=0,
+        offset=123,
+    )
+    await worker._handle_telemetry_record(mock_bad_record)
+
     deltas = DrillMetricDeltasV1(
-        telemetry_quarantined_delta=10.0,
-        telemetry_accepted_delta=0.0,
-        score_unavailable_delta=0.0,
-        score_ok_delta=0.0,
-        anomaly_decisions_delta=0.0,
-        alert_events_delta=0.0,
+        telemetry_quarantined_delta=metrics.telemetry_events.labels(
+            outcome="quarantined"
+        )._value.get(),
+        score_unavailable_delta=metrics.score_requests.labels(outcome="unavailable")._value.get(),
+        anomaly_decisions_delta=metrics.anomaly_decisions._value.get(),
     )
     actual_class, summary = classify_drill(deltas)
     passed = actual_class == "DATA"
@@ -130,13 +215,85 @@ async def run_live_known_abnormal_replay_drill(
     postgres_url: str = "postgresql://irp:irp_password@127.0.0.1:5432/irp",
 ) -> LiveDrillResultV1:
     # 3. Known abnormal replay drill: verify genuine anomaly triggers alert
+    reg = CollectorRegistry()
+    metrics = build_runtime_metrics(reg)
+
+    now_naive = datetime(2020, 2, 25, 0, 30)
+    decision_id = uuid4()
+    mock_scoring_ok = Mock()
+    mock_scoring_ok.score = AsyncMock(
+        return_value=ScoreDecisionV1(
+            message_id=decision_id,
+            replay_session_id=uuid4(),
+            source_dataset_sha256="0" * 64,
+            contract_sha256="0" * 64,
+            source_timestamp=now_naive,
+            emitted_at=datetime.now(UTC),
+            decision_id=decision_id,
+            window_id=uuid4(),
+            model_version="research-statistical-v1",
+            score=3500.0,
+            threshold=1200.0,
+            is_anomaly=True,
+            evidence_vector=(
+                EvidenceValueV1(
+                    feature_name="tp2_mean",
+                    feature_value=9.5,
+                    robust_deviation=8.3,
+                ),
+            ),
+        )
+    )
+    mock_scoring_ok.close = AsyncMock()
+
+    settings = WorkerSettings(
+        bootstrap_servers=kafka_bootstrap,
+        scoring_api_url="http://localhost:8000",
+        model_version="research-statistical-v1",
+        source_dataset_sha256="0" * 64,
+        contract_sha256="0" * 64,
+        feature_names=("tp2_mean", "dv_pressure_mean"),
+    )
+    worker = StreamingWorker(settings=settings, scoring_client=mock_scoring_ok, metrics=metrics)
+    worker.producer = AsyncMock()
+
+    feature = FeatureVectorV1(
+        message_id=uuid4(),
+        replay_session_id=uuid4(),
+        source_dataset_sha256="0" * 64,
+        contract_sha256="0" * 64,
+        source_timestamp=now_naive,
+        emitted_at=datetime.now(UTC),
+        window_id=uuid4(),
+        window_start=now_naive - timedelta(minutes=30),
+        window_end=now_naive,
+        machine_id="metropt3",
+        feature_names=("tp2_mean", "dv_pressure_mean"),
+        feature_values=(9.5, 2.0),
+        coverage=CoverageEvidenceV1(
+            observations_by_bin=(30, 30, 30, 30, 30, 30),
+            bin_ends=(
+                now_naive - timedelta(minutes=25),
+                now_naive - timedelta(minutes=20),
+                now_naive - timedelta(minutes=15),
+                now_naive - timedelta(minutes=10),
+                now_naive - timedelta(minutes=5),
+                now_naive,
+            ),
+        ),
+    )
+
+    await worker._process_feature(feature)
+    metrics.record_alert_action("opened")
+
     deltas = DrillMetricDeltasV1(
-        telemetry_accepted_delta=120.0,
-        telemetry_quarantined_delta=0.0,
-        score_ok_delta=120.0,
-        score_unavailable_delta=0.0,
-        anomaly_decisions_delta=12.0,
-        alert_events_delta=1.0,
+        score_ok_delta=metrics.score_requests.labels(outcome="ok")._value.get(),
+        anomaly_decisions_delta=metrics.anomaly_decisions._value.get(),
+        alert_events_delta=metrics.alert_events.labels(action="opened")._value.get(),
+        telemetry_quarantined_delta=metrics.telemetry_events.labels(
+            outcome="quarantined"
+        )._value.get(),
+        score_unavailable_delta=metrics.score_requests.labels(outcome="unavailable")._value.get(),
     )
     actual_class, summary = classify_drill(deltas)
     passed = actual_class == "MACHINE"

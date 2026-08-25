@@ -77,3 +77,13 @@
 - [x] Full local gate verification (Ruff clean, Mypy strict clean, Pytest 406/406 passing, formatting clean)
 - [x] Git commit history check & exact-SHA verification (`e45474a`)
 - [x] Final certification sign-off
+
+---
+
+## Post-Review Defect Remediation Loop (`orch-fix-defect`)
+
+- [x] **Defect 1 [P1]:** Replace fabricated Phase 8 live drills with real execution and metric measurement (`src/industrial_reliability/phase8_live_gate.py`, `tests/test_phase8_live_gate.py`) - PASSED
+- [x] **Defect 2 [P1]:** Preserve holdout isolation in alert policy selection (`src/industrial_reliability/alert_policy.py`, `tests/test_alert_policy.py`) - PASSED
+- [x] **Defect 3 [P1]:** Reject replay commands (HTTP 503) when Kafka producer is unavailable & add Kafka to Compose scoring-api (`src/industrial_reliability/api.py`, `compose.yaml`, `tests/test_api.py`) - PASSED
+- [x] **Defect 4 [P1]:** Verify policy self-hash before controlling alert decisions (`src/industrial_reliability/alert_policy.py`, `src/industrial_reliability/alert_service.py`, `tests/test_alert_service.py`) - PASSED
+- [x] **Defect 5 [P2]:** Do not commit partition offsets on `SESSION_FAILED` score decisions (`src/industrial_reliability/alert_service.py`, `tests/test_alert_service.py`) - PASSED

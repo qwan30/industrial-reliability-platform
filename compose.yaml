@@ -47,6 +47,7 @@ services:
     ports: ["127.0.0.1:8000:8000"]
     volumes: ["./artifacts/research-candidate:/runtime/scoring-package:ro"]
     environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SCORING_PACKAGE_DIR: /runtime/scoring-package
       SCORING_MANIFEST_SHA256: ${SCORING_MANIFEST_SHA256:-}
       ALLOW_RESEARCH_CANDIDATE: ${ALLOW_RESEARCH_CANDIDATE:-false}

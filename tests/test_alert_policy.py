@@ -110,3 +110,72 @@ def test_candidate_evaluator_rejects_holdout_rows() -> None:
     )
     with pytest.raises(ValueError, match="calibration"):
         select_policy(frame)
+
+
+def test_research_candidate_uses_train_fallback_never_holdout(tmp_path: Path) -> None:
+    # Write scores with ONLY train and holdout (no calibration)
+    start_ts = datetime(2020, 3, 1, 0, 0, 0)
+    rows = []
+    for i in range(288):
+        ts = start_ts + timedelta(minutes=5 * i)
+        rows.append(
+            {
+                "model_id": "statistical",
+                "split": "train",
+                "window_start": ts,
+                "window_end": ts + timedelta(minutes=30),
+                "score": 0.5,
+                "threshold": 1.0,
+                "is_anomaly": False,
+            }
+        )
+    for i in range(50):
+        ts = start_ts + timedelta(days=10, minutes=5 * i)
+        rows.append(
+            {
+                "model_id": "statistical",
+                "split": "holdout",
+                "window_start": ts,
+                "window_end": ts + timedelta(minutes=30),
+                "score": 1.5,
+                "threshold": 1.0,
+                "is_anomaly": True,
+            }
+        )
+
+    scores_df = pd.DataFrame(rows)
+    scores_path = tmp_path / "scores.parquet"
+    scores_df.to_parquet(scores_path, index=False)
+    scores_sha = sha256_file(scores_path)
+
+    manifest_data = {
+        "schema_version": "phase1b-champion-manifest-v1",
+        "model_id": "statistical",
+        "model_version": "research-statistical-v1",
+        "operational_status": "RESEARCH_ONLY",
+        "source_dataset_sha256": "a" * 64,
+        "contract_sha256": "b" * 64,
+        "threshold": 1.0,
+        "stride_seconds": 300,
+        "artifact_sha256": {
+            "scores.parquet": scores_sha,
+        },
+    }
+    manifest_path = tmp_path / "champion-manifest.json"
+    manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    out_file = tmp_path / "alert-policy.json"
+    policy = lock_alert_policy(manifest_path, out_file)
+    assert policy.source_split == "train"
+    assert policy.source_split != "holdout"
+
+    from industrial_reliability.alert_policy import verify_policy_integrity
+
+    verify_policy_integrity(policy)
+
+    # Test tampering policy
+    from dataclasses import replace
+
+    tampered = replace(policy, threshold=999.0)
+    with pytest.raises(ValueError, match="integrity check failed"):
+        verify_policy_integrity(tampered)

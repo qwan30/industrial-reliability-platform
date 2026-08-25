@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from aiokafka import TopicPartition
 
+from industrial_reliability.alert_consumer import ProcessOutcome
 from industrial_reliability.alert_service import (
     AlertService,
     AlertServiceSettings,
@@ -72,3 +74,60 @@ async def test_alert_service_lifecycle(tmp_path: Path) -> None:
         assert service._running is False
         mock_consumer.stop.assert_awaited_once()
         mock_producer.stop.assert_awaited_once()
+
+
+def test_alert_service_rejects_tampered_policy(tmp_path: Path) -> None:
+    policy = _make_policy()
+    policy_dict = policy.to_dict()
+    # Tamper with threshold without updating policy_sha256
+    policy_dict["threshold"] = 999.0
+
+    policy_file = tmp_path / "tampered-alert-policy.json"
+    policy_file.write_text(json.dumps(policy_dict), encoding="utf-8")
+
+    settings = AlertServiceSettings(
+        kafka=KafkaSettings(bootstrap_servers="localhost:9092", client_id="test"),
+        database_url="sqlite:///:memory:",
+        policy_path=policy_file,
+    )
+    with pytest.raises(ValueError, match="integrity check failed"):
+        AlertService(settings)
+
+
+@pytest.mark.asyncio
+async def test_alert_service_does_not_commit_on_session_failed(tmp_path: Path) -> None:
+    policy = _make_policy()
+    policy_file = tmp_path / "alert-policy.json"
+    policy_file.write_text(json.dumps(policy.to_dict()), encoding="utf-8")
+
+    settings = AlertServiceSettings(
+        kafka=KafkaSettings(bootstrap_servers="localhost:9092", client_id="test"),
+        database_url="sqlite:///:memory:",
+        policy_path=policy_file,
+    )
+
+    service = AlertService(settings)
+    mock_consumer = AsyncMock()
+    mock_alert_consumer = AsyncMock()
+
+    service.consumer = mock_consumer
+    service.alert_consumer = mock_alert_consumer
+
+    # Simulate getmany returning 1 record, but processing returns SESSION_FAILED
+    tp = TopicPartition("irp.scores.v1", 0)
+    mock_record = Mock(offset=42)
+
+    async def fake_getmany(**kwargs):
+        service._running = False  # exit loop after first batch
+        return {tp: [mock_record]}
+
+    mock_consumer.getmany.side_effect = fake_getmany
+    mock_alert_consumer.process.return_value = ProcessOutcome.SESSION_FAILED
+
+    service._running = True
+    await service._run_consumer_loop()
+
+    # Verify alert_consumer processed the record
+    mock_alert_consumer.process.assert_awaited_once_with(mock_record)
+    # Verify consumer.commit was NOT called because outcome was SESSION_FAILED!
+    mock_consumer.commit.assert_not_awaited()

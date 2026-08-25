@@ -27,6 +27,7 @@ jobs:
           github_action_config.auto_describe: "true"
           github_action_config.auto_improve: "false"
           github_action_config.pr_actions: '["opened", "synchronize", "reopened", "ready_for_review"]'
+          pr_description.publish_description_as_comment: "true"
           config.model: "gpt-4o-mini"
           config.fallback_models: '["gpt-4o-mini"]'
           config.max_model_tokens: "32000"

@@ -9,9 +9,11 @@ patch_extension_skip_types = [".md", ".txt", ".json", ".parquet", ".csv", ".prop
 require_focused_review = true
 require_score_review = true
 require_security_review = true
+require_estimate_effort_to_review = true
 num_code_suggestions = 0
 
 [pr_description]
+publish_description_as_comment = true
 publish_labels = false
 add_custom_labels = false
 
@@ -19,4 +21,4 @@ add_custom_labels = false
 auto_review = true
 auto_describe = true
 auto_improve = false
-pr_actions = ["opened", "reopened", "ready_for_review", "synchronize"]
+pr_actions = ["opened", "synchronize", "reopened", "ready_for_review"]

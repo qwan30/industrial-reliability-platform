@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
+import time
 from collections.abc import AsyncIterator
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -18,6 +20,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from industrial_reliability.champion import (
+    ChampionProvenanceVerifier,
     ChampionScorer,
     ScoringContractError,
     load_champion,
@@ -27,12 +30,15 @@ from industrial_reliability.console_stream import (
     ConsoleEventV1,
 )
 from industrial_reliability.kafka_io import encode_message
+from industrial_reliability.metrics import RuntimeMetrics, mount_api_metrics
 from industrial_reliability.persistence import (
     AlertDetailRecord,
     AlertSummaryRecord,
     ReplaySessionRecord,
     RuntimeStore,
 )
+from industrial_reliability.rca_evidence import AlertNotFound, gather_evidence
+from industrial_reliability.rca_openai import OpenAiRcaGenerator, evidence_only_report
 from industrial_reliability.runtime_messages import (
     REPLAY_COMMANDS_TOPIC,
     ApiErrorV1,
@@ -108,7 +114,7 @@ def _serialize_alert_detail(detail: AlertDetailRecord) -> dict[str, Any]:
         "events": detail.events,
         "evidence": detail.evidence,
         "decisions": detail.decisions,
-        "rca": None,
+        "rca": detail.rca,
     }
 
 
@@ -141,8 +147,14 @@ def create_app(
     store: RuntimeStore | None = None,
     producer: Any = None,
     broker: ConsoleEventBroker | None = None,
+    provenance_verifier: ChampionProvenanceVerifier | None = None,
+    metrics: RuntimeMetrics | None = None,
+    rca_generator: OpenAiRcaGenerator | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Industrial Reliability Scoring and Alert API", version="1.0")
+
+    if metrics is not None:
+        mount_api_metrics(app, metrics)
 
     @app.exception_handler(ScoringContractError)
     async def scoring_contract_error_handler(
@@ -167,18 +179,79 @@ def create_app(
         return {"success": True, "data": {"status": "ok"}, "error": None}
 
     @app.get("/readyz")
-    def readyz() -> dict[str, Any]:
-        return {"success": True, "data": {"status": "ready"}, "error": None}
+    def readyz() -> JSONResponse:
+        if provenance_verifier is not None:
+            ok, reason = provenance_verifier.verify()
+            if not ok:
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "success": False,
+                        "data": None,
+                        "error": {
+                            "code": "CHAMPION_PROVENANCE_MISMATCH",
+                            "message": reason or "Champion provenance verification failed",
+                        },
+                    },
+                )
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "data": {"status": "ready"}, "error": None},
+        )
+
+    @app.get("/v1/models/{model_version}/provenance")
+    def get_model_provenance(model_version: str) -> JSONResponse:
+        if model_version != scorer.model_version:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {
+                        "code": "MODEL_VERSION_NOT_FOUND",
+                        "message": f"Model version {model_version} not found",
+                    },
+                },
+            )
+        if provenance_verifier is not None:
+            prov_data = provenance_verifier.get_provenance_data()
+            return JSONResponse(
+                status_code=200,
+                content={"success": True, "data": prov_data, "error": None},
+            )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "data": {
+                    "model_version": scorer.model_version,
+                    "active_feature_names": list(scorer.feature_names),
+                    "threshold": scorer.threshold,
+                },
+                "error": None,
+            },
+        )
 
     @app.post("/v1/score")
     def score(request: ScoreRequestV1) -> ScoreResponseV1:
+        started = time.perf_counter()
         if request.model_version != scorer.model_version:
+            if metrics is not None:
+                metrics.record_score_request("invalid_model", time.perf_counter() - started)
             raise ScoringContractError(
                 f"Model version mismatch: expected {scorer.model_version}, got {request.model_version}"
             )
 
         feature = request.feature_vector
-        result = scorer.score(feature)
+        try:
+            result = scorer.score(feature)
+        except Exception:
+            if metrics is not None:
+                metrics.record_score_request("invalid_contract", time.perf_counter() - started)
+            raise
+
+        if metrics is not None:
+            metrics.record_score_request("ok", time.perf_counter() - started)
 
         decision_id = uuid5(
             RUNTIME_NAMESPACE, f"decision:{feature.window_id}:{scorer.model_version}"
@@ -308,6 +381,58 @@ def create_app(
         return JSONResponse(
             status_code=200,
             content={"success": True, "data": _serialize_alert_detail(detail), "error": None},
+        )
+
+    @app.post("/v1/alerts/{alert_id}/rca")
+    def generate_alert_rca(alert_id: UUID) -> JSONResponse:
+        if store is None:
+            return _store_unavailable_response()
+        detail = store.get_alert_detail(alert_id)
+        if detail is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {"code": "ALERT_NOT_FOUND", "message": "Alert not found"},
+                },
+            )
+        try:
+            bundle = gather_evidence(str(alert_id), store)
+        except AlertNotFound:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {"code": "ALERT_NOT_FOUND", "message": "Alert not found"},
+                },
+            )
+
+        existing_report = store.get_rca(alert_id, bundle.bundle_sha256)
+        if existing_report is not None:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True,
+                    "data": existing_report.model_dump(mode="json"),
+                    "error": None,
+                },
+            )
+
+        gen = rca_generator or OpenAiRcaGenerator.from_env()
+        if gen is None:
+            report = evidence_only_report(bundle, reason="provider_not_configured")
+        else:
+            report = gen.generate(bundle)
+
+        if report.status == "COMPLETE":
+            with contextlib.suppress(Exception):
+                report = store.save_complete_rca(report)
+
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "data": report.model_dump(mode="json"), "error": None},
         )
 
     @app.get("/v1/replays/{replay_session_id}/stream")

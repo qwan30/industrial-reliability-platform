@@ -3,6 +3,7 @@ import {
   AlertSummary,
   DependencyHealth,
   ReplaySession,
+  RcaReportV1,
   StartReplayParams,
 } from './types';
 
@@ -92,3 +93,20 @@ export async function checkHealth(baseUrl = DEFAULT_BASE_URL): Promise<Dependenc
     };
   }
 }
+
+export async function generateRca(
+  alertId: string,
+  baseUrl = DEFAULT_BASE_URL
+): Promise<RcaReportV1> {
+  const res = await fetch(`${baseUrl}/v1/alerts/${alertId}/rca`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error?.message || `Failed to generate RCA: ${res.statusText}`);
+  }
+  const json = await res.json();
+  return json.data;
+}
+

@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -16,10 +17,15 @@ from uuid import UUID, uuid4
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.structs import OffsetAndMetadata
 
+from industrial_reliability.drift import (
+    DriftReferenceV1,
+    max_population_stability_index,
+)
 from industrial_reliability.kafka_io import (
     decode_message,
     encode_message,
 )
+from industrial_reliability.metrics import RuntimeMetrics, start_process_metrics
 from industrial_reliability.online_features import (
     BuilderResult,
     OnlineFeatureBuilder,
@@ -105,11 +111,18 @@ class StreamingWorker:
         self,
         settings: WorkerSettings,
         scoring_client: ScoringClient | None = None,
+        metrics: RuntimeMetrics | None = None,
+        drift_reference: DriftReferenceV1 | None = None,
     ) -> None:
         self.settings = settings
         self.scoring_client = scoring_client or ScoringClient(
             base_url=settings.scoring_api_url,
             model_version=settings.model_version,
+        )
+        self.metrics = metrics
+        self.drift_reference = drift_reference
+        self.rolling_features: dict[UUID, dict[str, list[float]]] = defaultdict(
+            lambda: defaultdict(list)
         )
         self.producer: AIOKafkaProducer | None = None
         self.consumer: AIOKafkaConsumer | None = None
@@ -144,6 +157,8 @@ class StreamingWorker:
         )
         await self.producer.start()
         await self.consumer.start()
+        if self.metrics is not None:
+            self.metrics.set_dependency_ready("kafka", True)
         self._running = True
 
     async def stop(self) -> None:
@@ -163,6 +178,8 @@ class StreamingWorker:
         error_code: str,
         error_detail: str,
     ) -> None:
+        if self.metrics is not None:
+            self.metrics.record_telemetry("quarantined")
         if self.producer is None:
             raise RuntimeError(PRODUCER_NOT_STARTED)
         payload_hash = hashlib.sha256(raw_bytes).hexdigest()
@@ -189,6 +206,25 @@ class StreamingWorker:
         if self.producer is None:
             raise RuntimeError(PRODUCER_NOT_STARTED)
 
+        if self.metrics is not None:
+            # compute coverage ratio
+            obs = feature.coverage.observations_by_bin
+            ratio = float(sum(obs)) / float(max(1, len(obs) * 30))
+            self.metrics.record_valid_window(coverage_ratio=ratio)
+
+        # Track rolling features for drift indicator
+        session_feats = self.rolling_features[feature.replay_session_id]
+        for name, val in zip(feature.feature_names, feature.feature_values, strict=False):
+            session_feats[name].append(val)
+            if len(session_feats[name]) > 36:
+                session_feats[name].pop(0)
+
+        if self.drift_reference is not None and self.metrics is not None:
+            first_len = len(next(iter(session_feats.values()))) if session_feats else 0
+            if first_len >= 12:
+                psi = max_population_stability_index(session_feats, self.drift_reference)
+                self.metrics.set_feature_psi_max(psi)
+
         # 1. Publish feature vector
         feat_bytes = encode_message(feature)
         await self.producer.send_and_wait(
@@ -198,10 +234,14 @@ class StreamingWorker:
         )
 
         # 2. Obtain score decision
+        started = time.perf_counter()
         try:
             decision = await self.scoring_client.score(feature)
         except (RetryableScoringError, PermanentScoringError) as err:
             logger.exception("Scoring failed for feature %s", feature.window_id)
+            if self.metrics is not None:
+                self.metrics.record_score_request("unavailable", time.perf_counter() - started)
+                self.metrics.set_dependency_ready("scoring_api", False)
             error_code = (
                 "SCORING_RETRY_EXHAUSTED"
                 if isinstance(err, RetryableScoringError)
@@ -214,6 +254,14 @@ class StreamingWorker:
                 source_ts=feature.source_timestamp,
             )
             raise SessionFailedError(f"Session {feature.replay_session_id} failed: {err}") from err
+
+        duration = time.perf_counter() - started
+        if self.metrics is not None:
+            self.metrics.record_score_request("ok", duration)
+            self.metrics.record_anomaly_decision(
+                score=decision.score, is_anomaly=decision.is_anomaly
+            )
+            self.metrics.set_dependency_ready("scoring_api", True)
 
         # 3. Publish score decision
         score_bytes = encode_message(decision)
@@ -231,6 +279,8 @@ class StreamingWorker:
         source_ts: datetime,
     ) -> None:
         self._failed_sessions.add(session_id)
+        if self.metrics is not None:
+            self.metrics.record_replay_session_failure(error_code)
         if self.producer is None:
             return
 
@@ -307,8 +357,22 @@ class StreamingWorker:
             )
 
         builder = self.builders[session_id]
+        prev_seq = self.last_sequence.get(session_id, -1)
+        if self.metrics is not None:
+            if event.sequence <= prev_seq:
+                self.metrics.record_telemetry("duplicate")
+            else:
+                self.metrics.record_telemetry("accepted")
+
         res = builder.push(event)
         self.last_sequence[session_id] = event.sequence
+
+        if res.segment_closed_reason is not None:
+            self.rolling_features[session_id].clear()
+            if self.metrics is not None:
+                self.metrics.set_feature_psi_max(0.0)
+                reason_kind = "gap" if res.segment_closed_reason == "sequence_gap" else "ordering"
+                self.metrics.record_segment_break(reason_kind)
 
         for feature in res.features:
             await self._process_feature(feature)
@@ -373,8 +437,28 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
+    metrics_port = os.environ.get("METRICS_PORT", "").strip()
+    metrics = None
+    if metrics_port:
+        from prometheus_client import CollectorRegistry
+
+        from industrial_reliability.metrics import build_runtime_metrics
+
+        registry = CollectorRegistry()
+        metrics = build_runtime_metrics(registry)
+        start_process_metrics(int(metrics_port), registry)
+        logger.info("Metrics server started on port %s", metrics_port)
+
+    drift_ref = None
+    drift_ref_path = os.environ.get("DRIFT_REFERENCE_PATH", "").strip()
+    if drift_ref_path:
+        from industrial_reliability.drift import load_reference
+
+        drift_ref = load_reference(Path(drift_ref_path))
+        logger.info("Loaded drift reference from %s", drift_ref_path)
+
     settings = WorkerSettings.from_env()
-    worker = StreamingWorker(settings)
+    worker = StreamingWorker(settings, metrics=metrics, drift_reference=drift_ref)
     asyncio.run(worker.run())
 
 

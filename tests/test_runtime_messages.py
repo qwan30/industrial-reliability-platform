@@ -344,3 +344,78 @@ def test_evidence_snapshot_round_trips_and_validates() -> None:
         system_health={"cpu_pct": 12.5, "mem_mb": 128},
     )
     assert EvidenceSnapshotV1.model_validate_json(evidence.model_dump_json()) == evidence
+
+
+def _valid_rca_payload() -> dict[str, object]:
+    return {
+        "schema_version": "rca-report-v1",
+        "message_id": uuid4(),
+        "replay_session_id": uuid4(),
+        "source_dataset_sha256": "a" * 64,
+        "contract_sha256": "b" * 64,
+        "source_timestamp": datetime(2020, 4, 18, 0, 5),
+        "emitted_at": datetime.now(UTC),
+        "report_id": "rca-12345",
+        "alert_id": "alert-67890",
+        "status": "COMPLETE",
+        "summary": "Pressure anomaly detected during compressor loading.",
+        "observations": (
+            {
+                "claim": "tp2_mean deviated significantly from normal operational baseline.",
+                "evidence_ids": ("ev-score-1",),
+            },
+        ),
+        "uncertainty": ("Anomaly evidence does not prove a mechanical root cause.",),
+        "next_checks": ("Inspect intake check valve and pressure sensor calibration.",),
+        "evidence_ids": ("ev-score-1", "ev-alert-1"),
+        "evidence_bundle_sha256": "d" * 64,
+        "provider_model": "gpt-4o",
+    }
+
+
+def test_rca_report_requires_citations_for_every_observation() -> None:
+    from industrial_reliability.runtime_messages import RcaReportV1
+
+    payload = _valid_rca_payload()
+    payload["observations"] = ({"claim": "Score exceeded threshold", "evidence_ids": ()},)
+    with pytest.raises(ValidationError):
+        RcaReportV1.model_validate(payload)
+
+
+def test_rca_report_rejects_citations_outside_bundle() -> None:
+    from industrial_reliability.runtime_messages import RcaReportV1
+
+    payload = _valid_rca_payload()
+    payload["observations"] = (
+        {"claim": "Score exceeded threshold", "evidence_ids": ("invented-evidence-id",)},
+    )
+    with pytest.raises(ValidationError, match=r"unknown evidence ID|not in evidence_ids"):
+        RcaReportV1.model_validate(payload)
+
+
+def test_rca_report_requires_provider_model_if_complete() -> None:
+    from industrial_reliability.runtime_messages import RcaReportV1
+
+    payload = _valid_rca_payload()
+    payload["status"] = "COMPLETE"
+    payload["provider_model"] = None
+    with pytest.raises(ValidationError, match="provider_model"):
+        RcaReportV1.model_validate(payload)
+
+
+def test_rca_report_forbids_provider_model_if_unavailable() -> None:
+    from industrial_reliability.runtime_messages import RcaReportV1
+
+    payload = _valid_rca_payload()
+    payload["status"] = "UNAVAILABLE"
+    payload["provider_model"] = "gpt-4o"
+    with pytest.raises(ValidationError, match="provider_model"):
+        RcaReportV1.model_validate(payload)
+
+
+def test_rca_report_is_frozen() -> None:
+    from industrial_reliability.runtime_messages import RcaReportV1
+
+    report = RcaReportV1.model_validate(_valid_rca_payload())
+    with pytest.raises(ValidationError):
+        report.status = "UNAVAILABLE"  # type: ignore[misc]

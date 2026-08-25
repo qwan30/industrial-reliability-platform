@@ -1,0 +1,20 @@
+{
+  "schema_version": "openvino-decision-v1",
+  "technology": "openvino",
+  "status": "N/A",
+  "git_sha": "0000000000000000000000000000000000000000",
+  "champion_sha256": null,
+  "contract_sha256": "149e164748522fe6dfa844a8de70b29ee1259122962e036ff6a563c1120047d8",
+  "source_dataset_sha256": "aab991a970e58210de853bb8078ce0e63abb4d9412fdc5c79792dae3d8e1721a",
+  "reason_codes": [
+    "PLATFORM_PATH_STOPPED"
+  ],
+  "baseline": null,
+  "candidate": null,
+  "parity_passed": null,
+  "benefit_passed": null,
+  "limitations": [
+    "Platform path stopped after offline ML feasibility evaluation."
+  ],
+  "decision_sha256": "305ad275cd4488092b349d6780a3363f497418fa74437a34444bab73827706a4"
+}

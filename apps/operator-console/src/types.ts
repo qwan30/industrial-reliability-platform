@@ -32,12 +32,37 @@ export interface EvidenceItem {
   robust_deviation: number;
 }
 
+export interface RcaObservationV1 {
+  claim: string;
+  evidence_ids: string[];
+}
+
+export interface RcaReportV1 {
+  schema_version: 'rca-report-v1';
+  message_id: string;
+  replay_session_id: string;
+  source_dataset_sha256: string;
+  contract_sha256: string;
+  source_timestamp: string;
+  emitted_at: string;
+  report_id: string;
+  alert_id: string;
+  status: 'COMPLETE' | 'UNAVAILABLE';
+  summary: string;
+  observations: RcaObservationV1[];
+  uncertainty: string[];
+  next_checks: string[];
+  evidence_ids: string[];
+  evidence_bundle_sha256: string;
+  provider_model: string | null;
+}
+
 export interface AlertDetail {
   alert: AlertSummary;
   events: Array<Record<string, unknown>>;
   evidence: EvidenceItem[];
   decisions: Array<Record<string, unknown>>;
-  rca: Record<string, unknown> | null;
+  rca: RcaReportV1 | null;
 }
 
 export interface EvidenceVectorItem {

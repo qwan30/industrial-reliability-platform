@@ -144,3 +144,84 @@ def load_champion(package_dir: Path, expected_manifest_sha256: str) -> ChampionS
         median=median,
         mad=mad,
     )
+
+
+class ChampionProvenanceVerifier:
+    def __init__(
+        self,
+        package_dir: Path,
+        receipt_path: Path | None = None,
+        tracking_uri: str | None = None,
+        registered_model_name: str = "industrial-reliability-anomaly-detector",
+        alias: str = "champion",
+        mlflow_client: Any = None,
+    ) -> None:
+        self.package_dir = package_dir.resolve()
+        self.receipt_path = (
+            receipt_path or (self.package_dir / "promotion-receipt.json")
+        ).resolve()
+        self.tracking_uri = tracking_uri
+        self.registered_model_name = registered_model_name
+        self.alias = alias
+        self.mlflow_client = mlflow_client
+
+    def verify(self) -> tuple[bool, str | None]:
+        from industrial_reliability.ml_provenance import (
+            load_promotion_receipt,
+            verify_promotion_receipt,
+        )
+
+        manifest_file = self.package_dir / "manifest.json"
+        if not manifest_file.is_file():
+            return False, f"Champion manifest not found at {manifest_file}"
+
+        manifest_sha = sha256_file(manifest_file)
+
+        if not self.receipt_path.is_file():
+            return False, f"Promotion receipt not found at {self.receipt_path}"
+
+        try:
+            receipt = load_promotion_receipt(self.receipt_path)
+            verify_promotion_receipt(receipt)
+        except Exception as e:
+            return False, f"Invalid promotion receipt: {e}"
+
+        if receipt.champion_package_sha256 != manifest_sha:
+            return False, (
+                f"Provenance mismatch: receipt package sha {receipt.champion_package_sha256} "
+                f"does not match manifest sha {manifest_sha}"
+            )
+
+        client = self.mlflow_client
+        if client is None and self.tracking_uri:
+            try:
+                from industrial_reliability.ml_lifecycle import MlflowClient
+
+                if MlflowClient is not None:
+                    client = MlflowClient(tracking_uri=self.tracking_uri)
+            except Exception:
+                client = None
+
+        if client is not None:
+            try:
+                mv = client.get_model_version_by_alias(self.registered_model_name, self.alias)
+                if str(mv.run_id) != str(receipt.mlflow_run_id):
+                    return False, (
+                        f"MLflow champion alias points to run_id={mv.run_id}, "
+                        f"but promotion receipt has run_id={receipt.mlflow_run_id}"
+                    )
+            except Exception as e:
+                return False, f"MLflow alias verification failed: {e}"
+
+        return True, None
+
+    def get_provenance_data(self) -> dict[str, Any]:
+        import json
+
+        data: dict[str, Any] = {}
+        manifest_file = self.package_dir / "manifest.json"
+        if manifest_file.is_file():
+            data["manifest"] = json.loads(manifest_file.read_text(encoding="utf-8"))
+        if self.receipt_path.is_file():
+            data["receipt"] = json.loads(self.receipt_path.read_text(encoding="utf-8"))
+        return data

@@ -381,3 +381,48 @@ class EvidenceSnapshotV1(FrozenMessage):
         if self.emitted_at.tzinfo is None:
             raise ValueError(ERR_EMITTED_AT_UTC)
         return self
+
+
+class RcaObservationV1(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    claim: str = Field(min_length=1, max_length=500)
+    evidence_ids: tuple[str, ...] = Field(min_length=1, max_length=8)
+
+
+class RcaReportV1(FrozenMessage):
+    schema_version: Literal["rca-report-v1"] = "rca-report-v1"
+    message_id: UUID
+    replay_session_id: UUID
+    source_dataset_sha256: str = Field(pattern=HEX_64_PATTERN)
+    contract_sha256: str = Field(pattern=HEX_64_PATTERN)
+    source_timestamp: datetime
+    emitted_at: datetime
+    report_id: str = Field(min_length=1)
+    alert_id: str = Field(min_length=1)
+    status: Literal["COMPLETE", "UNAVAILABLE"]
+    summary: str = Field(min_length=1, max_length=1000)
+    observations: tuple[RcaObservationV1, ...] = Field(max_length=12)
+    uncertainty: tuple[str, ...] = Field(min_length=1, max_length=8)
+    next_checks: tuple[str, ...] = Field(max_length=8)
+    evidence_ids: tuple[str, ...] = Field(min_length=1, max_length=64)
+    evidence_bundle_sha256: str = Field(pattern=HEX_64_PATTERN)
+    provider_model: str | None = None
+
+    @model_validator(mode="after")
+    def validate_rca_report(self) -> RcaReportV1:
+        if self.source_timestamp.tzinfo is not None:
+            raise ValueError(ERR_SOURCE_TS_NAIVE)
+        if self.emitted_at.tzinfo is None:
+            raise ValueError(ERR_EMITTED_AT_UTC)
+        if len(self.evidence_ids) != len(set(self.evidence_ids)):
+            raise ValueError("evidence_ids must be unique")
+        allowed_ids = set(self.evidence_ids)
+        for obs in self.observations:
+            for ev_id in obs.evidence_ids:
+                if ev_id not in allowed_ids:
+                    raise ValueError(f"Observation citation '{ev_id}' is not in evidence_ids")
+        if self.status == "COMPLETE" and self.provider_model is None:
+            raise ValueError("provider_model is required when status is COMPLETE")
+        if self.status == "UNAVAILABLE" and self.provider_model is not None:
+            raise ValueError("provider_model must be None when status is UNAVAILABLE")
+        return self

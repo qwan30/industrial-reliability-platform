@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ from industrial_reliability.kafka_io import (
     decode_message,
     encode_message,
 )
+from industrial_reliability.metrics import RuntimeMetrics, start_process_metrics
 from industrial_reliability.replay import (
     ReplayController,
     ReplaySource,
@@ -55,10 +57,12 @@ class ReplayService:
         settings: KafkaSettings,
         replay_source: ReplaySource,
         enable_pacing: bool = True,
+        metrics: RuntimeMetrics | None = None,
     ) -> None:
         self.settings = settings
         self.source = replay_source
         self.enable_pacing = enable_pacing
+        self.metrics = metrics
         self.producer: AIOKafkaProducer | None = None
         self.consumer: AIOKafkaConsumer | None = None
         self.active_session: RunningSession | None = None
@@ -81,6 +85,8 @@ class ReplayService:
         )
         await self.producer.start()
         await self.consumer.start()
+        if self.metrics is not None:
+            self.metrics.set_dependency_ready("kafka", True)
         self._running = True
 
     async def stop(self) -> None:
@@ -97,6 +103,8 @@ class ReplayService:
             await self.producer.stop()
 
     async def publish_telemetry(self, event: TelemetryEventV1) -> None:
+        if self.metrics is not None:
+            self.metrics.record_telemetry("accepted")
         if self.producer is None:
             raise RuntimeError(PRODUCER_NOT_STARTED)
         payload = encode_message(event)
@@ -104,6 +112,8 @@ class ReplayService:
         await self.producer.send_and_wait(TELEMETRY_TOPIC, value=payload, key=key)
 
     async def publish_status(self, status: ReplayStatusV1) -> None:
+        if self.metrics is not None and status.state == "FAILED" and status.error_code:
+            self.metrics.record_replay_session_failure(status.error_code)
         if self.producer is None:
             raise RuntimeError(PRODUCER_NOT_STARTED)
         payload = encode_message(status)
@@ -111,6 +121,8 @@ class ReplayService:
         await self.producer.send_and_wait(REPLAY_STATUS_TOPIC, value=payload, key=key)
 
     async def publish_quarantine(self, record: QuarantineRecordV1) -> None:
+        if self.metrics is not None:
+            self.metrics.record_telemetry("quarantined")
         if self.producer is None:
             raise RuntimeError(PRODUCER_NOT_STARTED)
         payload = encode_message(record)
@@ -381,9 +393,21 @@ def main() -> None:
         )
         print("Certification results:", json.dumps(res, indent=2))
     else:
+        metrics_port = os.environ.get("METRICS_PORT", "").strip()
+        metrics = None
+        if metrics_port:
+            from prometheus_client import CollectorRegistry
+
+            from industrial_reliability.metrics import build_runtime_metrics
+
+            registry = CollectorRegistry()
+            metrics = build_runtime_metrics(registry)
+            start_process_metrics(int(metrics_port), registry)
+            logger.info("Metrics server started on port %s", metrics_port)
+
         settings = KafkaSettings.from_env()
         source = ReplaySource(args.parquet.resolve())
-        service = ReplayService(settings, source)
+        service = ReplayService(settings, source, metrics=metrics)
         asyncio.run(service.run())
 
 

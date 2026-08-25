@@ -71,6 +71,7 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: industrial-reliability
       REPLAY_PARQUET_PATH: /runtime/data/metropt3/telemetry.parquet
+      METRICS_PORT: "9101"
     depends_on:
       kafka:
         condition: service_healthy
@@ -86,6 +87,7 @@ services:
       CHAMPION_PACKAGE_DIR: /runtime/champion
       CHAMPION_MANIFEST_SHA256: ${CHAMPION_MANIFEST_SHA256:-}
       DATABASE_URL: postgresql://irp:irp_password@postgres:5432/irp
+      METRICS_PORT: "9102"
     depends_on:
       kafka:
         condition: service_healthy
@@ -103,6 +105,53 @@ services:
       scoring-api:
         condition: service_healthy
 
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/mlflow.Dockerfile
+    command: ["/bin/sh", "-c", "exec mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri \"$$MLFLOW_BACKEND_STORE_URI\" --artifacts-destination /mlartifacts --serve-artifacts"]
+    environment:
+      MLFLOW_BACKEND_STORE_URI: postgresql+psycopg://irp:${POSTGRES_PASSWORD:-irp_password}@postgres:5432/irp
+    volumes:
+      - mlflow-artifacts:/mlartifacts
+    ports:
+      - "127.0.0.1:5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    hostname: prometheus
+    ports: ["127.0.0.1:9090:9090"]
+    volumes:
+      - "./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      - "prometheus-data:/prometheus"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    depends_on:
+      - scoring-api
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    hostname: grafana
+    ports: ["127.0.0.1:3001:3000"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - "./ops/grafana/provisioning:/etc/grafana/provisioning:ro"
+      - "./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro"
+      - "grafana-data:/var/lib/grafana"
+    depends_on:
+      - prometheus
+
 volumes:
   kafka-data:
   postgres-data:
+  mlflow-artifacts:
+  prometheus-data:
+  grafana-data:

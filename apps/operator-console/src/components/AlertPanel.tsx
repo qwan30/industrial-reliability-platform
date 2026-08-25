@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AlertDetail, AlertSummary } from '../types';
 import { getAlertDetail } from '../api';
+import { RcaPanel } from './RcaPanel';
 
 export interface AlertPanelProps {
   alerts: AlertSummary[];
@@ -75,6 +76,8 @@ export function AlertPanel({ alerts, baseUrl = '' }: AlertPanelProps) {
               <div
                 key={alert.alert_id}
                 data-testid={`alert-item-${alert.alert_id}`}
+                data-row-id={`alert-row-${alert.alert_id}`}
+                className={`alert-item alert-row-${alert.alert_id}`}
                 onClick={() => handleSelectAlert(alert.alert_id)}
                 style={{
                   backgroundColor: isSelected ? '#334155' : '#0f172a',
@@ -176,6 +179,12 @@ export function AlertPanel({ alerts, baseUrl = '' }: AlertPanelProps) {
                         <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', color: '#94a3b8' }}>
                           Policy SHA: <code>{alert.policy_sha256.slice(0, 12)}...</code>
                         </div>
+
+                        <RcaPanel
+                          alertId={alert.alert_id}
+                          initialReport={alertDetail.rca}
+                          baseUrl={baseUrl}
+                        />
                       </div>
                     )}
                   </div>

@@ -94,6 +94,46 @@ python -m industrial_reliability.phase7_gate \
     --output-dir artifacts/phase7
 ```
 
+## Observability & Reliability (Phase 8)
+
+Phase 8 provides real-time Prometheus runtime instrumentation, train-only population stability index (PSI) drift indicators, three purpose-built Grafana operator dashboards, and certified fault drills distinguishing Service Outages, Ingestion Data Faults, and Machine Faults.
+
+### Runtime Metrics & Scrape Endpoints
+Bounded metric vocabulary with strictly validated enums:
+- `scoring-api:8000/metrics`: Scoring rate, p95 scoring latency (`irp_score_latency_seconds`), and outcome counters.
+- `replay-producer:9101/metrics`: Telemetry emission and replay session error counters.
+- `streaming-worker:9102/metrics`: Ingestion rates (`irp_telemetry_events_total`), segment breaks (`irp_segment_breaks_total`), feature window coverage ratio, anomaly score & decisions, and maximum feature PSI (`irp_feature_psi_max`).
+
+### Prometheus & Grafana Provisioning
+Start the observability stack on local isolated host bindings:
+```bash
+docker compose up -d prometheus grafana
+```
+- **Prometheus UI**: `http://127.0.0.1:9090`
+- **Grafana UI**: `http://127.0.0.1:3001` (anonymous view access enabled)
+  - `irp-system`: System Health, Dependency Readiness, Replay Failures, Kafka Lag.
+  - `irp-data-quality`: Telemetry Accepted vs Quarantined, Segment Breaks, Window Coverage Ratio.
+  - `irp-model-machine`: Scoring Request Rates, p95 Latency, Train-only Feature PSI Max, Anomaly Score & Active Alerts.
+
+> **Operator Guidance:** *Drift is not a failure diagnosis.* A PSI shift ($\ge 0.2$) indicates input distribution change relative to training data, whereas an anomaly decision reflects detector scoring and an alert reflects locked operational policy.
+
+### Train-Only Drift Reference Generation
+```bash
+python -m industrial_reliability.drift build-reference \
+    --manifest artifacts/champion/manifest.json \
+    --features data/processed/phase1b/metropt3/features.parquet \
+    --output artifacts/champion/drift-reference.json
+```
+
+### Fault Isolation Drills Certification
+Execute the certified 3-drill fault matrix:
+```powershell
+.\scripts\run_phase8_fault_drills.ps1
+```
+Generates cryptographically self-hashed evidence reports at:
+- `docs/results/phase-8-observability-reliability.json`
+- `docs/results/phase-8-observability-reliability.md`
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

@@ -9,7 +9,7 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import joblib
 import numpy as np
@@ -17,6 +17,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from industrial_reliability.champion import load_champion
+from industrial_reliability.evaluation import calibrate_threshold
 from industrial_reliability.ml_provenance import (
     PromotionReceiptV1,
     RunProvenanceV1,
@@ -26,12 +27,14 @@ from industrial_reliability.ml_provenance import (
     write_run_provenance,
 )
 from industrial_reliability.package_champion import ChampionManifest
-from industrial_reliability.phase1b_benchmark import ModelId, calibrate_threshold, detector_for
+from industrial_reliability.phase1b_benchmark import ModelId, detector_for
 from industrial_reliability.phase1b_contracts import PHASE1B
 from industrial_reliability.phase1b_data import sha256_file
 
 EXPERIMENT_NAME = "industrial-reliability-offline"
-REGISTERED_MODEL_NAME = "industrial-reliability-anomaly-detector"
+REGISTERED_MODEL_NAME: Literal["industrial-reliability-anomaly-detector"] = (
+    "industrial-reliability-anomaly-detector"
+)
 
 
 def get_current_git_sha() -> str:
@@ -68,10 +71,12 @@ def get_dependency_versions() -> dict[str, str]:
 try:
     import mlflow
     import mlflow.pyfunc
-    from mlflow import MlflowClient
+    from mlflow import MlflowClient as MlflowClient
 except ImportError:
     mlflow = None  # type: ignore[assignment]
     MlflowClient = None  # type: ignore[assignment,misc]
+
+__all__ = ["MlflowClient", "import_candidate", "reproduce_candidate", "promote_candidate"]
 
 
 class PackagedChampionPyFunc:
@@ -225,12 +230,12 @@ def import_candidate(
     for k, v in parameters.items():
         client.log_param(run_id, k, v)
 
-    metrics = {
+    numeric_metrics = {
         "threshold": float(pkg_manifest.threshold),
         "golden_case_count": float(pkg_manifest.golden_case_count),
     }
-    for k, v in metrics.items():
-        client.log_metric(run_id, k, v)
+    for metric_key, metric_val in numeric_metrics.items():
+        client.log_metric(run_id, metric_key, metric_val)
 
     provenance = RunProvenanceV1(
         schema_version="mlflow-run-provenance-v1",
@@ -246,7 +251,7 @@ def import_candidate(
         champion_package_sha256=pkg_manifest_sha,
         alert_policy_sha256=alert_policy_sha,
         parameters=parameters,
-        metrics=metrics,
+        metrics=numeric_metrics,
         artifact_sha256=dict(pkg_manifest.artifact_sha256),
         provenance_sha256="",
     ).with_computed_hash()
@@ -312,7 +317,7 @@ def reproduce_candidate(
     calib_features = calib_frame[feature_cols].to_numpy(dtype=np.float64, copy=False)
 
     # Fit detector on train only
-    model_id = cast(ModelId, pkg_manifest.model_id)
+    model_id = pkg_manifest.model_id
     detector = detector_for(model_id, PHASE1B).fit(train_features)
     calib_scores = detector.score(calib_features)
     threshold = calibrate_threshold(calib_scores, PHASE1B)
@@ -371,14 +376,14 @@ def reproduce_candidate(
     for k, v in parameters.items():
         client.log_param(run_id, k, v)
 
-    metrics = {
+    numeric_metrics = {
         "threshold": float(threshold),
         "min_calibration_score": float(np.min(calib_scores)),
         "max_calibration_score": float(np.max(calib_scores)),
         "mean_calibration_score": float(np.mean(calib_scores)),
     }
-    for k, v in metrics.items():
-        client.log_metric(run_id, k, v)
+    for metric_key, metric_val in numeric_metrics.items():
+        client.log_metric(run_id, metric_key, metric_val)
 
     provenance = RunProvenanceV1(
         schema_version="mlflow-run-provenance-v1",
@@ -394,7 +399,7 @@ def reproduce_candidate(
         champion_package_sha256=pkg_manifest_sha,
         alert_policy_sha256=alert_policy_sha,
         parameters=parameters,
-        metrics=metrics,
+        metrics=numeric_metrics,
         artifact_sha256=dict(pkg_manifest.artifact_sha256),
         provenance_sha256="",
     ).with_computed_hash()

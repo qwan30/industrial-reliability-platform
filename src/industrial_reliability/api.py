@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from collections.abc import AsyncIterator
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -28,6 +29,7 @@ from industrial_reliability.console_stream import (
     ConsoleEventV1,
 )
 from industrial_reliability.kafka_io import encode_message
+from industrial_reliability.metrics import RuntimeMetrics, mount_api_metrics
 from industrial_reliability.persistence import (
     AlertDetailRecord,
     AlertSummaryRecord,
@@ -143,8 +145,12 @@ def create_app(
     producer: Any = None,
     broker: ConsoleEventBroker | None = None,
     provenance_verifier: ChampionProvenanceVerifier | None = None,
+    metrics: RuntimeMetrics | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Industrial Reliability Scoring and Alert API", version="1.0")
+
+    if metrics is not None:
+        mount_api_metrics(app, metrics)
 
     @app.exception_handler(ScoringContractError)
     async def scoring_contract_error_handler(
@@ -224,13 +230,24 @@ def create_app(
 
     @app.post("/v1/score")
     def score(request: ScoreRequestV1) -> ScoreResponseV1:
+        started = time.perf_counter()
         if request.model_version != scorer.model_version:
+            if metrics is not None:
+                metrics.record_score_request("invalid_model", time.perf_counter() - started)
             raise ScoringContractError(
                 f"Model version mismatch: expected {scorer.model_version}, got {request.model_version}"
             )
 
         feature = request.feature_vector
-        result = scorer.score(feature)
+        try:
+            result = scorer.score(feature)
+        except Exception:
+            if metrics is not None:
+                metrics.record_score_request("invalid_contract", time.perf_counter() - started)
+            raise
+
+        if metrics is not None:
+            metrics.record_score_request("ok", time.perf_counter() - started)
 
         decision_id = uuid5(
             RUNTIME_NAMESPACE, f"decision:{feature.window_id}:{scorer.model_version}"

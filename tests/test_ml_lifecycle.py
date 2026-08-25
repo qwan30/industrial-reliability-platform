@@ -384,6 +384,10 @@ def test_cli_main_subcommands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     fake_client = FakeMlflowClient()
 
     monkeypatch.setattr(
+        "industrial_reliability.ml_lifecycle.mlflow",
+        fake_client,
+    )
+    monkeypatch.setattr(
         "industrial_reliability.ml_lifecycle.MlflowClient",
         lambda tracking_uri=None: fake_client,
     )

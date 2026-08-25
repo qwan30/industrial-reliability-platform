@@ -16,6 +16,7 @@ dependencies = [
   "fastapi>=0.115,<1",
   "joblib>=1.4,<2",
   "numpy>=2.2,<3",
+  "openai>=1.101,<2",
   "pandas>=2.2,<3",
   "prometheus-client>=0.22,<1",
   "psycopg[binary]>=3.2,<4",

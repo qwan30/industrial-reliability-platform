@@ -1,0 +1,30 @@
+{
+  "schema_version": "release-certification-v1",
+  "timestamp": "2026-08-25T04:57:43.084482+00:00",
+  "git_sha": "0000000000000000000000000000000000000000",
+  "verdict": "NEGATIVE_RESEARCH_RELEASE",
+  "phases_passed": [
+    "phase1b_negative_benchmark",
+    "phase8_observability_fault_drills",
+    "phase9_grounded_rca"
+  ],
+  "decision_gates": {
+    "airflow": "NOT_ADOPTED",
+    "spark": "N/A",
+    "openvino": "N/A"
+  },
+  "artifact_hashes": {
+    "phase1b_metrics": "4a948d8d1079952ea4d7af46dd4bf582f82e751fec5422748aad751d81813a4b",
+    "phase10a_spark": "0003bf61579eddefb0cbae0b5c8f41f87a161c27d6ffaae59d18264b8c6f14e3",
+    "phase10b_openvino": "0c77fd054a9eb7cdf08ac4b7d43b531d65f3a1cd1b3ba63f2d3c15310b31bd24",
+    "phase8_observability": "75acafe0dda84a991106e5bbd7375b9b65fdee22721d6120bda245a513308740",
+    "phase9_rca": "37b7c805462cc57f5a98e5b26843adcbbb22347aa35568e541699cefef29839e"
+  },
+  "is_certified": true,
+  "limitations": [
+    "Phase 1B offline ML feasibility did not meet event detection/false alarm gates on MetroPT-3 holdout.",
+    "Platform models demonstrated offline event detection tradeoffs and are packaged as negative research findings.",
+    "Runtime streaming worker, replay producer, alert lifecycle, and RCA pipeline remain fully functional and certified."
+  ],
+  "report_sha256": "c785f5789479e152c0d7a5fc54ff618751d5cb03f0ec62a4be663ad8fa207b81"
+}

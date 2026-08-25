@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import platform
 import subprocess
 import sys
 import tempfile
-from typing import Any, Mapping, cast
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, cast
 
 import joblib
 import numpy as np
@@ -21,8 +22,6 @@ from industrial_reliability.ml_provenance import (
     RunProvenanceV1,
     canonical_sha256,
     validate_git_sha,
-    validate_hex64,
-    verify_run_provenance,
     write_promotion_receipt,
     write_run_provenance,
 )
@@ -326,7 +325,7 @@ def reproduce_candidate(
         for case in golden_data.get("cases", []):
             if "feature_values" in case:
                 case_names = case.get("feature_names", feature_cols)
-                name_to_val = dict(zip(case_names, case["feature_values"]))
+                name_to_val = dict(zip(case_names, case["feature_values"], strict=False))
                 feat_vals = [name_to_val[name] for name in feature_cols]
             elif "feature_vector" in case:
                 feat_vals = [case["feature_vector"][name] for name in feature_cols]
@@ -431,7 +430,7 @@ def promote_candidate(
         client = MlflowClient(tracking_uri=request.tracking_uri)
 
     run = client.get_run(request.run_id)
-    tags: Mapping[str, str] = getattr(run, "data", None) and getattr(run.data, "tags", {}) or {}
+    tags: Mapping[str, str] = (getattr(run, "data", None) and getattr(run.data, "tags", {})) or {}
     if hasattr(client, "tags") and request.run_id in client.tags:
         tags = client.tags[request.run_id]
 
@@ -540,7 +539,9 @@ def main(argv: list[str] | None = None) -> int:
                 tracking_uri=args.tracking_uri,
             )
         )
-        print(f"Candidate reproduced successfully: run_id={r_res.run_id} threshold={r_res.threshold:.6f}")
+        print(
+            f"Candidate reproduced successfully: run_id={r_res.run_id} threshold={r_res.threshold:.6f}"
+        )
         return 0
 
     elif args.command == "promote":

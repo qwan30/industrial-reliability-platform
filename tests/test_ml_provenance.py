@@ -189,4 +189,3 @@ def test_canonical_dumps_nested_checks() -> None:
     assert canonical_dumps([1, 2, {"a": "b"}]) == '[1,2,{"a":"b"}]'
     with pytest.raises(ValueError, match="NaN or Infinity"):
         canonical_dumps([float("inf")])
-

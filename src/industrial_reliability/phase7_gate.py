@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-import json
 from pathlib import Path
-import sys
 from typing import Any, Literal
-
-import numpy as np
 
 from industrial_reliability.ml_lifecycle import (
     CandidateResult,
     ImportCandidateRequest,
     ReproductionRequest,
+    ReproductionResult,
     import_candidate,
     reproduce_candidate,
 )
@@ -25,7 +24,6 @@ from industrial_reliability.ml_provenance import (
     verify_run_provenance,
 )
 from industrial_reliability.package_champion import ChampionManifest
-from industrial_reliability.phase1b_data import sha256_file
 
 THRESHOLD_TOLERANCE = 1e-9
 SCORE_TOLERANCE = 1e-6

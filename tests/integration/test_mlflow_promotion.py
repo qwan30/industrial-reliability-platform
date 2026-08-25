@@ -8,10 +8,8 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pytest
 
 from industrial_reliability.ml_lifecycle import (
-    CandidateResult,
     ImportCandidateRequest,
     PromotionRequest,
     import_candidate,
@@ -125,7 +123,7 @@ def _setup_test_run(base_dir: Path) -> tuple[Path, Path, Path]:
 def test_promote_candidate_sqlite_tracking(tmp_path: Path) -> None:
     db_path = tmp_path / "mlflow.db"
     tracking_uri = f"sqlite:///{db_path.as_posix()}"
-    run_dir, feat_path, pkg_dir = _setup_test_run(tmp_path)
+    run_dir, _feat_path, pkg_dir = _setup_test_run(tmp_path)
 
     # 1. Import candidate
     import_req = ImportCandidateRequest(

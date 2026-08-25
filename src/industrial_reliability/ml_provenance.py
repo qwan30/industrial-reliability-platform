@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 import math
-from pathlib import Path
 import re
-from typing import Any, Literal, Mapping
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
+from typing import Any, Literal
 
 JSONScalar = str | int | float | bool | None
 HEX64_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -199,9 +200,7 @@ def load_run_provenance(path: Path) -> RunProvenanceV1:
     return prov
 
 
-def verify_promotion_receipt(
-    receipt: PromotionReceiptV1, package_manifest: Any = None
-) -> None:
+def verify_promotion_receipt(receipt: PromotionReceiptV1, package_manifest: Any = None) -> None:
     expected = receipt.compute_hash()
     if receipt.receipt_sha256 != expected:
         raise ValueError(

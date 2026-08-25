@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pytest
 
 from industrial_reliability.ml_provenance import (
     PromotionReceiptV1,
@@ -45,7 +44,9 @@ def _setup_test_champion(base_dir: Path) -> tuple[Path, Path, Path]:
     from industrial_reliability.phase1b_benchmark import calibrate_threshold
     from industrial_reliability.phase1b_contracts import PHASE1B
 
-    calib_matrix = np.array([[1.0 + i * 0.5, 2.0 + i * 0.5] for i in range(5, 10)], dtype=np.float64)
+    calib_matrix = np.array(
+        [[1.0 + i * 0.5, 2.0 + i * 0.5] for i in range(5, 10)], dtype=np.float64
+    )
     calib_scores_arr = detector.score(calib_matrix)
     computed_threshold = float(calibrate_threshold(calib_scores_arr, PHASE1B))
 

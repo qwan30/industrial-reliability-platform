@@ -1,11 +1,16 @@
-from dataclasses import dataclass, field
 import json
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+import joblib
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from industrial_reliability import phase1b_benchmark
@@ -20,9 +25,9 @@ from industrial_reliability.ml_lifecycle import (
     reproduce_candidate,
 )
 from industrial_reliability.ml_provenance import PromotionReceiptV1
-
-
-import uuid
+from industrial_reliability.models import RobustStatisticalDetector
+from industrial_reliability.package_champion import build_champion_package
+from industrial_reliability.phase1b_data import sha256_file
 
 
 @dataclass
@@ -108,15 +113,6 @@ class FakeMlflowClient:
             if mv.version == version_str:
                 return mv
         return FakeModelVersion(version=version_str, run_id="fake-run-123456")
-
-
-from industrial_reliability.models import RobustStatisticalDetector
-from industrial_reliability.package_champion import build_champion_package
-from industrial_reliability.phase1b_data import sha256_file
-import pyarrow as pa
-import pyarrow.parquet as pq
-from datetime import datetime, timedelta
-import joblib
 
 
 def _create_mock_feasible_phase1b_run(base_dir: Path) -> tuple[Path, Path, Path]:
@@ -237,7 +233,7 @@ def test_packaged_pyfunc_predict() -> None:
 
 
 def test_import_candidate_stops_at_candidate(tmp_path: Path) -> None:
-    run_dir, feat_path, pkg_dir = _create_mock_feasible_phase1b_run(tmp_path)
+    run_dir, _feat_path, pkg_dir = _create_mock_feasible_phase1b_run(tmp_path)
     fake_client = FakeMlflowClient()
     req = ImportCandidateRequest(
         champion_package=pkg_dir,
@@ -251,9 +247,13 @@ def test_import_candidate_stops_at_candidate(tmp_path: Path) -> None:
     assert fake_client.aliases == {}
 
 
-def test_reproduction_never_evaluates_holdout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reproduction_never_evaluates_holdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(
-        phase1b_benchmark, "run_phase1b_benchmark", Mock(side_effect=AssertionError("Holdout evaluated!"))
+        phase1b_benchmark,
+        "run_phase1b_benchmark",
+        Mock(side_effect=AssertionError("Holdout evaluated!")),
     )
     run_dir, feat_path, pkg_dir = _create_mock_feasible_phase1b_run(tmp_path)
     fake_client = FakeMlflowClient()
@@ -271,7 +271,7 @@ def test_reproduction_never_evaluates_holdout(tmp_path: Path, monkeypatch: pytes
 
 
 def test_promote_candidate_verifies_and_registers(tmp_path: Path) -> None:
-    run_dir, feat_path, pkg_dir = _create_mock_feasible_phase1b_run(tmp_path)
+    run_dir, _feat_path, pkg_dir = _create_mock_feasible_phase1b_run(tmp_path)
     fake_client = FakeMlflowClient()
     req_import = ImportCandidateRequest(
         champion_package=pkg_dir,
@@ -318,7 +318,7 @@ def test_import_candidate_missing_manifest(tmp_path: Path) -> None:
 
 
 def test_import_candidate_git_sha_mismatch(tmp_path: Path) -> None:
-    run_dir, feat_path, pkg_dir = _create_mock_feasible_phase1b_run(tmp_path)
+    run_dir, _feat_path, pkg_dir = _create_mock_feasible_phase1b_run(tmp_path)
     fake_client = FakeMlflowClient()
     req = ImportCandidateRequest(
         champion_package=pkg_dir,
@@ -368,7 +368,7 @@ def test_promote_candidate_invalid_lifecycle_state(tmp_path: Path) -> None:
 
 
 def test_pyfunc_load_context(tmp_path: Path) -> None:
-    run_dir, feat_path, pkg_dir = _create_mock_feasible_phase1b_run(tmp_path)
+    _run_dir, _feat_path, pkg_dir = _create_mock_feasible_phase1b_run(tmp_path)
     pyfunc = PackagedChampionPyFunc()
     context = Mock()
     context.artifacts = {"champion_package": str(pkg_dir)}
@@ -416,9 +416,7 @@ def test_cli_main_subcommands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
     # Test promote
     candidate_runs = [
-        rid
-        for rid, tags in fake_client.tags.items()
-        if tags.get("lifecycle_state") == "candidate"
+        rid for rid, tags in fake_client.tags.items() if tags.get("lifecycle_state") == "candidate"
     ]
     run_id = candidate_runs[0]
     out_receipt = tmp_path / "cli_receipt.json"
@@ -439,6 +437,3 @@ def test_cli_main_subcommands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     )
     assert ret_promote == 0
     assert out_receipt.exists()
-
-
-

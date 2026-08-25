@@ -1,24 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any
 from unittest.mock import Mock
 
-from fastapi.testclient import TestClient
 import joblib
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from fastapi.testclient import TestClient
 
 from industrial_reliability.api import create_app
 from industrial_reliability.champion import ChampionProvenanceVerifier, load_champion
 from industrial_reliability.ml_provenance import (
     PromotionReceiptV1,
-    canonical_dumps,
     write_promotion_receipt,
 )
 from industrial_reliability.models import RobustStatisticalDetector
@@ -186,7 +183,9 @@ def test_readyz_fails_503_on_tampered_receipt(tmp_path: Path) -> None:
     assert resp.json()["error"]["code"] == "CHAMPION_PROVENANCE_MISMATCH"
 
 
-def test_readyz_fails_503_on_mlflow_alias_mismatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_readyz_fails_503_on_mlflow_alias_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _, _, pkg_dir = _setup_test_champion(tmp_path)
     manifest_sha = sha256_file(pkg_dir / "manifest.json")
     scorer = load_champion(pkg_dir, manifest_sha)

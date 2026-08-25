@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 
@@ -246,7 +244,6 @@ def test_evaluate_phase7_gate_fails_on_golden_scores_delta_and_count() -> None:
 
 
 def test_phase7_gate_cli_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from industrial_reliability.phase7_gate import main
 
     mock_gate_result = Phase7GateResult(
         schema_version="phase7-gate-v1",
@@ -277,4 +274,3 @@ def test_phase7_gate_cli_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         ]
     )
     assert ret == 0
-

@@ -25,14 +25,14 @@
   - [x] Worktree isolation & branch creation (`using-git-worktrees`: branch `feat/phase-7-reproducible-ml-lifecycle`)
   - [x] Project setup & clean baseline check (259 passed, 87.86% coverage)
 
-- [/] **Phase 3: Parallel TDD Execution & 3-Reviewer Guard**
-  - [ ] Task 1: Run a localhost MLflow service with durable metadata (`pyproject.toml`, `compose.yaml`, `.env.example`, `docker/mlflow.Dockerfile`, `tests/integration/test_mlflow_service.py`)
-  - [ ] Task 2: Define immutable lifecycle provenance (`src/industrial_reliability/ml_provenance.py`, `tests/test_ml_provenance.py`)
-  - [ ] Task 3: Import the immutable candidate and reproduce its fit without holdout (`src/industrial_reliability/ml_lifecycle.py`, `tests/test_ml_lifecycle.py`, `tests/integration/test_mlflow_candidate.py`)
-  - [ ] Task 4: Add explicit candidate-to-champion promotion (`src/industrial_reliability/ml_lifecycle.py`, `tests/test_ml_lifecycle.py`, `tests/integration/test_mlflow_promotion.py`)
-  - [ ] Task 5: Fail scoring readiness closed on provenance mismatch (`src/industrial_reliability/champion.py`, `src/industrial_reliability/api.py`, `src/industrial_reliability/persistence.py`, `tests/test_model_provenance_api.py`)
-  - [ ] Task 6: Certify reproducibility and lineage (`src/industrial_reliability/phase7_gate.py`, `tests/test_phase7_gate.py`, `tests/integration/test_phase7_reproducibility.py`, `README.md`)
-  - [ ] 3-Reviewer Guard: Logic Reviewer, Security Reviewer, Performance Reviewer
+- [x] **Phase 3: Parallel TDD Execution & 3-Reviewer Guard**
+  - [x] Task 1: Run a localhost MLflow service with durable metadata (`pyproject.toml`, `compose.yaml`, `.env.example`, `docker/mlflow.Dockerfile`, `tests/integration/test_mlflow_service.py`)
+  - [x] Task 2: Define immutable lifecycle provenance (`src/industrial_reliability/ml_provenance.py`, `tests/test_ml_provenance.py`)
+  - [x] Task 3: Import the immutable candidate and reproduce its fit without holdout (`src/industrial_reliability/ml_lifecycle.py`, `tests/test_ml_lifecycle.py`, `tests/integration/test_mlflow_candidate.py`)
+  - [x] Task 4: Add explicit candidate-to-champion promotion (`src/industrial_reliability/ml_lifecycle.py`, `tests/test_ml_lifecycle.py`, `tests/integration/test_mlflow_promotion.py`)
+  - [x] Task 5: Fail scoring readiness closed on provenance mismatch (`src/industrial_reliability/champion.py`, `src/industrial_reliability/api.py`, `src/industrial_reliability/persistence.py`, `tests/test_model_provenance_api.py`)
+  - [x] Task 6: Certify reproducibility and lineage (`src/industrial_reliability/phase7_gate.py`, `tests/test_phase7_gate.py`, `tests/integration/test_phase7_reproducibility.py`, `README.md`)
+  - [x] 3-Reviewer Guard: Logic Reviewer, Security Reviewer, Performance Reviewer
 
 - [ ] **Phase 4: Dual Adversarial Verification (Santa Method)**
   - [ ] Santa Reviewer B (Cryptographic Lineage & Zero Holdout Leakage Guard)

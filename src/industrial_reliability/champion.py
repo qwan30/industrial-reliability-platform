@@ -157,7 +157,9 @@ class ChampionProvenanceVerifier:
         mlflow_client: Any = None,
     ) -> None:
         self.package_dir = package_dir.resolve()
-        self.receipt_path = (receipt_path or (self.package_dir / "promotion-receipt.json")).resolve()
+        self.receipt_path = (
+            receipt_path or (self.package_dir / "promotion-receipt.json")
+        ).resolve()
         self.tracking_uri = tracking_uri
         self.registered_model_name = registered_model_name
         self.alias = alias
@@ -194,6 +196,7 @@ class ChampionProvenanceVerifier:
         if client is None and self.tracking_uri:
             try:
                 from industrial_reliability.ml_lifecycle import MlflowClient
+
                 if MlflowClient is not None:
                     client = MlflowClient(tracking_uri=self.tracking_uri)
             except Exception:
@@ -222,4 +225,3 @@ class ChampionProvenanceVerifier:
         if self.receipt_path.is_file():
             data["receipt"] = json.loads(self.receipt_path.read_text(encoding="utf-8"))
         return data
-

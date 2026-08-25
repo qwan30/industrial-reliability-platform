@@ -1,0 +1,20 @@
+[config]
+max_model_tokens = 128000
+model = "gpt-4o"
+fallback_models = ["gpt-4o-mini"]
+
+[pr_reviewer]
+require_focused_review = true
+require_score_review = true
+require_security_review = true
+num_code_suggestions = 3
+
+[pr_description]
+publish_labels = false
+add_custom_labels = false
+
+[github_action_config]
+auto_review = true
+auto_describe = true
+auto_improve = false
+pr_actions = ["opened", "reopened", "ready_for_review", "synchronize"]

@@ -1,0 +1,36 @@
+{
+  "schema_version": "phase-9-rca-certification-v1",
+  "certified_at": "2026-08-25T04:32:38.908583+00:00",
+  "verdict": "PASS",
+  "checks": [
+    {
+      "name": "openai_sdk_responses_parse_support",
+      "passed": true,
+      "details": "OpenAI SDK has responses.parse with required text_format parameters"
+    },
+    {
+      "name": "allowlisted_evidence_projection",
+      "passed": true,
+      "details": "4 allowlisted tools strictly gathered in order: ('get_alert', 'get_score_evidence', 'get_model_provenance', 'get_system_health')"
+    },
+    {
+      "name": "citation_enforcement_contract",
+      "passed": true,
+      "details": "Strict citation validation: unbundled citations rejected immediately"
+    },
+    {
+      "name": "provider_generation_and_fallback",
+      "passed": true,
+      "details": "Complete path produces COMPLETE report; provider errors cleanly fallback to UNAVAILABLE"
+    },
+    {
+      "name": "secret_isolation_and_scrubbing",
+      "passed": true,
+      "details": "API keys read strictly in from_env() and scrubbed from string representations"
+    }
+  ],
+  "total_checks": 5,
+  "passed_checks": 5,
+  "failed_checks": 0,
+  "report_sha256": "aa7934fe785918aec7d400326485d3ad2abeb0d22d443aa88419ef115b7b79ac"
+}

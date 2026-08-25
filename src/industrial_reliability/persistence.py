@@ -14,6 +14,7 @@ from psycopg.rows import dict_row
 from industrial_reliability.alert_state import AlertState, TransitionResult
 from industrial_reliability.console_stream import ConsoleEventV1
 from industrial_reliability.runtime_messages import (
+    RcaReportV1,
     ReplayStatusV1,
     ScoreDecisionV1,
 )
@@ -100,6 +101,7 @@ class RuntimeStore:
             "evidence_snapshots",
             "alert_outbox",
             "console_events",
+            "rca_reports",
         }
         if table_name not in allowed_tables:
             raise ValueError(f"Invalid table name: {table_name}")
@@ -112,6 +114,7 @@ class RuntimeStore:
                     "decision_id",
                     "message_id",
                     "window_id",
+                    "report_id",
                 }
                 if column not in allowed_columns:
                     raise ValueError(f"Invalid column name: {column}")
@@ -516,13 +519,112 @@ class RuntimeStore:
                 for r in cur.fetchall()
             ]
 
+            # RCA Report if table exists and row found
+            rca_payload: dict[str, Any] | None = None
+            try:
+                cur.execute(
+                    """
+                    SELECT payload FROM rca_reports
+                    WHERE alert_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1;
+                    """,
+                    (str(alert_id),),
+                )
+                rca_row = cur.fetchone()
+                if rca_row:
+                    raw_p = rca_row["payload"]
+                    rca_payload = raw_p if isinstance(raw_p, dict) else json.loads(raw_p)
+            except Exception:
+                pass
+
             return AlertDetailRecord(
                 alert=summary,
                 events=events,
                 evidence=evidence,
                 decisions=decisions,
-                rca=None,
+                rca=rca_payload,
             )
+
+    def save_complete_rca(self, report: RcaReportV1) -> RcaReportV1:
+        if report.status != "COMPLETE":
+            return report
+
+        with (
+            psycopg.connect(self.db_url) as conn,
+            conn.cursor(row_factory=dict_row) as cur,
+        ):
+            payload_json = json.dumps(report.model_dump(mode="json"))
+            cur.execute(
+                """
+                INSERT INTO rca_reports (
+                    report_id, alert_id, evidence_bundle_sha256,
+                    status, provider_model, summary, payload, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (alert_id, evidence_bundle_sha256) DO NOTHING;
+                """,
+                (
+                    report.report_id,
+                    str(report.alert_id),
+                    report.evidence_bundle_sha256,
+                    report.status,
+                    report.provider_model or "unknown",
+                    report.summary,
+                    payload_json,
+                    report.emitted_at,
+                ),
+            )
+            # Read back stored row to guarantee immutability & payload identity
+            cur.execute(
+                """
+                SELECT payload FROM rca_reports
+                WHERE alert_id = %s AND evidence_bundle_sha256 = %s;
+                """,
+                (str(report.alert_id), report.evidence_bundle_sha256),
+            )
+            row = cur.fetchone()
+            if row:
+                existing_payload = (
+                    row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"])
+                )
+                existing_report = RcaReportV1.model_validate(existing_payload)
+                if existing_report.evidence_bundle_sha256 != report.evidence_bundle_sha256:
+                    raise IdentityMismatchError("Stored RCA report evidence bundle hash does not match")
+                return existing_report
+            return report
+
+    def get_rca(
+        self, alert_id: str | UUID, evidence_bundle_sha256: str | None = None
+    ) -> RcaReportV1 | None:
+        with (
+            psycopg.connect(self.db_url) as conn,
+            conn.cursor(row_factory=dict_row) as cur,
+        ):
+            if evidence_bundle_sha256:
+                cur.execute(
+                    """
+                    SELECT payload FROM rca_reports
+                    WHERE alert_id = %s AND evidence_bundle_sha256 = %s
+                    LIMIT 1;
+                    """,
+                    (str(alert_id), evidence_bundle_sha256),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT payload FROM rca_reports
+                    WHERE alert_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1;
+                    """,
+                    (str(alert_id),),
+                )
+            row = cur.fetchone()
+            if not row:
+                return None
+            payload = row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"])
+            return RcaReportV1.model_validate(payload)
+
 
     def append_console_event(self, event: ConsoleEventV1) -> None:
         with psycopg.connect(self.db_url) as conn, conn.cursor() as cur:

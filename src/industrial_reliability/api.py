@@ -36,10 +36,13 @@ from industrial_reliability.persistence import (
     ReplaySessionRecord,
     RuntimeStore,
 )
+from industrial_reliability.rca_evidence import AlertNotFound, gather_evidence
+from industrial_reliability.rca_openai import OpenAiRcaGenerator, evidence_only_report
 from industrial_reliability.runtime_messages import (
     REPLAY_COMMANDS_TOPIC,
     ApiErrorV1,
     ErrorResponseV1,
+    RcaReportV1,
     ReplayCommandV1,
     ScoreDecisionV1,
     ScoreRequestV1,
@@ -111,7 +114,7 @@ def _serialize_alert_detail(detail: AlertDetailRecord) -> dict[str, Any]:
         "events": detail.events,
         "evidence": detail.evidence,
         "decisions": detail.decisions,
-        "rca": None,
+        "rca": detail.rca,
     }
 
 
@@ -146,6 +149,7 @@ def create_app(
     broker: ConsoleEventBroker | None = None,
     provenance_verifier: ChampionProvenanceVerifier | None = None,
     metrics: RuntimeMetrics | None = None,
+    rca_generator: OpenAiRcaGenerator | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Industrial Reliability Scoring and Alert API", version="1.0")
 
@@ -378,6 +382,57 @@ def create_app(
             status_code=200,
             content={"success": True, "data": _serialize_alert_detail(detail), "error": None},
         )
+
+    @app.post("/v1/alerts/{alert_id}/rca")
+    def generate_alert_rca(alert_id: UUID) -> JSONResponse:
+        if store is None:
+            return _store_unavailable_response()
+        detail = store.get_alert_detail(alert_id)
+        if detail is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {"code": "ALERT_NOT_FOUND", "message": "Alert not found"},
+                },
+            )
+        try:
+            bundle = gather_evidence(str(alert_id), store)
+        except AlertNotFound:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {"code": "ALERT_NOT_FOUND", "message": "Alert not found"},
+                },
+            )
+
+        existing_report = store.get_rca(alert_id, bundle.bundle_sha256)
+        if existing_report is not None:
+            return JSONResponse(
+                status_code=200,
+                content={"success": True, "data": existing_report.model_dump(mode="json"), "error": None},
+            )
+
+        gen = rca_generator or OpenAiRcaGenerator.from_env()
+        if gen is None:
+            report = evidence_only_report(bundle, reason="provider_not_configured")
+        else:
+            report = gen.generate(bundle)
+
+        if report.status == "COMPLETE":
+            try:
+                report = store.save_complete_rca(report)
+            except Exception:
+                pass
+
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "data": report.model_dump(mode="json"), "error": None},
+        )
+
 
     @app.get("/v1/replays/{replay_session_id}/stream")
     async def stream_replay(

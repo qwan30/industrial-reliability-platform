@@ -1,38 +1,14 @@
 # .github/workflows/pr-agent.yml
 name: PR Agent
-
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  issue_comment:
-
+    types: [opened, synchronize]
 jobs:
   pr_agent_job:
-    if: ${{ github.event.sender.type != 'Bot' }}
     runs-on: ubuntu-latest
-    permissions:
-      issues: write
-      pull-requests: write
-      contents: write
-      checks: write
-    name: Run pr agent on every pull request
     steps:
-      - name: PR Agent action step
-        id: pragent
-        uses: the-pr-agent/pr-agent@main
-        env:
-          OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
-          GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "false"
-          GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "false"
-          GITHUB_ACTION_CONFIG.PR_ACTIONS: '["opened", "synchronize", "reopened", "ready_for_review"]'
-          CONFIG.MODEL: "gpt-4o-mini"
-          CONFIG.FALLBACK_MODELS: '["gpt-4o-mini"]'
-          CONFIG.MAX_MODEL_TOKENS: "32000"
-          CONFIG.LARGE_PATCH_POLICY: "clip"
-          PR_REVIEWER.REQUIRE_FOCUSED_REVIEW: "true"
-          PR_REVIEWER.REQUIRE_SCORE_REVIEW: "true"
-          PR_REVIEWER.REQUIRE_SECURITY_REVIEW: "true"
-          PR_REVIEWER.REQUIRE_ESTIMATE_EFFORT_TO_REVIEW: "true"
-          PR_REVIEWER.NUM_CODE_SUGGESTIONS: "0"
+    - name: PR Agent action step
+      uses: the-pr-agent/pr-agent@main
+      env:
+        OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

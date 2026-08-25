@@ -1,0 +1,74 @@
+"""Unit tests for the AlertService background daemon."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from industrial_reliability.alert_service import (
+    AlertService,
+    AlertServiceSettings,
+)
+from industrial_reliability.kafka_io import KafkaSettings
+from tests.test_persistence import _make_policy
+
+
+def test_alert_service_settings_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    policy = _make_policy()
+    policy_file = tmp_path / "alert-policy.json"
+    policy_file.write_text(json.dumps(policy.to_dict()), encoding="utf-8")
+
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/test")
+    monkeypatch.setenv("ALERT_POLICY_PATH", str(policy_file))
+    monkeypatch.setenv("METRICS_PORT", "9103")
+    monkeypatch.setenv("MACHINE_ID", "compressor-01")
+
+    settings = AlertServiceSettings.from_env()
+    assert settings.kafka.bootstrap_servers == "localhost:9092"
+    assert settings.database_url == "postgresql://user:pass@localhost:5432/test"
+    assert settings.policy_path == policy_file
+    assert settings.metrics_port == 9103
+    assert settings.machine_id == "compressor-01"
+
+
+def test_alert_service_settings_missing_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    with pytest.raises(ValueError, match="DATABASE_URL"):
+        AlertServiceSettings.from_env()
+
+
+@pytest.mark.asyncio
+async def test_alert_service_lifecycle(tmp_path: Path) -> None:
+    policy = _make_policy()
+    policy_file = tmp_path / "alert-policy.json"
+    policy_file.write_text(json.dumps(policy.to_dict()), encoding="utf-8")
+
+    settings = AlertServiceSettings(
+        kafka=KafkaSettings(bootstrap_servers="localhost:9092", client_id="test"),
+        database_url="sqlite:///:memory:",
+        policy_path=policy_file,
+    )
+
+    mock_producer = AsyncMock()
+    mock_consumer = AsyncMock()
+
+    service = AlertService(settings)
+
+    with (
+        patch("industrial_reliability.alert_service.AIOKafkaProducer", return_value=mock_producer),
+        patch("industrial_reliability.alert_service.AIOKafkaConsumer", return_value=mock_consumer),
+    ):
+        await service.start()
+        assert service._running is True
+        mock_producer.start.assert_awaited_once()
+        mock_consumer.start.assert_awaited_once()
+
+        await service.stop()
+        assert service._running is False
+        mock_consumer.stop.assert_awaited_once()
+        mock_producer.stop.assert_awaited_once()

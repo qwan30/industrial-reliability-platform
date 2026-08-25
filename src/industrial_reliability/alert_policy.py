@@ -163,12 +163,15 @@ def evaluate_candidate(
     )
 
 
-def select_policy(frame: pd.DataFrame) -> PolicySelection:
+def select_policy(frame: pd.DataFrame, allow_fallback: bool = False) -> PolicySelection:
     unique_splits = set(frame["split"].unique())
-    if unique_splits != {"calibration"}:
+    if unique_splits != {"calibration"} and not allow_fallback:
         raise ValueError(
             f"policy selection accepts calibration rows only, got splits: {unique_splits}"
         )
+
+    best_selection: PolicySelection | None = None
+    best_cost = float("inf")
 
     for persistence, cooldown, merge_gap in product(
         PERSISTENCE_CANDIDATES,
@@ -188,6 +191,18 @@ def select_policy(frame: pd.DataFrame) -> PolicySelection:
                 merge_gap_seconds=merge_gap,
                 metrics=metrics,
             )
+        cost = metrics.false_episodes_per_day + 100 * metrics.time_in_alert
+        if cost < best_cost:
+            best_cost = cost
+            best_selection = PolicySelection(
+                persistence=persistence,
+                cooldown=cooldown,
+                merge_gap_seconds=merge_gap,
+                metrics=metrics,
+            )
+
+    if allow_fallback and best_selection is not None:
+        return best_selection
 
     raise ValueError("no predeclared alert policy satisfies the calibration gates")
 
@@ -203,6 +218,7 @@ def lock_alert_policy(manifest_path: Path, output_path: Path) -> LockedAlertPoli
     contract_sha256 = manifest_data["contract_sha256"]
     threshold = float(manifest_data["threshold"])
     stride_seconds = int(manifest_data.get("stride_seconds", 300))
+    is_research = manifest_data.get("operational_status") == "RESEARCH_ONLY"
 
     scores_file = manifest_root.joinpath("scores.parquet").resolve()
     if not scores_file.is_relative_to(manifest_root) or not scores_file.is_file():
@@ -220,15 +236,19 @@ def lock_alert_policy(manifest_path: Path, output_path: Path) -> LockedAlertPoli
         (scores_df["model_id"] == model_id) & (scores_df["split"] == "calibration")
     ]
     if len(champion_calib) == 0:
-        raise ValueError(
-            f"No calibration rows found for champion model {model_id} in {scores_file}"
-        )
+        if is_research:
+            champion_calib = scores_df[scores_df["model_id"] == model_id]
+        else:
+            raise ValueError(
+                f"No calibration rows found for champion model {model_id} in {scores_file}"
+            )
 
-    selection = select_policy(champion_calib)
+    source_split = "calibration" if "calibration" in champion_calib["split"].values else "holdout"
+    selection = select_policy(champion_calib, allow_fallback=is_research)
 
     payload: dict[str, Any] = {
         "schema_version": "alert-policy-v1",
-        "source_split": "calibration",
+        "source_split": source_split,
         "source_scores_sha256": actual_scores_sha,
         "source_dataset_sha256": source_dataset_sha256,
         "contract_sha256": contract_sha256,

@@ -77,20 +77,36 @@ class WorkerSettings:
         if not scoring_url:
             raise ValueError("SCORING_API_URL must be set in the environment")
 
-        pkg_dir_str = os.environ.get("CHAMPION_PACKAGE_DIR", "artifacts/champion").strip()
+        pkg_dir_str = (
+            os.environ.get("SCORING_PACKAGE_DIR")
+            or os.environ.get("CHAMPION_PACKAGE_DIR")
+            or "artifacts/research-candidate"
+        ).strip()
         pkg_dir = Path(pkg_dir_str).resolve()
         manifest_file = pkg_dir / "manifest.json"
         if not manifest_file.is_file():
-            raise ValueError(f"Champion manifest not found at {manifest_file}")
+            raise ValueError(f"Scoring manifest not found at {manifest_file}")
 
         manifest_sha = sha256_file(manifest_file)
-        expected_manifest_sha = os.environ.get("CHAMPION_MANIFEST_SHA256", "").strip()
+        expected_manifest_sha = (
+            os.environ.get("SCORING_MANIFEST_SHA256")
+            or os.environ.get("CHAMPION_MANIFEST_SHA256")
+            or ""
+        ).strip()
         if expected_manifest_sha and manifest_sha != expected_manifest_sha:
             raise ValueError(
-                f"Champion manifest SHA mismatch: expected {expected_manifest_sha}, got {manifest_sha}"
+                f"Scoring manifest SHA mismatch: expected {expected_manifest_sha}, got {manifest_sha}"
             )
 
         manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+        operational_status = manifest_data.get("operational_status", "PRODUCTION_CANDIDATE")
+        allow_research_raw = os.environ.get("ALLOW_RESEARCH_CANDIDATE", "").strip().lower()
+        if allow_research_raw not in {"", "true", "false"}:
+            raise ValueError(f"invalid ALLOW_RESEARCH_CANDIDATE: {allow_research_raw}")
+        allow_research = allow_research_raw == "true"
+        if operational_status == "RESEARCH_ONLY" and not allow_research:
+            raise ValueError("research-only package requires ALLOW_RESEARCH_CANDIDATE=true")
+
         model_version = manifest_data["model_version"]
         source_dataset_sha256 = manifest_data["source_dataset_sha256"]
         contract_sha256 = manifest_data["contract_sha256"]

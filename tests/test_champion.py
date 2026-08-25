@@ -143,3 +143,55 @@ def test_all_golden_cases_match_package(tmp_path: Path) -> None:
         assert scored.score == pytest.approx(case["expected_score"], abs=1e-9)
         assert scored.is_anomaly == case["expected_is_anomaly"]
         assert len(scored.evidence_vector) == len(case["expected_evidence"])
+
+
+def test_load_champion_enforces_allow_research_candidate(tmp_path: Path) -> None:
+    from industrial_reliability.package_research_candidate import build_research_candidate_package
+    from industrial_reliability.phase1b_data import sha256_file
+
+    run_dir, feat_path = _create_mock_feasible_phase1b_run(tmp_path)
+    feat_manifest = tmp_path / "feature_manifest.json"
+    feat_manifest.write_text(
+        json.dumps(
+            {
+                "output_sha256": sha256_file(feat_path),
+                "active_feature_names": ["tp2_mean", "dv_pressure_mean"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "phase1b-run-v1",
+                "run_id": "phase1b-run-mock",
+                "verdict": "NOT FEASIBLE",
+                "selected_model": None,
+                "contract_sha256": "a" * 64,
+                "source_dataset_sha256": "b" * 64,
+                "feature_output_sha256": sha256_file(feat_path),
+                "models": {
+                    "statistical": {
+                        "threshold": 1.0,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    out_dir = tmp_path / "research_pkg"
+    res = build_research_candidate_package(
+        run_dir=run_dir,
+        features_path=feat_path,
+        feature_manifest_path=feat_manifest,
+        output_dir=out_dir,
+    )
+
+    # Without flag -> fails
+    with pytest.raises(ChampionIntegrityError, match="research-only package requires ALLOW_RESEARCH_CANDIDATE=true"):
+        load_champion(out_dir, res.manifest_sha256, allow_research_candidate=False)
+
+    # With flag -> succeeds
+    scorer = load_champion(out_dir, res.manifest_sha256, allow_research_candidate=True)
+    assert scorer.model_version == "research-candidate-statistical-v1"

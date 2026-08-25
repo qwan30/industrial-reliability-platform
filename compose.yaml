@@ -45,10 +45,11 @@ services:
     build: .
     command: ["python", "-m", "uvicorn", "industrial_reliability.api:create_app_from_env", "--factory", "--host", "0.0.0.0", "--port", "8000"]
     ports: ["127.0.0.1:8000:8000"]
-    volumes: ["./artifacts/champion:/runtime/champion:ro"]
+    volumes: ["./artifacts/research-candidate:/runtime/scoring-package:ro"]
     environment:
-      CHAMPION_PACKAGE_DIR: /runtime/champion
-      CHAMPION_MANIFEST_SHA256: ${CHAMPION_MANIFEST_SHA256:-}
+      SCORING_PACKAGE_DIR: /runtime/scoring-package
+      SCORING_MANIFEST_SHA256: ${SCORING_MANIFEST_SHA256:-}
+      ALLOW_RESEARCH_CANDIDATE: ${ALLOW_RESEARCH_CANDIDATE:-false}
       DATABASE_URL: postgresql://irp:irp_password@postgres:5432/irp
     depends_on:
       kafka:
@@ -66,7 +67,7 @@ services:
     command: ["python", "-m", "industrial_reliability.replay_service"]
     volumes:
       - "./data/processed/phase1b:/runtime/data:ro"
-      - "./artifacts/champion:/runtime/champion:ro"
+      - "./artifacts/research-candidate:/runtime/scoring-package:ro"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: industrial-reliability
@@ -80,12 +81,13 @@ services:
     build: .
     command: ["python", "-m", "industrial_reliability.worker"]
     volumes:
-      - "./artifacts/champion:/runtime/champion:ro"
+      - "./artifacts/research-candidate:/runtime/scoring-package:ro"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SCORING_API_URL: http://scoring-api:8000
-      CHAMPION_PACKAGE_DIR: /runtime/champion
-      CHAMPION_MANIFEST_SHA256: ${CHAMPION_MANIFEST_SHA256:-}
+      SCORING_PACKAGE_DIR: /runtime/scoring-package
+      SCORING_MANIFEST_SHA256: ${SCORING_MANIFEST_SHA256:-}
+      ALLOW_RESEARCH_CANDIDATE: ${ALLOW_RESEARCH_CANDIDATE:-false}
       DATABASE_URL: postgresql://irp:irp_password@postgres:5432/irp
       METRICS_PORT: "9102"
     depends_on:

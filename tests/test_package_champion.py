@@ -152,3 +152,124 @@ def test_package_contains_one_model_and_three_golden_cases(tmp_path: Path) -> No
     golden_json = json.loads((pkg_dir / "golden-cases.json").read_text(encoding="utf-8"))
     assert golden_json["schema_version"] == "champion-golden-cases-v1"
     assert len(golden_json["cases"]) == 3
+
+
+def test_package_manifest_validates_role_combinations() -> None:
+    from industrial_reliability.package_champion import ChampionManifest, ThresholdProvenance
+
+    valid_hashes = {
+        "detector.joblib": "a" * 64,
+        "evidence-baseline.npz": "b" * 64,
+        "golden-cases.json": "c" * 64,
+    }
+
+    # Valid CHAMPION
+    m_champ = ChampionManifest(
+        schema_version="champion-package-v1",
+        package_role="CHAMPION",
+        evaluation_verdict="FEASIBLE",
+        operational_status="PRODUCTION_CANDIDATE",
+        source_champion_schema="phase1b-champion-v1",
+        source_run_id="run-1",
+        model_id="statistical",
+        model_version="v1",
+        contract_sha256="d" * 64,
+        source_dataset_sha256="e" * 64,
+        feature_names=("f1",),
+        threshold=1.0,
+        threshold_provenance=ThresholdProvenance(),
+        artifact_sha256=valid_hashes,
+    )
+    assert m_champ.package_role == "CHAMPION"
+
+    # Valid RESEARCH_CANDIDATE
+    m_res = ChampionManifest(
+        schema_version="champion-package-v1",
+        package_role="RESEARCH_CANDIDATE",
+        evaluation_verdict="NOT_FEASIBLE",
+        operational_status="RESEARCH_ONLY",
+        source_champion_schema="phase1b-run-v1",
+        source_run_id="run-1",
+        model_id="statistical",
+        model_version="v1",
+        contract_sha256="d" * 64,
+        source_dataset_sha256="e" * 64,
+        feature_names=("f1",),
+        threshold=1.0,
+        threshold_provenance=ThresholdProvenance(),
+        artifact_sha256=valid_hashes,
+    )
+    assert m_res.package_role == "RESEARCH_CANDIDATE"
+
+    # Invalid combination: CHAMPION with NOT_FEASIBLE
+    with pytest.raises(ValueError, match="invalid package role"):
+        ChampionManifest(
+            schema_version="champion-package-v1",
+            package_role="CHAMPION",
+            evaluation_verdict="NOT_FEASIBLE",
+            operational_status="PRODUCTION_CANDIDATE",
+            source_champion_schema="phase1b-champion-v1",
+            source_run_id="run-1",
+            model_id="statistical",
+            model_version="v1",
+            contract_sha256="d" * 64,
+            source_dataset_sha256="e" * 64,
+            feature_names=("f1",),
+            threshold=1.0,
+            threshold_provenance=ThresholdProvenance(),
+            artifact_sha256=valid_hashes,
+        )
+
+
+def test_build_research_candidate_package(tmp_path: Path) -> None:
+    from industrial_reliability.package_research_candidate import build_research_candidate_package
+
+    run_dir, feat_path = _create_mock_feasible_phase1b_run(tmp_path)
+    # Convert run_manifest to NOT FEASIBLE phase1b-run-v1
+    feat_manifest = tmp_path / "feature_manifest.json"
+    feat_manifest.write_text(
+        json.dumps(
+            {
+                "output_sha256": sha256_file(feat_path),
+                "active_feature_names": ["tp2_mean", "dv_pressure_mean"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "phase1b-run-v1",
+                "run_id": "phase1b-run-mock",
+                "verdict": "NOT FEASIBLE",
+                "selected_model": None,
+                "contract_sha256": "a" * 64,
+                "source_dataset_sha256": "b" * 64,
+                "feature_output_sha256": sha256_file(feat_path),
+                "models": {
+                    "statistical": {
+                        "threshold": 1.0,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    out_dir = tmp_path / "research_pkg"
+    res = build_research_candidate_package(
+        run_dir=run_dir,
+        features_path=feat_path,
+        feature_manifest_path=feat_manifest,
+        output_dir=out_dir,
+    )
+
+    assert res.output_dir.exists()
+    assert res.manifest.package_role == "RESEARCH_CANDIDATE"
+    assert res.manifest.evaluation_verdict == "NOT_FEASIBLE"
+    assert res.manifest.operational_status == "RESEARCH_ONLY"
+    assert res.manifest.source_champion_schema == "phase1b-run-v1"
+    assert (out_dir / "manifest.json").exists()
+    assert (out_dir / "alert-policy.json").exists()
+    assert (out_dir / "detector.joblib").exists()
+    assert (out_dir / "golden-cases.json").exists()

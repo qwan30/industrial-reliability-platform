@@ -98,3 +98,72 @@ def test_create_app_from_env(
     client = TestClient(app)
     r = client.get("/healthz")
     assert r.status_code == 200
+
+
+def test_create_app_from_env_research_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from industrial_reliability.champion import ChampionIntegrityError
+    from industrial_reliability.package_research_candidate import build_research_candidate_package
+    from industrial_reliability.phase1b_data import sha256_file
+
+    run_dir, feat_path = _create_mock_feasible_phase1b_run(tmp_path)
+    feat_manifest = tmp_path / "feature_manifest.json"
+    feat_manifest.write_text(
+        json.dumps(
+            {
+                "output_sha256": sha256_file(feat_path),
+                "active_feature_names": ["tp2_mean", "dv_pressure_mean"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "phase1b-run-v1",
+                "run_id": "phase1b-run-mock",
+                "verdict": "NOT FEASIBLE",
+                "selected_model": None,
+                "contract_sha256": "a" * 64,
+                "source_dataset_sha256": "b" * 64,
+                "feature_output_sha256": sha256_file(feat_path),
+                "models": {
+                    "statistical": {
+                        "threshold": 1.0,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    pkg_dir = tmp_path / "research_pkg"
+    res = build_research_candidate_package(
+        run_dir=run_dir,
+        features_path=feat_path,
+        feature_manifest_path=feat_manifest,
+        output_dir=pkg_dir,
+    )
+
+    monkeypatch.setenv("SCORING_PACKAGE_DIR", str(pkg_dir))
+    monkeypatch.setenv("SCORING_MANIFEST_SHA256", res.manifest_sha256)
+
+    # Without ALLOW_RESEARCH_CANDIDATE -> fails
+    monkeypatch.delenv("ALLOW_RESEARCH_CANDIDATE", raising=False)
+    with pytest.raises(ChampionIntegrityError, match="research-only package requires ALLOW_RESEARCH_CANDIDATE=true"):
+        create_app_from_env()
+
+    # Invalid ALLOW_RESEARCH_CANDIDATE -> ValueError
+    monkeypatch.setenv("ALLOW_RESEARCH_CANDIDATE", "yes")
+    with pytest.raises(ValueError, match="invalid ALLOW_RESEARCH_CANDIDATE"):
+        create_app_from_env()
+
+    # Valid ALLOW_RESEARCH_CANDIDATE=true -> succeeds
+    monkeypatch.setenv("ALLOW_RESEARCH_CANDIDATE", "true")
+    app = create_app_from_env()
+    client = TestClient(app)
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    assert r.json() == {"success": True, "data": {"status": "ok"}, "error": None}

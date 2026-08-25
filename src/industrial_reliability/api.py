@@ -498,14 +498,19 @@ def create_app(
 
 
 def create_app_from_env() -> FastAPI:
-    pkg_dir_str = os.environ.get("CHAMPION_PACKAGE_DIR")
-    manifest_sha = os.environ.get("CHAMPION_MANIFEST_SHA256")
+    pkg_dir_str = os.environ.get("SCORING_PACKAGE_DIR") or os.environ.get("CHAMPION_PACKAGE_DIR")
+    manifest_sha = os.environ.get("SCORING_MANIFEST_SHA256") or os.environ.get("CHAMPION_MANIFEST_SHA256")
     if not pkg_dir_str or not manifest_sha:
         raise ValueError(
-            "CHAMPION_PACKAGE_DIR and CHAMPION_MANIFEST_SHA256 must be set in the environment"
+            "SCORING_PACKAGE_DIR and SCORING_MANIFEST_SHA256 must be set in the environment"
         )
+    allow_research_raw = os.environ.get("ALLOW_RESEARCH_CANDIDATE", "").strip().lower()
+    if allow_research_raw not in {"", "true", "false"}:
+        raise ValueError(f"invalid ALLOW_RESEARCH_CANDIDATE: {allow_research_raw}")
+    allow_research = allow_research_raw == "true"
+
     pkg_dir = Path(pkg_dir_str).resolve()
-    scorer = load_champion(pkg_dir, manifest_sha)
+    scorer = load_champion(pkg_dir, manifest_sha, allow_research_candidate=allow_research)
 
     db_url = os.environ.get("DATABASE_URL")
     store = RuntimeStore(db_url) if db_url else None

@@ -68,13 +68,15 @@ def get_dependency_versions() -> dict[str, str]:
     }
 
 
+mlflow: Any
+MlflowClient: Any
 try:
     import mlflow
     import mlflow.pyfunc
     from mlflow import MlflowClient as MlflowClient
 except ImportError:
-    mlflow = None  # type: ignore[assignment]
-    MlflowClient = None  # type: ignore[assignment,misc]
+    mlflow = None
+    MlflowClient = None
 
 __all__ = ["MlflowClient", "import_candidate", "promote_candidate", "reproduce_candidate"]
 

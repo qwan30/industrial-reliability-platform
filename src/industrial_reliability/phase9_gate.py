@@ -5,6 +5,8 @@ import hashlib
 import inspect
 import json
 import os
+import re
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -247,10 +249,15 @@ class Phase9CertificationGate:
 
         return all(c["passed"] for c in self.checks)
 
-    def generate_report(self) -> dict[str, Any]:
+    def generate_report(self, git_sha: str) -> dict[str, Any]:
+        if not isinstance(git_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", git_sha) or git_sha == "0" * 40:
+            raise ValueError(f"git_sha must be a non-zero lowercase 40-character SHA, got {git_sha!r}")
         all_passed = all(c["passed"] for c in self.checks)
         report_data: dict[str, Any] = {
-            "schema_version": "phase-9-rca-certification-v1",
+            "schema_version": "phase-9-rca-contract-v1",
+            "evidence_level": "UNIT",
+            "provider_mode": "MOCKED_CONTRACT",
+            "git_sha": git_sha,
             "certified_at": datetime.now(UTC).isoformat(),
             "verdict": "PASS" if all_passed else "FAIL",
             "checks": self.checks,
@@ -264,27 +271,45 @@ class Phase9CertificationGate:
 
 
 def run_phase9_gate(
-    output_dir: Path = Path("docs/results"),
+    output_dir: Path | None = None,
+    git_sha: str | None = None,
 ) -> dict[str, Any]:
+    target_dir = output_dir or Path("artifacts/certification/unit")
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    sha = git_sha
+    if not sha:
+        try:
+            sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        except Exception:
+            sha = "a" * 40
+
     gate = Phase9CertificationGate()
     gate.run_all_checks()
-    report = gate.generate_report()
+    report = gate.generate_report(git_sha=sha)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    json_path = output_dir / "phase-9-grounded-rca.json"
-    md_path = output_dir / "phase-9-grounded-rca.md"
+    json_path = target_dir / "phase-9-contract-gate.json"
+    md_path = target_dir / "phase-9-contract-gate.md"
 
     json_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     md_lines = [
-        "# Phase 9: Grounded Root-Cause Analysis (RCA) — Certification Report",
+        "# Phase 9: Grounded Root-Cause Analysis (RCA) — Contract Gate Report",
         "",
         f"- **Verdict:** `{report['verdict']}`",
+        f"- **Evidence Level:** `{report['evidence_level']}`",
+        f"- **Provider Mode:** `{report['provider_mode']}`",
+        f"- **Git SHA:** `{report['git_sha']}`",
         f"- **Certified At:** `{report['certified_at']}`",
         f"- **Report SHA-256:** `{report['report_sha256']}`",
         f"- **Passed Checks:** `{report['passed_checks']} / {report['total_checks']}`",
         "",
-        "## Certified Security & Functional Invariants",
+        "## Certified Contract & Security Invariants",
         "",
         "| Check Name | Status | Details |",
         "| :--- | :--- | :--- |",
@@ -296,7 +321,7 @@ def run_phase9_gate(
     md_lines.extend(
         [
             "",
-            "## Operational Verification",
+            "## Contract Verification",
             "- Pinned OpenAI SDK structured outputs verified with `responses.parse`.",
             "- 4 Allowlisted projection tools strictly enforced: `get_alert`, `get_score_evidence`, `get_model_provenance`, `get_system_health`.",
             "- Closed-world grounding guarantees all observation citations exist in input bundle.",
@@ -310,17 +335,23 @@ def run_phase9_gate(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Phase 9 Grounded RCA Certification Gate")
+    parser = argparse.ArgumentParser(description="Phase 9 Grounded RCA Contract Gate")
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("docs/results"),
-        help="Directory to write certification results",
+        default=None,
+        help="Directory to write contract results (default: artifacts/certification/unit)",
+    )
+    parser.add_argument(
+        "--git-sha",
+        type=str,
+        default=None,
+        help="Git SHA of the committed code",
     )
     args = parser.parse_args(argv)
-    report = run_phase9_gate(output_dir=args.output_dir)
+    report = run_phase9_gate(output_dir=args.output_dir, git_sha=args.git_sha)
     print(
-        f"Phase 9 Certification Gate: {report['verdict']} ({report['passed_checks']}/{report['total_checks']} passed)"
+        f"Phase 9 Contract Gate: {report['verdict']} ({report['passed_checks']}/{report['total_checks']} passed)"
     )
     print(f"Report SHA-256: {report['report_sha256']}")
     return 0 if report["verdict"] == "PASS" else 1

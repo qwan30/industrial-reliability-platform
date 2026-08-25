@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import asyncio
 import json
 from pathlib import Path
 
@@ -9,6 +8,7 @@ from industrial_reliability.fault_report import (
     DrillMetricDeltasV1,
     DrillResultV1,
     classify_drill,
+    execute_in_process_drills,
     publish_drill_report,
 )
 
@@ -84,14 +84,23 @@ def test_publish_and_verify_fault_report(tmp_path: Path) -> None:
     json_path = tmp_path / "fault-report.json"
     md_path = tmp_path / "fault-report.md"
 
-    report = publish_drill_report(drills, json_path=json_path, md_path=md_path)
+    report = publish_drill_report(
+        drills,
+        json_path=json_path,
+        md_path=md_path,
+        git_sha="a" * 40,
+    )
     assert report.all_passed is True
+    assert report.evidence_level == "UNIT"
+    assert report.git_sha == "a" * 40
     assert json_path.is_file()
     assert md_path.is_file()
 
     # Verify JSON self-hash
     data = json.loads(json_path.read_text(encoding="utf-8"))
     assert data["schema_version"] == "phase8-fault-report-v1"
+    assert data["evidence_level"] == "UNIT"
+    assert data["git_sha"] == "a" * 40
     assert len(data["self_sha256"]) == 64
 
     # Verify Markdown
@@ -100,6 +109,30 @@ def test_publish_and_verify_fault_report(tmp_path: Path) -> None:
     assert "scoring-outage" in md_text
     assert "malformed-telemetry" in md_text
     assert "known-abnormal-replay" in md_text
+
+
+def test_fault_report_is_unit_evidence(tmp_path: Path) -> None:
+    drills = asyncio.run(execute_in_process_drills())
+    assert all(result.passed for result in drills)
+    published = publish_drill_report(
+        drills,
+        json_path=tmp_path / "report.json",
+        md_path=tmp_path / "report.md",
+        git_sha="a" * 40,
+    )
+    assert published.evidence_level == "UNIT"
+    assert published.git_sha == "a" * 40
+
+
+@pytest.mark.parametrize("invalid_sha", ["0" * 40, "abc", "G" * 40, ""])
+def test_publish_drill_report_rejects_invalid_git_sha(tmp_path: Path, invalid_sha: str) -> None:
+    with pytest.raises(ValueError, match="git_sha"):
+        publish_drill_report(
+            [],
+            json_path=tmp_path / "report.json",
+            md_path=tmp_path / "report.md",
+            git_sha=invalid_sha,
+        )
 
 
 @pytest.mark.asyncio

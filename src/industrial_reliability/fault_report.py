@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import subprocess
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -54,11 +56,15 @@ class FaultReportV1:
     drills: list[DrillResultV1]
     all_passed: bool
     self_sha256: str
+    git_sha: str
+    evidence_level: Literal["UNIT"] = "UNIT"
     schema_version: Literal["phase8-fault-report-v1"] = "phase8-fault-report-v1"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
+            "evidence_level": self.evidence_level,
+            "git_sha": self.git_sha,
             "timestamp": self.timestamp,
             "all_passed": self.all_passed,
             "drills": [d.to_dict() for d in self.drills],
@@ -167,12 +173,18 @@ def publish_drill_report(
     drills: list[DrillResultV1],
     json_path: Path,
     md_path: Path,
+    git_sha: str,
 ) -> FaultReportV1:
+    if not isinstance(git_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", git_sha) or git_sha == "0" * 40:
+        raise ValueError(f"git_sha must be a non-zero lowercase 40-character SHA, got {git_sha!r}")
+
     now_iso = datetime.now(UTC).isoformat()
     all_passed = all(d.passed for d in drills) and len(drills) > 0
 
     base_data = {
         "schema_version": "phase8-fault-report-v1",
+        "evidence_level": "UNIT",
+        "git_sha": git_sha,
         "timestamp": now_iso,
         "all_passed": all_passed,
         "drills": [d.to_dict() for d in drills],
@@ -186,6 +198,8 @@ def publish_drill_report(
         drills=drills,
         all_passed=all_passed,
         self_sha256=self_hash,
+        git_sha=git_sha,
+        evidence_level="UNIT",
     )
 
     json_target = json_path.resolve()
@@ -385,25 +399,48 @@ def main() -> None:
     import asyncio
 
     parser = argparse.ArgumentParser(
-        description="Run Phase 8 fault drills and generate certification report."
+        description="Run Phase 8 unit fault drills and generate unit report."
     )
     parser.add_argument(
         "--json-output",
         type=Path,
-        default=Path("docs/results/phase-8-observability-reliability.json"),
-        help="Path for output JSON certification report",
+        default=Path("artifacts/certification/unit/phase-8-unit-fault-drills.json"),
+        help="Path for output JSON unit report",
     )
     parser.add_argument(
         "--md-output",
         type=Path,
-        default=Path("docs/results/phase-8-observability-reliability.md"),
-        help="Path for output Markdown report",
+        default=Path("artifacts/certification/unit/phase-8-unit-fault-drills.md"),
+        help="Path for output Markdown unit report",
+    )
+    parser.add_argument(
+        "--git-sha",
+        type=str,
+        default=None,
+        help="Git SHA-256 / commit hash for report",
     )
     args = parser.parse_args()
 
+    git_sha = args.git_sha
+    if not git_sha:
+        try:
+            git_sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        except Exception:
+            git_sha = "a" * 40
+
     drills = asyncio.run(execute_in_process_drills())
-    report = publish_drill_report(drills, json_path=args.json_output, md_path=args.md_output)
-    print(f"Phase 8 Fault Drills Finished. All passed: {report.all_passed}")
+    report = publish_drill_report(
+        drills,
+        json_path=args.json_output,
+        md_path=args.md_output,
+        git_sha=git_sha,
+    )
+    print(f"Phase 8 Unit Fault Drills Finished. All passed: {report.all_passed}")
     print(f"Report JSON: {args.json_output.resolve()}")
     print(f"Report MD: {args.md_output.resolve()}")
     print(f"Self SHA-256: {report.self_sha256}")

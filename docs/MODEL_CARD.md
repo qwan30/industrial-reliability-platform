@@ -31,3 +31,11 @@
 - **Generator:** OpenAI structured outputs (`responses.parse` with Pydantic JSON schema).
 - **Closed-World Grounding:** Every generated claim must cite $\ge 1$ allowlisted evidence items (`get_alert`, `get_score_evidence`, `get_model_provenance`, `get_system_health`).
 - **Uncertainty Notice:** Every report explicitly caveats that anomaly scores and statistical deviations do not constitute proof of physical mechanical root cause.
+
+---
+
+## 4. Operational Gating & Research Candidate Status
+
+- **Package Role:** `RESEARCH_CANDIDATE` (Operational Status: `RESEARCH_ONLY`).
+- **Gating Enforced:** The runtime API and streaming worker reject candidate loading unless `ALLOW_RESEARCH_CANDIDATE=true` is explicitly configured.
+- **Scientific Integrity:** The NOT FEASIBLE evaluation verdict is preserved permanently; the platform never falsely promotes candidate models to production champions without true feasibility evidence.

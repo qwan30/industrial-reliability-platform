@@ -2,42 +2,45 @@
 
 ```mermaid
 graph TD
-    subgraph Data Layer
-        A[Raw Parquet Telemetry] -->|Ordered Replay| B[Kafka Replay Producer]
+    subgraph Data & Ingestion Layer
+        A[Raw Parquet Telemetry] -->|Ordered Replay| B[Replay Service / Producer]
+        B -->|irp.telemetry.v1| C[Kafka Message Broker]
     end
 
-    subgraph Messaging & Streaming
-        B -->|telemetry.events| C[Kafka Broker]
-        C -->|Raw Stream| D[Python Streaming Worker]
-        D -->|Feature Aggregation| D
-        D -->|features.events| C
-    end
-
-    subgraph Scoring & Decision Layer
+    subgraph Streaming & Scoring Layer
+        C -->|irp.telemetry.v1| D[Streaming Worker]
+        D -->|irp.features.v1| C
         D -->|POST /v1/score| E[FastAPI Scoring Service]
-        E -->|Detector Model| E
-        E -->|Score & Decision| D
-        D -->|score.decisions| C
+        E -->|Stateless Detector| E
+        E -->|Score Decision| D
+        D -->|irp.scores.v1| C
+        D -->|irp.quarantine.v1| C
     end
 
-    subgraph State & Persistence
-        D -->|Alert State Machine| F[(PostgreSQL Database)]
-        F -->|Alerts & Events| F
-        F -->|rca_reports| F
+    subgraph Alert Lifecycle & Outbox Layer
+        C -->|irp.scores.v1| F[Alert Service Daemon]
+        F -->|State Machine Transition| G[(PostgreSQL Database)]
+        F -->|Transactional Outbox| C
+        C -->|irp.alerts.v1| C
     end
 
-    subgraph Operator Surface
-        G[React Operator Console] -->|Control APIs /v1/replays| E
-        G -->|SSE Stream /v1/replays/events| E
-        G -->|Generate RCA /v1/alerts/id/rca| E
-        E -->|Evidence Projection| H[OpenAI Structured RCA]
+    subgraph Operator Console & RCA
+        H[React Operator Console] -->|POST /v1/replays| E
+        E -->|irp.replay.commands.v1| C
+        C -->|Replay Control| B
+        H -->|SSE Stream /v1/replays/events| E
+        H -->|POST /v1/alerts/id/rca| E
+        E -->|4-Tool Evidence Bundle| I[Grounded RCA Generator]
+        I -->|Structured Output| J[OpenAI Provider / Local Fallback]
+        J -->|Validated Citations| G
     end
 
     subgraph Observability
-        E -->|/metrics| I[Prometheus Scraper]
-        B -->|:9101/metrics| I
-        D -->|:9102/metrics| I
-        I -->|Scrape Targets| J[Grafana Operator Dashboards]
+        E -->|:8000/metrics| K[Prometheus Scraper]
+        B -->|:9101/metrics| K
+        D -->|:9102/metrics| K
+        F -->|:9103/metrics| K
+        K -->|Scrape Metrics| L[Grafana Operator Dashboards]
     end
 ```
 
@@ -45,8 +48,8 @@ graph TD
 
 ## Data Flow Sequences
 
-1. **Replay Ingestion:** Replay Producer reads source Parquet files and emits timestamp-ordered `TelemetryEventV1` messages to Kafka topic `irp.telemetry.events`.
-2. **Online Feature Computation:** Streaming worker consumes raw telemetry, builds 5-minute bins and 30-minute rolling causal windows, and detects sequence breaks.
-3. **Stateless Anomaly Scoring:** Streaming worker sends `FeatureVectorV1` to FastAPI `/v1/score`, which evaluates the champion model and returns a `ScoreDecisionV1`.
-4. **Alert State Machine & Persistence:** Streaming worker transitions alert states (`OPEN`, `ACKNOWLEDGED`, `RESOLVED`) based on locked policy, storing decisions and alerts in PostgreSQL.
-5. **Grounded RCA Generation:** When requested via the console or API, the platform gathers a deterministic 4-tool evidence bundle, invokes OpenAI `responses.parse`, validates citations, and persists immutable `COMPLETE` reports.
+1. **Replay Ingestion & Control:** API emits control commands to `irp.replay.commands.v1`. Replay Service reads source Parquet and emits timestamp-ordered `TelemetryEventV1` messages to `irp.telemetry.v1`.
+2. **Online Feature Computation:** Streaming worker consumes raw telemetry, constructs rolling causal windows, catches segment breaks, and routes malformed records to `irp.quarantine.v1`.
+3. **Stateless Anomaly Scoring:** Streaming worker sends `FeatureVectorV1` to FastAPI `/v1/score`, which evaluates the candidate model and returns `ScoreDecisionV1` published to `irp.scores.v1`.
+4. **Alert State Machine & Outbox:** Dedicated `AlertService` consumes score decisions, evaluates locked alert persistence/cooldown policies, transitions alert state records in PostgreSQL, and dispatches outbox alert events to `irp.alerts.v1`.
+5. **Grounded RCA Generation:** On operator request, the platform projects a deterministic 4-tool evidence bundle, validates closed-world citations via OpenAI structured outputs (or graceful local fallback under outage), and writes an immutable report to PostgreSQL.

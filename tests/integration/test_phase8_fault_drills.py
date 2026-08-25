@@ -202,5 +202,10 @@ async def test_in_process_phase8_fault_drills_matrix(tmp_path: Path) -> None:
     # Publish full drill report
     json_path = tmp_path / "phase-8-observability-reliability.json"
     md_path = tmp_path / "phase-8-observability-reliability.md"
-    report = publish_drill_report([res_1, res_2, res_3], json_path=json_path, md_path=md_path)
+    report = publish_drill_report(
+        [res_1, res_2, res_3],
+        json_path=json_path,
+        md_path=md_path,
+        git_sha="a" * 40,
+    )
     assert report.all_passed is True

@@ -4,19 +4,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock
 from uuid import UUID, uuid4
+
 import pytest
 
 from industrial_reliability.persistence import AlertDetailRecord, AlertSummaryRecord
 from industrial_reliability.rca_evidence import (
     RCA_TOOL_NAMES,
     AlertNotFound,
-    EvidenceBundleV1,
-    EvidenceItemV1,
     gather_evidence,
-    get_alert_evidence,
-    get_model_provenance_evidence,
-    get_score_evidence,
-    get_system_health_evidence,
 )
 
 
@@ -59,7 +54,11 @@ def _fake_alert_detail() -> AlertDetailRecord:
                 }
             ],
             "data_quality": {"valid_bins": 6, "observation_count": 180},
-            "model": {"score": 1400.0, "threshold": 1200.0, "model_version": "champion-statistical-v1"},
+            "model": {
+                "score": 1400.0,
+                "threshold": 1200.0,
+                "model_version": "champion-statistical-v1",
+            },
             "system_health": {"queue_lag": 0, "api_status": "ok"},
         }
     ]
@@ -161,4 +160,3 @@ def test_gather_evidence_with_empty_events_and_evidence(tmp_path: Path) -> None:
     bundle = gather_evidence(str(alert_summary.alert_id), fake_store, champion_dir=tmp_path)
     assert len(bundle.items) == 4
     assert bundle.alert_id == str(alert_summary.alert_id)
-

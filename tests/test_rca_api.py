@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import Mock
 from uuid import UUID, uuid4
-from fastapi.testclient import TestClient
+
 import pytest
+from fastapi.testclient import TestClient
 
 from industrial_reliability.api import create_app
 from industrial_reliability.persistence import AlertDetailRecord, AlertSummaryRecord
-from industrial_reliability.rca_openai import ProviderRcaDraft
 from industrial_reliability.runtime_messages import RcaObservationV1, RcaReportV1
 
 
@@ -58,7 +58,11 @@ def _fake_alert_detail(alert_id: UUID) -> AlertDetailRecord:
                 }
             ],
             "data_quality": {"valid_bins": 6, "observation_count": 180},
-            "model": {"score": 1400.0, "threshold": 1200.0, "model_version": "champion-statistical-v1"},
+            "model": {
+                "score": 1400.0,
+                "threshold": 1200.0,
+                "model_version": "champion-statistical-v1",
+            },
             "system_health": {"queue_lag": 0, "api_status": "ok"},
         }
     ]

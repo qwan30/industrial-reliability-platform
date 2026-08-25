@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import time
@@ -42,7 +43,6 @@ from industrial_reliability.runtime_messages import (
     REPLAY_COMMANDS_TOPIC,
     ApiErrorV1,
     ErrorResponseV1,
-    RcaReportV1,
     ReplayCommandV1,
     ScoreDecisionV1,
     ScoreRequestV1,
@@ -413,7 +413,11 @@ def create_app(
         if existing_report is not None:
             return JSONResponse(
                 status_code=200,
-                content={"success": True, "data": existing_report.model_dump(mode="json"), "error": None},
+                content={
+                    "success": True,
+                    "data": existing_report.model_dump(mode="json"),
+                    "error": None,
+                },
             )
 
         gen = rca_generator or OpenAiRcaGenerator.from_env()
@@ -423,16 +427,13 @@ def create_app(
             report = gen.generate(bundle)
 
         if report.status == "COMPLETE":
-            try:
+            with contextlib.suppress(Exception):
                 report = store.save_complete_rca(report)
-            except Exception:
-                pass
 
         return JSONResponse(
             status_code=200,
             content={"success": True, "data": report.model_dump(mode="json"), "error": None},
         )
-
 
     @app.get("/v1/replays/{replay_session_id}/stream")
     async def stream_replay(

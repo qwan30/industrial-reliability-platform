@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import pytest
 
 from industrial_reliability.phase9_gate import (
     Phase9CertificationGate,

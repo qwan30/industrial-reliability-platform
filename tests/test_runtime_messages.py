@@ -377,9 +377,7 @@ def test_rca_report_requires_citations_for_every_observation() -> None:
     from industrial_reliability.runtime_messages import RcaReportV1
 
     payload = _valid_rca_payload()
-    payload["observations"] = (
-        {"claim": "Score exceeded threshold", "evidence_ids": ()},
-    )
+    payload["observations"] = ({"claim": "Score exceeded threshold", "evidence_ids": ()},)
     with pytest.raises(ValidationError):
         RcaReportV1.model_validate(payload)
 
@@ -391,7 +389,7 @@ def test_rca_report_rejects_citations_outside_bundle() -> None:
     payload["observations"] = (
         {"claim": "Score exceeded threshold", "evidence_ids": ("invented-evidence-id",)},
     )
-    with pytest.raises(ValidationError, match="unknown evidence ID|not in evidence_ids"):
+    with pytest.raises(ValidationError, match=r"unknown evidence ID|not in evidence_ids"):
         RcaReportV1.model_validate(payload)
 
 
@@ -421,4 +419,3 @@ def test_rca_report_is_frozen() -> None:
     report = RcaReportV1.model_validate(_valid_rca_payload())
     with pytest.raises(ValidationError):
         report.status = "UNAVAILABLE"  # type: ignore[misc]
-

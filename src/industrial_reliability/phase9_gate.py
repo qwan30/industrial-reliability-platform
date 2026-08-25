@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
 import hashlib
 import inspect
 import json
 import os
-from pathlib import Path
 import sys
-from typing import Any, Literal
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
-from uuid import UUID, uuid4
+from uuid import uuid4
+
 from openai import OpenAI
 from pydantic import ValidationError
 
@@ -24,7 +25,6 @@ from industrial_reliability.rca_evidence import (
 from industrial_reliability.rca_openai import (
     OpenAiRcaGenerator,
     ProviderRcaDraft,
-    evidence_only_report,
 )
 from industrial_reliability.runtime_messages import RcaObservationV1, RcaReportV1
 
@@ -50,11 +50,13 @@ class Phase9CertificationGate:
         self.checks: list[dict[str, Any]] = []
 
     def record_check(self, name: str, passed: bool, details: str) -> None:
-        self.checks.append({
-            "name": name,
-            "passed": passed,
-            "details": details,
-        })
+        self.checks.append(
+            {
+                "name": name,
+                "passed": passed,
+                "details": details,
+            }
+        )
 
     def run_all_checks(self) -> bool:
         # Check 1: Pinned OpenAI SDK structured outputs support
@@ -141,7 +143,9 @@ class Phase9CertificationGate:
 
             # Test rejection on un-cited observation
             invalid_payload = dict(valid_payload)
-            invalid_payload["observations"] = ({"claim": "Invalid", "evidence_ids": ("invented-id",)},)
+            invalid_payload["observations"] = (
+                {"claim": "Invalid", "evidence_ids": ("invented-id",)},
+            )
             rejected = False
             try:
                 RcaReportV1.model_validate(invalid_payload)
@@ -289,15 +293,17 @@ def run_phase9_gate(
         status_sym = "PASS" if chk["passed"] else "FAIL"
         md_lines.append(f"| `{chk['name']}` | **{status_sym}** | {chk['details']} |")
 
-    md_lines.extend([
-        "",
-        "## Operational Verification",
-        "- Pinned OpenAI SDK structured outputs verified with `responses.parse`.",
-        "- 4 Allowlisted projection tools strictly enforced: `get_alert`, `get_score_evidence`, `get_model_provenance`, `get_system_health`.",
-        "- Closed-world grounding guarantees all observation citations exist in input bundle.",
-        "- Graceful fallback guarantees `UNAVAILABLE` evidence-only output on provider outage without blocking triage.",
-        "- Zero telemetry leakage, raw rows excluded, and credentials scrubbed from all logging and metrics.",
-    ])
+    md_lines.extend(
+        [
+            "",
+            "## Operational Verification",
+            "- Pinned OpenAI SDK structured outputs verified with `responses.parse`.",
+            "- 4 Allowlisted projection tools strictly enforced: `get_alert`, `get_score_evidence`, `get_model_provenance`, `get_system_health`.",
+            "- Closed-world grounding guarantees all observation citations exist in input bundle.",
+            "- Graceful fallback guarantees `UNAVAILABLE` evidence-only output on provider outage without blocking triage.",
+            "- Zero telemetry leakage, raw rows excluded, and credentials scrubbed from all logging and metrics.",
+        ]
+    )
 
     md_path.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
     return report
@@ -313,7 +319,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     report = run_phase9_gate(output_dir=args.output_dir)
-    print(f"Phase 9 Certification Gate: {report['verdict']} ({report['passed_checks']}/{report['total_checks']} passed)")
+    print(
+        f"Phase 9 Certification Gate: {report['verdict']} ({report['passed_checks']}/{report['total_checks']} passed)"
+    )
     print(f"Report SHA-256: {report['report_sha256']}")
     return 0 if report["verdict"] == "PASS" else 1
 

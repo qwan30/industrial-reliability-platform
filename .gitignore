@@ -70,3 +70,11 @@ dist/
 .coverage
 .coverage.*
 htmlcov/
+
+# =========================
+# Node & Frontend
+# =========================
+node_modules/
+test-results/
+playwright-report/
+

@@ -134,7 +134,7 @@ test.describe('Operator Console E2E Flow', () => {
     await page.goto('/');
 
     // Wait for alerts to render and click the first alert row
-    const alertRow = page.getByTestId('alert-row-alt-e2e-1');
+    const alertRow = page.getByTestId('alert-item-alt-e2e-1');
     await expect(alertRow).toBeVisible();
     await alertRow.click();
 

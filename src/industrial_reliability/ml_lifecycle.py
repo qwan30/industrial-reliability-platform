@@ -9,7 +9,7 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import joblib
 import numpy as np
@@ -27,7 +27,7 @@ from industrial_reliability.ml_provenance import (
     write_run_provenance,
 )
 from industrial_reliability.package_champion import ChampionManifest
-from industrial_reliability.phase1b_benchmark import ModelId, detector_for
+from industrial_reliability.phase1b_benchmark import detector_for
 from industrial_reliability.phase1b_contracts import PHASE1B
 from industrial_reliability.phase1b_data import sha256_file
 
@@ -76,7 +76,7 @@ except ImportError:
     mlflow = None  # type: ignore[assignment]
     MlflowClient = None  # type: ignore[assignment,misc]
 
-__all__ = ["MlflowClient", "import_candidate", "reproduce_candidate", "promote_candidate"]
+__all__ = ["MlflowClient", "import_candidate", "promote_candidate", "reproduce_candidate"]
 
 
 class PackagedChampionPyFunc:

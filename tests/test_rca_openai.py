@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import inspect
-from pathlib import Path
+from datetime import UTC, datetime
 from unittest.mock import Mock
-from openai import OpenAI
+
 import pytest
+from openai import OpenAI
 
 from industrial_reliability.rca_evidence import EvidenceBundleV1, EvidenceItemV1
 from industrial_reliability.rca_openai import (
@@ -144,7 +144,9 @@ def test_secret_never_appears_in_repr_or_error(
     assert "sk-secret" not in str(gen)
 
     # Trigger failure
-    gen._client.responses.parse = Mock(side_effect=RuntimeError("Failed with sk-secret-test-key-12345"))
+    gen._client.responses.parse = Mock(
+        side_effect=RuntimeError("Failed with sk-secret-test-key-12345")
+    )
     report = gen.generate(evidence_bundle)
     assert report.status == "UNAVAILABLE"
     assert "sk-secret" not in repr(report)
@@ -178,5 +180,3 @@ def test_empty_draft_or_empty_citations_trigger_fallback(
     fake_client.responses.parse.side_effect = ValueError("Schema validation error: empty citations")
     report2 = gen.generate(evidence_bundle)
     assert report2.status == "UNAVAILABLE"
-
-

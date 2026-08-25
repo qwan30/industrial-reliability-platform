@@ -76,6 +76,8 @@ export function AlertPanel({ alerts, baseUrl = '' }: AlertPanelProps) {
               <div
                 key={alert.alert_id}
                 data-testid={`alert-item-${alert.alert_id}`}
+                data-row-id={`alert-row-${alert.alert_id}`}
+                className={`alert-item alert-row-${alert.alert_id}`}
                 onClick={() => handleSelectAlert(alert.alert_id)}
                 style={{
                   backgroundColor: isSelected ? '#334155' : '#0f172a',

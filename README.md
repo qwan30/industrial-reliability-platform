@@ -134,7 +134,45 @@ Generates cryptographically self-hashed evidence reports at:
 - `docs/results/phase-8-observability-reliability.json`
 - `docs/results/phase-8-observability-reliability.md`
 
+## Grounded Root-Cause Analysis (Phase 9)
+
+Phase 9 provides closed-world, evidence-grounded anomaly explanation and Root-Cause Analysis (RCA) via direct integration with OpenAI Python SDK structured outputs (`responses.parse` / `text_format`), strict 4-tool allowlisted projection, cryptographic citation enforcement, write-once PostgreSQL persistence, and operator console UI integration.
+
+### Evidence Projection & Closed-World Grounding
+The LLM generator is strictly restricted to an allowlist of 4 projection tools:
+1. `get_alert`: Alert lifecycle timeline, duration, detection bounds, and machine identifier.
+2. `get_score_evidence`: Top statistical feature deviations (`tp2_mean`, `h1_std`, etc.) and baseline comparisons.
+3. `get_model_provenance`: Frozen model metadata, champion package SHA-256, and promotion receipt.
+4. `get_system_health`: Dependency health status, scoring queue latency, and data quality indicators.
+
+> **Data Minimization & Security Invariants:**
+> - Raw telemetry arrays/parquet rows, database connection strings, and local filesystem paths are **strictly excluded**.
+> - Every observation claim must cite valid evidence IDs from the gathered bundle (`evidence-<24 hex>`). Any invented or un-grounded citation immediately triggers discard and fallback.
+> - Secret isolation: `RCA_OPENAI_API_KEY` is loaded strictly in `OpenAiRcaGenerator.from_env()`, never committed, and scrubbed from all logging, repr, and metrics.
+> - Mandatory non-causal disclaimer: Every report embeds *"Anomaly evidence does not prove a mechanical root cause."*
+
+### API Endpoints
+- `POST /v1/alerts/{alert_id}/rca`: Generates or retrieves cached RCA report for an alert. If credentials are missing or the provider fails, gracefully returns HTTP 200 with `status: "UNAVAILABLE"` containing all gathered evidence so operator triage is never blocked.
+- `GET /v1/alerts/{alert_id}`: Retrieves alert details, associated evidence, timeline events, and attached RCA report if previously generated.
+
+### Operator Console UI
+The React operator console includes an interactive RCA panel in the alert detail drawer:
+- **Generate RCA** button with real-time loading states.
+- Status badges for `COMPLETE` and `UNAVAILABLE` states.
+- Grounded observations linked to clickable evidence citation pills.
+- Explicit non-causal uncertainty disclaimer and recommended operational next checks.
+
+### Certification Gate
+Run the cryptographic Phase 9 certification gate:
+```bash
+python -m industrial_reliability.phase9_gate --output-dir docs/results
+```
+Generates self-hashed reports at:
+- `docs/results/phase-9-grounded-rca.json` (SHA-256 verified)
+- `docs/results/phase-9-grounded-rca.md`
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
 

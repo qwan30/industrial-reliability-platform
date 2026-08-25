@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import logging
 import os
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
+
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -60,9 +61,7 @@ def evidence_only_report(bundle: EvidenceBundleV1, reason: str) -> RcaReportV1:
         "Anomaly evidence does not prove a mechanical root cause.",
         f"Provider execution status: {reason}.",
     )
-    next_checks = (
-        "Verify physical machine operational indicators and calibration status.",
-    )
+    next_checks = ("Verify physical machine operational indicators and calibration status.",)
 
     return RcaReportV1(
         schema_version="rca-report-v1",

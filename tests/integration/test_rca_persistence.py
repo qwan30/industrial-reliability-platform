@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import os
+from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
+
 import pytest
 from tests.test_persistence import _make_decision, _make_policy
 
 from industrial_reliability.alert_state import AlertState, transition
-from industrial_reliability.persistence import IdentityMismatchError, RuntimeStore
+from industrial_reliability.persistence import RuntimeStore
 from industrial_reliability.runtime_messages import RcaObservationV1, RcaReportV1
 
 TEST_DB_URL = os.environ.get("DATABASE_URL", "postgresql://irp:irp_password@localhost:5432/irp")

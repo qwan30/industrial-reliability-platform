@@ -1,6 +1,6 @@
 {
   "schema_version": "phase-9-rca-certification-v1",
-  "certified_at": "2026-08-25T04:32:38.908583+00:00",
+  "certified_at": "2026-08-25T04:38:55.196329+00:00",
   "verdict": "PASS",
   "checks": [
     {
@@ -32,5 +32,5 @@
   "total_checks": 5,
   "passed_checks": 5,
   "failed_checks": 0,
-  "report_sha256": "aa7934fe785918aec7d400326485d3ad2abeb0d22d443aa88419ef115b7b79ac"
+  "report_sha256": "4faffa030ba5345e4206ade3c2efa298bc487bacd86dc2a0eb1d88435a06eb8e"
 }

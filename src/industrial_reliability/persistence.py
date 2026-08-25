@@ -585,11 +585,15 @@ class RuntimeStore:
             row = cur.fetchone()
             if row:
                 existing_payload = (
-                    row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"])
+                    row["payload"]
+                    if isinstance(row["payload"], dict)
+                    else json.loads(row["payload"])
                 )
                 existing_report = RcaReportV1.model_validate(existing_payload)
                 if existing_report.evidence_bundle_sha256 != report.evidence_bundle_sha256:
-                    raise IdentityMismatchError("Stored RCA report evidence bundle hash does not match")
+                    raise IdentityMismatchError(
+                        "Stored RCA report evidence bundle hash does not match"
+                    )
                 return existing_report
             return report
 
@@ -622,9 +626,10 @@ class RuntimeStore:
             row = cur.fetchone()
             if not row:
                 return None
-            payload = row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"])
+            payload = (
+                row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"])
+            )
             return RcaReportV1.model_validate(payload)
-
 
     def append_console_event(self, event: ConsoleEventV1) -> None:
         with psycopg.connect(self.db_url) as conn, conn.cursor() as cur:

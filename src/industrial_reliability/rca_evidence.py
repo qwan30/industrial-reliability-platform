@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from datetime import UTC, datetime
 import hashlib
 import json
 import math
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from industrial_reliability.persistence import AlertDetailRecord
@@ -92,8 +93,16 @@ def get_alert_evidence(detail: AlertDetailRecord) -> EvidenceItemV1:
         if alert.last_detection.tzinfo is None
         else alert.last_detection
     )
-    first_dt = alert.first_detection.replace(tzinfo=UTC) if alert.first_detection.tzinfo is None else alert.first_detection
-    last_dt = alert.last_detection.replace(tzinfo=UTC) if alert.last_detection.tzinfo is None else alert.last_detection
+    first_dt = (
+        alert.first_detection.replace(tzinfo=UTC)
+        if alert.first_detection.tzinfo is None
+        else alert.first_detection
+    )
+    last_dt = (
+        alert.last_detection.replace(tzinfo=UTC)
+        if alert.last_detection.tzinfo is None
+        else alert.last_detection
+    )
     active_duration = (last_dt - first_dt).total_seconds()
     facts: dict[str, JsonScalar] = {
         "action": str(detail.events[0]["action"]) if detail.events else "OPENED",

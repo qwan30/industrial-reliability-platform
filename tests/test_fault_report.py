@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+
 import pytest
 
 from industrial_reliability.fault_report import (
@@ -128,4 +129,3 @@ def test_fault_report_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     main()
     assert json_out.is_file()
     assert md_out.is_file()
-

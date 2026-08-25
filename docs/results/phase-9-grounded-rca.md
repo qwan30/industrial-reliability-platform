@@ -1,8 +1,8 @@
 # Phase 9: Grounded Root-Cause Analysis (RCA) — Certification Report
 
 - **Verdict:** `PASS`
-- **Certified At:** `2026-08-25T04:32:38.908583+00:00`
-- **Report SHA-256:** `aa7934fe785918aec7d400326485d3ad2abeb0d22d443aa88419ef115b7b79ac`
+- **Certified At:** `2026-08-25T04:38:55.196329+00:00`
+- **Report SHA-256:** `4faffa030ba5345e4206ade3c2efa298bc487bacd86dc2a0eb1d88435a06eb8e`
 - **Passed Checks:** `5 / 5`
 
 ## Certified Security & Functional Invariants

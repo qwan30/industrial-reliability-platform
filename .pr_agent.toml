@@ -12,13 +12,8 @@ require_security_review = true
 require_estimate_effort_to_review = true
 num_code_suggestions = 0
 
-[pr_description]
-publish_description_as_comment = true
-publish_labels = false
-add_custom_labels = false
-
 [github_action_config]
 auto_review = true
-auto_describe = true
+auto_describe = false
 auto_improve = false
 pr_actions = ["opened", "synchronize", "reopened", "ready_for_review"]

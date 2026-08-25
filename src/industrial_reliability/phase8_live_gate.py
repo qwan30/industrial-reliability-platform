@@ -165,7 +165,11 @@ def publish_live_drill_report(
     md_path: Path,
     git_sha: str,
 ) -> LiveFaultReportV1:
-    if not isinstance(git_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", git_sha) or git_sha == "0" * 40:
+    if (
+        not isinstance(git_sha, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", git_sha)
+        or git_sha == "0" * 40
+    ):
         raise ValueError(f"git_sha must be a non-zero lowercase 40-character SHA, got {git_sha!r}")
 
     all_passed = bool(drills and all(d.passed for d in drills))

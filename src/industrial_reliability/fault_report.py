@@ -175,7 +175,11 @@ def publish_drill_report(
     md_path: Path,
     git_sha: str,
 ) -> FaultReportV1:
-    if not isinstance(git_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", git_sha) or git_sha == "0" * 40:
+    if (
+        not isinstance(git_sha, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", git_sha)
+        or git_sha == "0" * 40
+    ):
         raise ValueError(f"git_sha must be a non-zero lowercase 40-character SHA, got {git_sha!r}")
 
     now_iso = datetime.now(UTC).isoformat()

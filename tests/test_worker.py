@@ -392,7 +392,9 @@ def test_worker_settings_from_env_research_candidate(
 
     # Without ALLOW_RESEARCH_CANDIDATE -> fails
     monkeypatch.delenv("ALLOW_RESEARCH_CANDIDATE", raising=False)
-    with pytest.raises(ValueError, match="research-only package requires ALLOW_RESEARCH_CANDIDATE=true"):
+    with pytest.raises(
+        ValueError, match="research-only package requires ALLOW_RESEARCH_CANDIDATE=true"
+    ):
         WorkerSettings.from_env()
 
     # Invalid ALLOW_RESEARCH_CANDIDATE -> ValueError

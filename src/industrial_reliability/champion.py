@@ -120,9 +120,7 @@ def load_champion(
 
     manifest = ChampionManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
     if manifest.operational_status == "RESEARCH_ONLY" and not allow_research_candidate:
-        raise ChampionIntegrityError(
-            "research-only package requires ALLOW_RESEARCH_CANDIDATE=true"
-        )
+        raise ChampionIntegrityError("research-only package requires ALLOW_RESEARCH_CANDIDATE=true")
 
     for name, expected_hash in manifest.artifact_sha256.items():
         child_path = _resolve_safe_child(resolved_pkg, name)

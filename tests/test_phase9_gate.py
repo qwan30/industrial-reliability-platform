@@ -51,7 +51,9 @@ def test_run_phase9_gate_generates_json_and_md(tmp_path: Path) -> None:
     saved_data = json.loads(json_file.read_text(encoding="utf-8"))
     assert saved_data["report_sha256"] == report["report_sha256"]
     assert saved_data["evidence_level"] == "UNIT"
-    assert "Contract" in md_file.read_text(encoding="utf-8") or "Grounded" in md_file.read_text(encoding="utf-8")
+    assert "Contract" in md_file.read_text(encoding="utf-8") or "Grounded" in md_file.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_phase9_gate_main_cli(tmp_path: Path) -> None:

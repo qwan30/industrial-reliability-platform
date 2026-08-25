@@ -250,8 +250,14 @@ class Phase9CertificationGate:
         return all(c["passed"] for c in self.checks)
 
     def generate_report(self, git_sha: str) -> dict[str, Any]:
-        if not isinstance(git_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", git_sha) or git_sha == "0" * 40:
-            raise ValueError(f"git_sha must be a non-zero lowercase 40-character SHA, got {git_sha!r}")
+        if (
+            not isinstance(git_sha, str)
+            or not re.fullmatch(r"[0-9a-f]{40}", git_sha)
+            or git_sha == "0" * 40
+        ):
+            raise ValueError(
+                f"git_sha must be a non-zero lowercase 40-character SHA, got {git_sha!r}"
+            )
         all_passed = all(c["passed"] for c in self.checks)
         report_data: dict[str, Any] = {
             "schema_version": "phase-9-rca-contract-v1",

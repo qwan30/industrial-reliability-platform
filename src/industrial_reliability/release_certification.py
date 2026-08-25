@@ -67,7 +67,11 @@ class ReleaseCertificationValidator:
             except Exception:
                 resolved_sha = ""
 
-        if not resolved_sha or not re.fullmatch(r"[0-9a-f]{40}", resolved_sha) or resolved_sha == "0" * 40:
+        if (
+            not resolved_sha
+            or not re.fullmatch(r"[0-9a-f]{40}", resolved_sha)
+            or resolved_sha == "0" * 40
+        ):
             return ReleaseCertificationReportV1(
                 schema_version="release-certification-v1",
                 timestamp=datetime.now(UTC).isoformat(),
@@ -77,7 +81,9 @@ class ReleaseCertificationValidator:
                 decision_gates={},
                 artifact_hashes={},
                 is_certified=False,
-                limitations=["Exact committed 40-character lowercase hex git_sha required; fail closed"],
+                limitations=[
+                    "Exact committed 40-character lowercase hex git_sha required; fail closed"
+                ],
             )
 
         if not self.artifact_dir.exists():

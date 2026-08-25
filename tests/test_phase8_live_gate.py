@@ -73,7 +73,9 @@ def test_publish_live_drill_report(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("invalid_sha", ["0" * 40, "abc", "G" * 40, ""])
-def test_publish_live_drill_report_rejects_invalid_git_sha(tmp_path: Path, invalid_sha: str) -> None:
+def test_publish_live_drill_report_rejects_invalid_git_sha(
+    tmp_path: Path, invalid_sha: str
+) -> None:
     with pytest.raises(ValueError, match="git_sha"):
         publish_live_drill_report(
             [],

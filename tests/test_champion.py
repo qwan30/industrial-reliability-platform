@@ -189,7 +189,9 @@ def test_load_champion_enforces_allow_research_candidate(tmp_path: Path) -> None
     )
 
     # Without flag -> fails
-    with pytest.raises(ChampionIntegrityError, match="research-only package requires ALLOW_RESEARCH_CANDIDATE=true"):
+    with pytest.raises(
+        ChampionIntegrityError, match="research-only package requires ALLOW_RESEARCH_CANDIDATE=true"
+    ):
         load_champion(out_dir, res.manifest_sha256, allow_research_candidate=False)
 
     # With flag -> succeeds

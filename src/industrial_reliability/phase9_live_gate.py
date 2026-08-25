@@ -156,7 +156,9 @@ class Phase9LiveGate:
         # Check 4: Graceful fallback on error
         try:
             broken_generator = OpenAiRcaGenerator(
-                client=Mock(responses=Mock(parse=Mock(side_effect=RuntimeError("Simulated timeout")))),
+                client=Mock(
+                    responses=Mock(parse=Mock(side_effect=RuntimeError("Simulated timeout")))
+                ),
                 model=self.model,
             )
             item = EvidenceItemV1(
@@ -298,11 +300,19 @@ class Phase9LiveGate:
             self.record_check("secret_isolation_and_scrubbing", False, str(exc))
 
     def generate_report(self, git_sha: str) -> dict[str, Any]:
-        if not isinstance(git_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", git_sha) or git_sha == "0" * 40:
-            raise ValueError(f"git_sha must be a non-zero lowercase 40-character SHA, got {git_sha!r}")
+        if (
+            not isinstance(git_sha, str)
+            or not re.fullmatch(r"[0-9a-f]{40}", git_sha)
+            or git_sha == "0" * 40
+        ):
+            raise ValueError(
+                f"git_sha must be a non-zero lowercase 40-character SHA, got {git_sha!r}"
+            )
         all_passed = all(c["passed"] for c in self.checks)
         schema_version = (
-            "phase-9-rca-live-v1" if self.provider_mode == "LIVE_OPENAI" else "phase-9-rca-fallback-v1"
+            "phase-9-rca-live-v1"
+            if self.provider_mode == "LIVE_OPENAI"
+            else "phase-9-rca-fallback-v1"
         )
         report_data: dict[str, Any] = {
             "schema_version": schema_version,

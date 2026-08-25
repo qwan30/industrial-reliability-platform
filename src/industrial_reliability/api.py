@@ -526,7 +526,9 @@ def create_app(
 
 def create_app_from_env() -> FastAPI:
     pkg_dir_str = os.environ.get("SCORING_PACKAGE_DIR") or os.environ.get("CHAMPION_PACKAGE_DIR")
-    manifest_sha = os.environ.get("SCORING_MANIFEST_SHA256") or os.environ.get("CHAMPION_MANIFEST_SHA256")
+    manifest_sha = os.environ.get("SCORING_MANIFEST_SHA256") or os.environ.get(
+        "CHAMPION_MANIFEST_SHA256"
+    )
     if not pkg_dir_str or not manifest_sha:
         raise ValueError(
             "SCORING_PACKAGE_DIR and SCORING_MANIFEST_SHA256 must be set in the environment"

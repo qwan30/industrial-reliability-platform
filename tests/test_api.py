@@ -152,7 +152,9 @@ def test_create_app_from_env_research_candidate(
 
     # Without ALLOW_RESEARCH_CANDIDATE -> fails
     monkeypatch.delenv("ALLOW_RESEARCH_CANDIDATE", raising=False)
-    with pytest.raises(ChampionIntegrityError, match="research-only package requires ALLOW_RESEARCH_CANDIDATE=true"):
+    with pytest.raises(
+        ChampionIntegrityError, match="research-only package requires ALLOW_RESEARCH_CANDIDATE=true"
+    ):
         create_app_from_env()
 
     # Invalid ALLOW_RESEARCH_CANDIDATE -> ValueError

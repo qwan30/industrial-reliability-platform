@@ -1,8 +1,12 @@
+"""Release certification and portfolio packaging validation."""
+
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import re
+import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -20,6 +24,12 @@ def _canonical_json(data: Any) -> bytes:
         allow_nan=False,
         default=lambda o: o.isoformat() if isinstance(o, datetime) else str(o),
     ).encode("utf-8")
+
+
+def _compute_self_hash(data: dict[str, Any]) -> str:
+    copy_data = dict(data)
+    copy_data["report_sha256"] = ""
+    return hashlib.sha256(_canonical_json(copy_data)).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -43,12 +53,38 @@ class ReleaseCertificationValidator:
     def __init__(self, artifact_dir: Path | str = Path("docs/results")) -> None:
         self.artifact_dir = Path(artifact_dir)
 
-    def evaluate(self, git_sha: str = "0" * 40) -> ReleaseCertificationReportV1:
+    def evaluate(self, git_sha: str | None = None) -> ReleaseCertificationReportV1:
+        if git_sha is not None:
+            resolved_sha = git_sha
+        else:
+            try:
+                resolved_sha = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+            except Exception:
+                resolved_sha = ""
+
+        if not resolved_sha or not re.fullmatch(r"[0-9a-f]{40}", resolved_sha) or resolved_sha == "0" * 40:
+            return ReleaseCertificationReportV1(
+                schema_version="release-certification-v1",
+                timestamp=datetime.now(UTC).isoformat(),
+                git_sha=resolved_sha or "0" * 40,
+                verdict="INVALID",
+                phases_passed=[],
+                decision_gates={},
+                artifact_hashes={},
+                is_certified=False,
+                limitations=["Exact committed 40-character lowercase hex git_sha required; fail closed"],
+            )
+
         if not self.artifact_dir.exists():
             return ReleaseCertificationReportV1(
                 schema_version="release-certification-v1",
                 timestamp=datetime.now(UTC).isoformat(),
-                git_sha=git_sha,
+                git_sha=resolved_sha,
                 verdict="INVALID",
                 phases_passed=[],
                 decision_gates={},
@@ -80,7 +116,6 @@ class ReleaseCertificationValidator:
         # 2. Check Decision Gates
         p7a_file = self.artifact_dir / "phase-7a-airflow-decision.json"
         if not p7a_file.is_file():
-            # Check docs/decisions
             adr = Path("docs/decisions/2026-08-24-airflow-not-adopted.md")
             if adr.is_file():
                 decision_gates["airflow"] = "NOT_ADOPTED"
@@ -103,7 +138,10 @@ class ReleaseCertificationValidator:
             ).hexdigest()
 
         # 3. Check Phase 8 Observability & Fault drills
-        p8_file = self.artifact_dir / "phase-8-observability-reliability.json"
+        p8_file = self.artifact_dir / "phase-8-live-fault-drills.json"
+        if not p8_file.is_file():
+            p8_file = self.artifact_dir / "phase-8-observability-reliability.json"
+
         if p8_file.is_file():
             phases_passed.append("phase8_observability_fault_drills")
             artifact_hashes["phase8_observability"] = hashlib.sha256(
@@ -111,7 +149,15 @@ class ReleaseCertificationValidator:
             ).hexdigest()
 
         # 4. Check Phase 9 Grounded RCA
-        p9_file = self.artifact_dir / "phase-9-grounded-rca.json"
+        p9_file = (
+            self.artifact_dir / "phase-9-rca-live.json"
+            if (self.artifact_dir / "phase-9-rca-live.json").is_file()
+            else (
+                self.artifact_dir / "phase-9-rca-fallback.json"
+                if (self.artifact_dir / "phase-9-rca-fallback.json").is_file()
+                else self.artifact_dir / "phase-9-grounded-rca.json"
+            )
+        )
         if p9_file.is_file():
             phases_passed.append("phase9_grounded_rca")
             artifact_hashes["phase9_rca"] = hashlib.sha256(p9_file.read_bytes()).hexdigest()
@@ -131,7 +177,7 @@ class ReleaseCertificationValidator:
         report_dict: dict[str, Any] = {
             "schema_version": "release-certification-v1",
             "timestamp": datetime.now(UTC).isoformat(),
-            "git_sha": git_sha,
+            "git_sha": resolved_sha,
             "verdict": verdict,
             "phases_passed": phases_passed,
             "decision_gates": decision_gates,
@@ -141,8 +187,7 @@ class ReleaseCertificationValidator:
             "report_sha256": "",
         }
 
-        raw_canonical = _canonical_json(report_dict)
-        report_sha256 = hashlib.sha256(raw_canonical).hexdigest()
+        report_sha256 = _compute_self_hash(report_dict)
         report_dict["report_sha256"] = report_sha256
 
         return ReleaseCertificationReportV1(
@@ -163,7 +208,7 @@ def run_release_certification(
     *,
     artifact_dir: Path = Path("docs/results"),
     output_file: Path = Path("docs/results/release-certification.json"),
-    git_sha: str = "0" * 40,
+    git_sha: str | None = None,
 ) -> ReleaseCertificationReportV1:
     validator = ReleaseCertificationValidator(artifact_dir=artifact_dir)
     report = validator.evaluate(git_sha=git_sha)
@@ -177,6 +222,7 @@ def run_release_certification(
         "",
         f"- **Verdict:** `{report.verdict}`",
         f"- **Certified:** `{report.is_certified}`",
+        f"- **Git SHA:** `{report.git_sha}`",
         f"- **Certified At:** `{report.timestamp}`",
         f"- **Report SHA-256:** `{report.report_sha256}`",
         "",
@@ -184,8 +230,19 @@ def run_release_certification(
         f"- **Phases Certified:** {', '.join(report.phases_passed)}",
         f"- **Decision Gates:** {json.dumps(report.decision_gates)}",
         "",
-        "## Limitations & Research Findings",
+        "## Artifact Hashes",
+        "| Artifact | SHA-256 |",
+        "| :--- | :--- |",
     ]
+    for name, sha in sorted(report.artifact_hashes.items()):
+        md_lines.append(f"| `{name}` | `{sha}` |")
+
+    md_lines.extend(
+        [
+            "",
+            "## Limitations & Research Findings",
+        ]
+    )
     for lim in report.limitations:
         md_lines.append(f"- {lim}")
 
@@ -199,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output", type=Path, default=Path("docs/results/release-certification.json")
     )
-    parser.add_argument("--git-sha", type=str, default="0" * 40)
+    parser.add_argument("--git-sha", type=str, default=None)
 
     args = parser.parse_args(argv)
     report = run_release_certification(

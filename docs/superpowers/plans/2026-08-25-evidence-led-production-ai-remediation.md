@@ -416,9 +416,7 @@ def load_champion(
         raise ChampionIntegrityError("manifest SHA-256 mismatch")
     manifest = ChampionManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
     if manifest.operational_status == "RESEARCH_ONLY" and not allow_research_candidate:
-        raise ChampionIntegrityError(
-            "research-only package requires ALLOW_RESEARCH_CANDIDATE=true"
-        )
+        raise ChampionIntegrityError("research-only package requires ALLOW_RESEARCH_CANDIDATE=true")
 ```
 
 Parse `ALLOW_RESEARCH_CANDIDATE` as exactly `true` in both `create_app_from_env()` and `WorkerSettings.from_env()`; reject every other non-empty value.
@@ -506,7 +504,11 @@ def test_start_replay_uses_signed_package_identity() -> None:
     client = TestClient(create_app(scorer=scorer, producer=producer))
     response = client.post(
         "/v1/replays",
-        json={"range_start": "2020-05-29T21:00:00", "range_end": "2020-05-29T22:00:00", "speed": 1000},
+        json={
+            "range_start": "2020-05-29T21:00:00",
+            "range_end": "2020-05-29T22:00:00",
+            "speed": 1000,
+        },
     )
     assert response.status_code == 202
     command = decode_message(producer.messages[0][2], ReplayCommandV1)
@@ -869,9 +871,15 @@ Define `JSONScalar = str | int | float | bool | None` in `phase8_live_gate.py`; 
 def test_live_report_requires_all_three_real_observations() -> None:
     report = LivePhase8Report.build(
         git_sha="a" * 40,
-        service_outage=DrillObservation("scoring-outage", "SERVICE", False, "session-1", None, "SCORING_RETRY_EXHAUSTED", {}),
-        machine_replay=DrillObservation("known-abnormal-replay", "MACHINE", True, "session-2", "alert-1", None, {}),
-        malformed_telemetry=DrillObservation("malformed-telemetry", "DATA", True, None, None, "INVALID_TELEMETRY_PAYLOAD", {}),
+        service_outage=DrillObservation(
+            "scoring-outage", "SERVICE", False, "session-1", None, "SCORING_RETRY_EXHAUSTED", {}
+        ),
+        machine_replay=DrillObservation(
+            "known-abnormal-replay", "MACHINE", True, "session-2", "alert-1", None, {}
+        ),
+        malformed_telemetry=DrillObservation(
+            "malformed-telemetry", "DATA", True, None, None, "INVALID_TELEMETRY_PAYLOAD", {}
+        ),
     )
     assert report.verdict == "FAIL"
     assert report.evidence_level == "LIVE"
@@ -1045,9 +1053,7 @@ def test_complete_response_is_live_provider_evidence() -> None:
     payload = {
         "status": "COMPLETE",
         "provider_model": "configured-provider-model",
-        "observations": [
-            {"claim": "score exceeded threshold", "evidence_ids": ["evidence-1"]}
-        ],
+        "observations": [{"claim": "score exceeded threshold", "evidence_ids": ["evidence-1"]}],
         "evidence_ids": ["evidence-1"],
         "uncertainty": ["Anomaly evidence does not prove a mechanical root cause."],
         "evidence_bundle_sha256": "b" * 64,
@@ -1062,9 +1068,7 @@ def test_unavailable_response_is_not_live_provider_evidence() -> None:
     payload = {
         "status": "UNAVAILABLE",
         "provider_model": None,
-        "observations": [
-            {"claim": "persisted evidence only", "evidence_ids": ["evidence-1"]}
-        ],
+        "observations": [{"claim": "persisted evidence only", "evidence_ids": ["evidence-1"]}],
         "evidence_ids": ["evidence-1"],
         "uncertainty": ["Anomaly evidence does not prove a mechanical root cause."],
         "evidence_bundle_sha256": "b" * 64,
@@ -1105,10 +1109,7 @@ assert data["provider_model"]
 assert data["observations"]
 allowed = set(data["evidence_ids"])
 assert all(set(item["evidence_ids"]) <= allowed for item in data["observations"])
-assert any(
-    "does not prove a mechanical root cause" in item.lower()
-    for item in data["uncertainty"]
-)
+assert any("does not prove a mechanical root cause" in item.lower() for item in data["uncertainty"])
 ```
 
 For `UNAVAILABLE`, require `provider_model is None`, retained evidence IDs, and the same non-causal uncertainty. Record only status, model name, evidence IDs, hashes, timestamps, and HTTP status.
@@ -1319,12 +1320,15 @@ Every failed condition adds a limitation and keeps `is_certified=False`.
 Change the CLI default from zeros to:
 
 ```python
-git_sha = args.git_sha or subprocess.run(
-    ["git", "rev-parse", "HEAD"],
-    check=True,
-    capture_output=True,
-    text=True,
-).stdout.strip()
+git_sha = (
+    args.git_sha
+    or subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+)
 ```
 
 Add CLI argument `--phase1b-metrics` with default `docs/results/phase-1b-metrics.json`. Default output becomes `artifacts/certification/<git-sha>/release-certification.json`. Remove the three tracked dynamic release files listed above; do not delete immutable Phase 1/1B benchmark evidence.

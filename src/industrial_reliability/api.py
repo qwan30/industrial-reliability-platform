@@ -8,6 +8,7 @@ import json
 import os
 import time
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,7 +30,7 @@ from industrial_reliability.console_stream import (
     ConsoleEventBroker,
     ConsoleEventV1,
 )
-from industrial_reliability.kafka_io import encode_message
+from industrial_reliability.kafka_io import KafkaSettings, encode_message
 from industrial_reliability.metrics import RuntimeMetrics, mount_api_metrics
 from industrial_reliability.persistence import (
     AlertDetailRecord,
@@ -39,6 +40,9 @@ from industrial_reliability.persistence import (
 )
 from industrial_reliability.rca_evidence import AlertNotFound, gather_evidence
 from industrial_reliability.rca_openai import OpenAiRcaGenerator, evidence_only_report
+from industrial_reliability.runtime_kafka import (
+    AioKafkaCommandProducer,
+)
 from industrial_reliability.runtime_messages import (
     REPLAY_COMMANDS_TOPIC,
     ApiErrorV1,
@@ -51,6 +55,7 @@ from industrial_reliability.runtime_messages import (
 
 RUNTIME_NAMESPACE = NAMESPACE_URL
 ERR_STORE_UNAVAILABLE_MSG = "Database store not configured"
+_background_tasks: set[asyncio.Task[Any]] = set()
 
 
 class StartReplayRequestV1(BaseModel):
@@ -135,11 +140,21 @@ def _store_unavailable_response() -> JSONResponse:
 def _publish_command(producer: Any, topic: str, key: str, cmd: ReplayCommandV1) -> None:
     if producer is None:
         return
-    payload_bytes = encode_message(cmd)
-    if hasattr(producer, "send"):
-        producer.send(topic, key=key.encode("utf-8"), value=payload_bytes)
-    elif hasattr(producer, "produce"):
-        producer.produce(topic, key=key.encode("utf-8"), value=payload_bytes)
+    if hasattr(producer, "publish_command"):
+        coro = producer.publish_command(cmd)
+        try:
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(coro)
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+        except RuntimeError:
+            asyncio.run(coro)
+    else:
+        payload_bytes = encode_message(cmd)
+        if hasattr(producer, "send"):
+            producer.send(topic, key=key.encode("utf-8"), value=payload_bytes)
+        elif hasattr(producer, "produce"):
+            producer.produce(topic, key=key.encode("utf-8"), value=payload_bytes)
 
 
 def create_app(
@@ -151,7 +166,19 @@ def create_app(
     metrics: RuntimeMetrics | None = None,
     rca_generator: OpenAiRcaGenerator | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="Industrial Reliability Scoring and Alert API", version="1.0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        if producer is not None and hasattr(producer, "start"):
+            await producer.start()
+        yield
+        if producer is not None and hasattr(producer, "stop"):
+            await producer.stop()
+
+    app = FastAPI(
+        title="Industrial Reliability Scoring and Alert API",
+        version="1.0",
+        lifespan=lifespan,
+    )
 
     if metrics is not None:
         mount_api_metrics(app, metrics)
@@ -515,4 +542,13 @@ def create_app_from_env() -> FastAPI:
     db_url = os.environ.get("DATABASE_URL")
     store = RuntimeStore(db_url) if db_url else None
 
-    return create_app(scorer, store)
+    bootstrap_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "").strip()
+    producer: Any = None
+    if bootstrap_servers:
+        settings = KafkaSettings(
+            bootstrap_servers=bootstrap_servers,
+            client_id=os.environ.get("KAFKA_CLIENT_ID", "irp-api-v1"),
+        )
+        producer = AioKafkaCommandProducer(settings)
+
+    return create_app(scorer, store, producer=producer)

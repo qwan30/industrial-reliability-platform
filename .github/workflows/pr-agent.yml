@@ -1,14 +1,38 @@
 # .github/workflows/pr-agent.yml
+# Docs: https://docs.pr-agent.ai/installation/github/#run-as-a-github-action
 name: PR Agent
+
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, reopened, ready_for_review, synchronize]
+  issue_comment:
+    types: [created]
+
 jobs:
   pr_agent_job:
+    # Skip bot senders (e.g. dependabot) to avoid feedback loops.
+    if: ${{ github.event.sender.type != 'Bot' }}
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: write
+      checks: write
+    name: Run pr agent on every pull request, respond to user comments
     steps:
-    - name: PR Agent action step
-      uses: the-pr-agent/pr-agent@main
-      env:
-        OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: PR Agent action step
+        id: pragent
+        uses: the-pr-agent/pr-agent@main
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Auto-run /review when the PR is opened and on every push.
+          # Without PR_ACTIONS, "synchronize" events are skipped by the action.
+          GITHUB_ACTION_CONFIG.PR_ACTIONS: '["opened", "reopened", "ready_for_review", "synchronize"]'
+          GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
+          # Description and suggestions stay on-demand via comments: /describe, /improve
+          GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "false"
+          GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "false"
+          # Fail the job loudly when a tool errors (e.g. invalid API key),
+          # instead of silently succeeding with no bot output.
+          CONFIG.PROPAGATE_TOOL_ERRORS: "true"

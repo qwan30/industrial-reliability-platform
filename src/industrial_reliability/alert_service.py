@@ -54,6 +54,10 @@ class AlertServiceSettings:
 
         policy_path_str = os.environ.get("ALERT_POLICY_PATH", "").strip()
         if not policy_path_str:
+            # Only research-candidate packages embed the locked alert policy
+            # (champion packages do not ship one), so the fallback default
+            # points at the research candidate. Compose deployments always
+            # set SCORING_PACKAGE_DIR explicitly.
             pkg_dir_str = (
                 os.environ.get("SCORING_PACKAGE_DIR")
                 or os.environ.get("CHAMPION_PACKAGE_DIR")

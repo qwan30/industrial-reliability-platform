@@ -80,7 +80,7 @@ class WorkerSettings:
         pkg_dir_str = (
             os.environ.get("SCORING_PACKAGE_DIR")
             or os.environ.get("CHAMPION_PACKAGE_DIR")
-            or "artifacts/research-candidate"
+            or "artifacts/champion"
         ).strip()
         pkg_dir = Path(pkg_dir_str).resolve()
         manifest_file = pkg_dir / "manifest.json"

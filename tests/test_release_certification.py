@@ -45,6 +45,7 @@ def _write_passing_phase8_report(tmp_path: Path) -> None:
         {
             "schema_version": "phase8-in-process-fault-drills-v1",
             "evidence_level": "IN_PROCESS",
+            "git_sha": "a" * 40,
             "all_passed": True,
             "drills": [],
         },
@@ -58,6 +59,7 @@ def _write_passing_phase9_report(tmp_path: Path) -> None:
         {
             "schema_version": "phase-9-rca-fallback-v1",
             "evidence_level": "IN_PROCESS",
+            "git_sha": "a" * 40,
             "verdict": "PASS",
             "checks": [],
         },
@@ -143,6 +145,26 @@ def test_validator_rejects_tampered_self_hash(tmp_path: Path) -> None:
     report_out = ReleaseCertificationValidator(artifact_dir=tmp_path).evaluate(git_sha="a" * 40)
     assert "phase8_observability_fault_drills" not in report_out.phases_passed
     assert any("Phase 8" in lim for lim in report_out.limitations)
+
+
+def test_validator_rejects_evidence_bound_to_different_commit(tmp_path: Path) -> None:
+    _write_phase1b_metrics(tmp_path)
+    # Passing, self-consistent report produced for a DIFFERENT commit.
+    _write_self_hashed_report(
+        tmp_path / "phase-8-in-process-fault-drills.json",
+        {
+            "schema_version": "phase8-in-process-fault-drills-v1",
+            "evidence_level": "IN_PROCESS",
+            "git_sha": "b" * 40,
+            "all_passed": True,
+            "drills": [],
+        },
+        "self_sha256",
+    )
+
+    report = ReleaseCertificationValidator(artifact_dir=tmp_path).evaluate(git_sha="a" * 40)
+    assert "phase8_observability_fault_drills" not in report.phases_passed
+    assert any("Phase 8" in lim for lim in report.limitations)
 
 
 def test_validator_rejects_current_schema_without_self_hash(tmp_path: Path) -> None:

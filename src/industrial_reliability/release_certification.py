@@ -19,7 +19,7 @@ from industrial_reliability.report_hashes import compute_self_hash
 ReleaseVerdict = Literal["FEASIBLE_PLATFORM_RELEASE", "NEGATIVE_RESEARCH_RELEASE", "INVALID"]
 
 _SELF_HASH_FIELDS = ("report_sha256", "self_sha256")
-_SELF_HASH_REQUIRED_SCHEMAS = frozenset(
+_CURRENT_SCHEMAS = frozenset(
     {
         "phase8-in-process-fault-drills-v1",
         "phase8-live-fault-drills-v1",
@@ -51,11 +51,23 @@ def _verify_report_self_hash(data: dict[str, Any]) -> bool:
     """
     hash_field = next((field for field in _SELF_HASH_FIELDS if field in data), None)
     if hash_field is None:
-        return data.get("schema_version") not in _SELF_HASH_REQUIRED_SCHEMAS
+        return data.get("schema_version") not in _CURRENT_SCHEMAS
     stored = data[hash_field]
     if not isinstance(stored, str) or len(stored) != 64:
         return False
     return hmac.compare_digest(stored, compute_self_hash(data, hash_field))
+
+
+def _report_matches_git_sha(data: dict[str, Any], git_sha: str) -> bool:
+    """Exact-SHA certification: evidence must be bound to the certified commit.
+
+    Current schemas always embed ``git_sha`` and it must equal the resolved
+    SHA, so evidence produced for a different commit is rejected. Legacy
+    reports without the field remain accepted for backward compatibility.
+    """
+    if "git_sha" in data:
+        return data.get("git_sha") == git_sha
+    return data.get("schema_version") not in _CURRENT_SCHEMAS
 
 
 @dataclass(frozen=True)
@@ -190,6 +202,7 @@ class ReleaseCertificationValidator:
                 p8_data is not None
                 and p8_data.get("all_passed") is True
                 and _verify_report_self_hash(p8_data)
+                and _report_matches_git_sha(p8_data, resolved_sha)
             )
             if p8_valid:
                 phases_passed.append("phase8_observability_fault_drills")
@@ -198,8 +211,8 @@ class ReleaseCertificationValidator:
                 ).hexdigest()
             else:
                 limitations.append(
-                    "Phase 8 fault-drill evidence missing, failing, unreadable, or tampered; "
-                    "phase not certified."
+                    "Phase 8 fault-drill evidence missing, failing, unreadable, tampered, "
+                    "or bound to a different commit; phase not certified."
                 )
 
         # 4. Check Phase 9 Grounded RCA
@@ -216,14 +229,15 @@ class ReleaseCertificationValidator:
                 p9_data is not None
                 and p9_data.get("verdict") == "PASS"
                 and _verify_report_self_hash(p9_data)
+                and _report_matches_git_sha(p9_data, resolved_sha)
             )
             if p9_valid:
                 phases_passed.append("phase9_grounded_rca")
                 artifact_hashes["phase9_rca"] = hashlib.sha256(p9_file.read_bytes()).hexdigest()
             else:
                 limitations.append(
-                    "Phase 9 grounded-RCA evidence missing, failing, unreadable, or tampered; "
-                    "phase not certified."
+                    "Phase 9 grounded-RCA evidence missing, failing, unreadable, tampered, "
+                    "or bound to a different commit; phase not certified."
                 )
 
         # Determine verdict

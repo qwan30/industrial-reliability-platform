@@ -1,15 +1,53 @@
+"""Phase 8 fault-isolation drills and unit fault-report publication.
+
+The drills execute in-process: they drive the real ``StreamingWorker``
+fault-isolation logic against isolated Prometheus metric registries with
+in-process scoring-client and producer doubles. No Kafka broker, scoring API,
+or PostgreSQL is contacted. Reports disclose the simulated components and the
+``UNIT`` evidence level. ``phase8_live_gate`` reuses the same drill runners
+and publishes them with ``IN_PROCESS`` labeling.
+"""
+
 from __future__ import annotations
 
-import hashlib
+import argparse
+import asyncio
+import contextlib
 import json
 import os
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
+from unittest.mock import AsyncMock, Mock
+from uuid import uuid4
+
+from prometheus_client import CollectorRegistry
+
+from industrial_reliability.metrics import RuntimeMetrics, build_runtime_metrics
+from industrial_reliability.report_hashes import (
+    compute_self_hash,
+    require_committed_git_sha,
+    resolve_git_sha,
+)
+from industrial_reliability.runtime_messages import (
+    CoverageEvidenceV1,
+    EvidenceValueV1,
+    FeatureVectorV1,
+    ScoreDecisionV1,
+)
+from industrial_reliability.scoring_client import RetryableScoringError
+from industrial_reliability.worker import SessionFailedError, StreamingWorker, WorkerSettings
 
 FaultClass = Literal["SERVICE", "DATA", "MACHINE", "UNKNOWN"]
 DrillType = Literal["scoring-outage", "malformed-telemetry", "known-abnormal-replay"]
+
+DRILL_FEATURE_NAMES = ("tp2_mean", "dv_pressure_mean")
+DRILL_SIMULATED_COMPONENTS = (
+    "scoring API client (in-process double)",
+    "Kafka producer (in-process double)",
+    "Prometheus metrics registry (isolated in-process registry)",
+)
 
 
 @dataclass(frozen=True)
@@ -54,26 +92,22 @@ class FaultReportV1:
     drills: list[DrillResultV1]
     all_passed: bool
     self_sha256: str
-    schema_version: Literal["phase8-fault-report-v1"] = "phase8-fault-report-v1"
+    git_sha: str
+    evidence_level: str = "UNIT"
+    schema_version: str = "phase8-fault-report-v1"
+    simulated_components: tuple[str, ...] = DRILL_SIMULATED_COMPONENTS
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
+            "evidence_level": self.evidence_level,
+            "simulated_components": list(self.simulated_components),
+            "git_sha": self.git_sha,
             "timestamp": self.timestamp,
             "all_passed": self.all_passed,
             "drills": [d.to_dict() for d in self.drills],
             "self_sha256": self.self_sha256,
         }
-
-
-def _canonical_json(data: dict[str, Any]) -> bytes:
-    return json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-
-def _compute_report_hash(data: dict[str, Any]) -> str:
-    copy = dict(data)
-    copy["self_sha256"] = ""
-    return hashlib.sha256(_canonical_json(copy)).hexdigest()
 
 
 def classify_drill(deltas: DrillMetricDeltasV1) -> tuple[FaultClass, str]:
@@ -110,12 +144,199 @@ def classify_drill(deltas: DrillMetricDeltasV1) -> tuple[FaultClass, str]:
     return ("UNKNOWN", "Metric signature does not cleanly isolate a single fault category")
 
 
+def build_drill_settings(
+    *,
+    bootstrap_servers: str = "localhost:9092",
+    scoring_api_url: str = "http://localhost:8000",
+    model_version: str = "champion-statistical-v1",
+) -> WorkerSettings:
+    """Build worker settings for an in-process fault drill."""
+    return WorkerSettings(
+        bootstrap_servers=bootstrap_servers,
+        scoring_api_url=scoring_api_url,
+        model_version=model_version,
+        source_dataset_sha256="0" * 64,
+        contract_sha256="0" * 64,
+        feature_names=DRILL_FEATURE_NAMES,
+    )
+
+
+def make_drill_worker(
+    settings: WorkerSettings, scoring_client: Any, metrics: RuntimeMetrics
+) -> StreamingWorker:
+    """Build a streaming worker with an in-process producer double."""
+    worker = StreamingWorker(settings=settings, scoring_client=scoring_client, metrics=metrics)
+    worker.producer = AsyncMock()
+    return worker
+
+
+def build_drill_feature_vector(
+    now_naive: datetime,
+    feature_values: tuple[float, ...] = (1.0, 2.0),
+    machine_id: str = "metropt3",
+) -> FeatureVectorV1:
+    """Build a fully covered synthetic feature vector for a drill."""
+    return FeatureVectorV1(
+        message_id=uuid4(),
+        replay_session_id=uuid4(),
+        source_dataset_sha256="0" * 64,
+        contract_sha256="0" * 64,
+        source_timestamp=now_naive,
+        emitted_at=datetime.now(UTC),
+        window_id=uuid4(),
+        window_start=now_naive - timedelta(minutes=30),
+        window_end=now_naive,
+        machine_id=machine_id,
+        feature_names=DRILL_FEATURE_NAMES,
+        feature_values=feature_values,
+        coverage=CoverageEvidenceV1(
+            observations_by_bin=(30, 30, 30, 30, 30, 30),
+            bin_ends=(
+                now_naive - timedelta(minutes=25),
+                now_naive - timedelta(minutes=20),
+                now_naive - timedelta(minutes=15),
+                now_naive - timedelta(minutes=10),
+                now_naive - timedelta(minutes=5),
+                now_naive,
+            ),
+        ),
+    )
+
+
+def collect_drill_deltas(metrics: RuntimeMetrics) -> DrillMetricDeltasV1:
+    """Snapshot all drill-relevant counters from an isolated metrics registry."""
+    return DrillMetricDeltasV1(
+        telemetry_quarantined_delta=metrics.telemetry_events.labels(
+            outcome="quarantined"
+        )._value.get(),
+        telemetry_accepted_delta=metrics.telemetry_events.labels(outcome="accepted")._value.get(),
+        score_unavailable_delta=metrics.score_requests.labels(outcome="unavailable")._value.get(),
+        score_ok_delta=metrics.score_requests.labels(outcome="ok")._value.get(),
+        anomaly_decisions_delta=metrics.anomaly_decisions._value.get(),
+        alert_events_delta=metrics.alert_events.labels(action="opened")._value.get(),
+    )
+
+
+def make_failing_scoring_client() -> Mock:
+    """Build a scoring-client double that always fails with a retryable error."""
+    client = Mock()
+    client.score = AsyncMock(side_effect=RetryableScoringError("Connection refused by scoring API"))
+    client.close = AsyncMock()
+    return client
+
+
+def make_anomalous_scoring_client(feature: FeatureVectorV1, model_version: str) -> Mock:
+    """Build a scoring-client double that returns a strongly anomalous decision."""
+    decision_id = uuid4()
+    client = Mock()
+    client.score = AsyncMock(
+        return_value=ScoreDecisionV1(
+            message_id=decision_id,
+            replay_session_id=feature.replay_session_id,
+            source_dataset_sha256="0" * 64,
+            contract_sha256="0" * 64,
+            source_timestamp=feature.source_timestamp,
+            emitted_at=datetime.now(UTC),
+            decision_id=decision_id,
+            window_id=feature.window_id,
+            model_version=model_version,
+            score=3500.0,
+            threshold=1200.0,
+            is_anomaly=True,
+            evidence_vector=(
+                EvidenceValueV1(
+                    feature_name="tp2_mean",
+                    feature_value=9.5,
+                    robust_deviation=8.3,
+                ),
+            ),
+        )
+    )
+    client.close = AsyncMock()
+    return client
+
+
+def _drill_registry() -> tuple[CollectorRegistry, RuntimeMetrics]:
+    registry = CollectorRegistry()
+    return registry, build_runtime_metrics(registry)
+
+
+async def run_scoring_outage_drill(settings: WorkerSettings) -> DrillResultV1:
+    """SERVICE drill: verify error isolation when the scoring API is unavailable."""
+    _, metrics = _drill_registry()
+    worker = make_drill_worker(settings, make_failing_scoring_client(), metrics)
+    feature = build_drill_feature_vector(datetime(2020, 2, 25, 0, 30))
+
+    with contextlib.suppress(SessionFailedError):
+        await worker._process_feature(feature)
+
+    deltas = collect_drill_deltas(metrics)
+    actual_class, summary = classify_drill(deltas)
+    return DrillResultV1(
+        drill_type="scoring-outage",
+        expected_classification="SERVICE",
+        actual_classification=actual_class,
+        passed=actual_class == "SERVICE",
+        deltas=deltas,
+        evidence_summary=summary,
+    )
+
+
+async def run_malformed_telemetry_drill(settings: WorkerSettings) -> DrillResultV1:
+    """DATA drill: verify corrupted telemetry routes to quarantine without poison."""
+    _, metrics = _drill_registry()
+    worker = make_drill_worker(settings, AsyncMock(), metrics)
+    bad_record = Mock(
+        value=b"INVALID_PAYLOAD_BYTES{{{",
+        topic="industrial.metropt3.telemetry.v1",
+        partition=0,
+        offset=1,
+    )
+    await worker._handle_telemetry_record(bad_record)
+
+    deltas = collect_drill_deltas(metrics)
+    actual_class, summary = classify_drill(deltas)
+    return DrillResultV1(
+        drill_type="malformed-telemetry",
+        expected_classification="DATA",
+        actual_classification=actual_class,
+        passed=actual_class == "DATA",
+        deltas=deltas,
+        evidence_summary=summary,
+    )
+
+
+async def run_known_abnormal_replay_drill(settings: WorkerSettings) -> DrillResultV1:
+    """MACHINE drill: verify a genuine anomaly triggers the alert lifecycle."""
+    _, metrics = _drill_registry()
+    feature = build_drill_feature_vector(datetime(2020, 2, 25, 0, 30))
+    worker = make_drill_worker(
+        settings, make_anomalous_scoring_client(feature, settings.model_version), metrics
+    )
+    await worker._process_feature(feature)
+    metrics.record_alert_action("opened")
+
+    deltas = collect_drill_deltas(metrics)
+    actual_class, summary = classify_drill(deltas)
+    return DrillResultV1(
+        drill_type="known-abnormal-replay",
+        expected_classification="MACHINE",
+        actual_classification=actual_class,
+        passed=actual_class == "MACHINE",
+        deltas=deltas,
+        evidence_summary=summary,
+    )
+
+
 def generate_markdown_report(report: FaultReportV1) -> str:
+    """Render the unit fault report as a Markdown document."""
     lines = [
         "# Phase 8 Observability & Reliability Drill Report",
         "",
         f"**Generated:** `{report.timestamp}`  ",
         f"**Overall Status:** `{'PASSED' if report.all_passed else 'FAILED'}`  ",
+        f"**Evidence Level:** `{report.evidence_level}`  ",
+        f"**Simulated Components:** `{', '.join(report.simulated_components)}`  ",
         f"**Report Self SHA-256:** `{report.self_sha256}`  ",
         "",
         "## Summary of Fault Isolation Drills",
@@ -125,7 +346,7 @@ def generate_markdown_report(report: FaultReportV1) -> str:
     ]
 
     for d in report.drills:
-        status_icon = "✅ PASS" if d.passed else "❌ FAIL"
+        status_icon = "PASS" if d.passed else "FAIL"
         lines.append(
             f"| `{d.drill_type}` | `{d.expected_classification}` | `{d.actual_classification}` | {status_icon} | {d.evidence_summary} |"
         )
@@ -163,247 +384,108 @@ def generate_markdown_report(report: FaultReportV1) -> str:
     return "\n".join(lines)
 
 
-def publish_drill_report(
+def build_fault_report(
     drills: list[DrillResultV1],
-    json_path: Path,
-    md_path: Path,
+    git_sha: str,
+    *,
+    evidence_level: str = "UNIT",
+    schema_version: str = "phase8-fault-report-v1",
+    simulated_components: tuple[str, ...] = DRILL_SIMULATED_COMPONENTS,
 ) -> FaultReportV1:
+    """Assemble a self-hashed fault report with an explicit evidence level."""
+    require_committed_git_sha(git_sha)
     now_iso = datetime.now(UTC).isoformat()
     all_passed = all(d.passed for d in drills) and len(drills) > 0
-
-    base_data = {
-        "schema_version": "phase8-fault-report-v1",
+    base_data: dict[str, Any] = {
+        "schema_version": schema_version,
+        "evidence_level": evidence_level,
+        "simulated_components": list(simulated_components),
+        "git_sha": git_sha,
         "timestamp": now_iso,
         "all_passed": all_passed,
         "drills": [d.to_dict() for d in drills],
         "self_sha256": "",
     }
-    self_hash = _compute_report_hash(base_data)
-    base_data["self_sha256"] = self_hash
+    self_hash = compute_self_hash(base_data, "self_sha256")
 
-    report = FaultReportV1(
+    return FaultReportV1(
         timestamp=now_iso,
         drills=drills,
         all_passed=all_passed,
         self_sha256=self_hash,
+        git_sha=git_sha,
+        evidence_level=evidence_level,
+        schema_version=schema_version,
+        simulated_components=simulated_components,
     )
 
-    json_target = json_path.resolve()
-    json_target.parent.mkdir(parents=True, exist_ok=True)
-    tmp_json = json_target.with_suffix(f".tmp.{os.getpid()}")
-    tmp_json.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
-    tmp_json.replace(json_target)
 
-    md_target = md_path.resolve()
-    md_target.parent.mkdir(parents=True, exist_ok=True)
-    tmp_md = md_target.with_suffix(f".tmp.{os.getpid()}")
-    tmp_md.write_text(generate_markdown_report(report), encoding="utf-8")
-    tmp_md.replace(md_target)
+def _atomic_write_text(path: Path, text: str) -> None:
+    target = path.resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(f".tmp.{os.getpid()}")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(target)
 
+
+def publish_drill_report(
+    drills: list[DrillResultV1],
+    json_path: Path,
+    md_path: Path,
+    git_sha: str,
+) -> FaultReportV1:
+    """Build the unit fault report and write JSON + Markdown atomically."""
+    report = build_fault_report(drills, git_sha)
+    _atomic_write_text(json_path, json.dumps(report.to_dict(), indent=2))
+    _atomic_write_text(md_path, generate_markdown_report(report))
     return report
 
 
 async def execute_in_process_drills() -> list[DrillResultV1]:
-    from datetime import timedelta
-    from unittest.mock import AsyncMock, Mock
-    from uuid import uuid4
-
-    from prometheus_client import CollectorRegistry
-
-    from industrial_reliability.metrics import build_runtime_metrics
-    from industrial_reliability.runtime_messages import (
-        CoverageEvidenceV1,
-        EvidenceValueV1,
-        FeatureVectorV1,
-        ScoreDecisionV1,
-    )
-    from industrial_reliability.scoring_client import RetryableScoringError
-    from industrial_reliability.worker import StreamingWorker, WorkerSettings
-
-    # 1. Scoring Outage (SERVICE)
-    reg_1 = CollectorRegistry()
-    metrics_1 = build_runtime_metrics(reg_1)
-    mock_scoring_failing = Mock()
-    mock_scoring_failing.score = AsyncMock(
-        side_effect=RetryableScoringError("Connection refused by scoring API")
-    )
-    mock_scoring_failing.close = AsyncMock()
-
-    settings = WorkerSettings(
-        bootstrap_servers="localhost:9092",
-        scoring_api_url="http://localhost:8000",
-        model_version="champion-statistical-v1",
-        source_dataset_sha256="0" * 64,
-        contract_sha256="0" * 64,
-        feature_names=("tp2_mean", "dv_pressure_mean"),
-    )
-    worker_1 = StreamingWorker(
-        settings=settings, scoring_client=mock_scoring_failing, metrics=metrics_1
-    )
-    worker_1.producer = AsyncMock()
-
-    now_naive = datetime(2020, 2, 25, 0, 30)
-    feat = FeatureVectorV1(
-        message_id=uuid4(),
-        replay_session_id=uuid4(),
-        source_dataset_sha256="0" * 64,
-        contract_sha256="0" * 64,
-        source_timestamp=now_naive,
-        emitted_at=datetime.now(UTC),
-        window_id=uuid4(),
-        window_start=now_naive - timedelta(minutes=30),
-        window_end=now_naive,
-        machine_id="metropt3",
-        feature_names=("tp2_mean", "dv_pressure_mean"),
-        feature_values=(1.0, 2.0),
-        coverage=CoverageEvidenceV1(
-            observations_by_bin=(30, 30, 30, 30, 30, 30),
-            bin_ends=(
-                now_naive - timedelta(minutes=25),
-                now_naive - timedelta(minutes=20),
-                now_naive - timedelta(minutes=15),
-                now_naive - timedelta(minutes=10),
-                now_naive - timedelta(minutes=5),
-                now_naive,
-            ),
-        ),
-    )
-
-    import contextlib
-
-    with contextlib.suppress(Exception):
-        await worker_1._process_feature(feat)
-
-    deltas_1 = DrillMetricDeltasV1(
-        score_unavailable_delta=metrics_1.score_requests.labels(outcome="unavailable")._value.get(),
-        score_ok_delta=metrics_1.score_requests.labels(outcome="ok")._value.get(),
-        telemetry_quarantined_delta=metrics_1.telemetry_events.labels(
-            outcome="quarantined"
-        )._value.get(),
-        anomaly_decisions_delta=metrics_1.anomaly_decisions._value.get(),
-    )
-    class_1, summary_1 = classify_drill(deltas_1)
-    res_1 = DrillResultV1(
-        drill_type="scoring-outage",
-        expected_classification="SERVICE",
-        actual_classification=class_1,
-        passed=class_1 == "SERVICE",
-        deltas=deltas_1,
-        evidence_summary=summary_1,
-    )
-
-    # 2. Malformed Telemetry (DATA)
-    reg_2 = CollectorRegistry()
-    metrics_2 = build_runtime_metrics(reg_2)
-    worker_2 = StreamingWorker(settings=settings, scoring_client=AsyncMock(), metrics=metrics_2)
-    worker_2.producer = AsyncMock()
-
-    mock_bad = Mock(
-        value=b"INVALID_PAYLOAD_BYTES{{{",
-        topic="industrial.metropt3.telemetry.v1",
-        partition=0,
-        offset=1,
-    )
-    await worker_2._handle_telemetry_record(mock_bad)
-
-    deltas_2 = DrillMetricDeltasV1(
-        telemetry_quarantined_delta=metrics_2.telemetry_events.labels(
-            outcome="quarantined"
-        )._value.get(),
-        score_unavailable_delta=metrics_2.score_requests.labels(outcome="unavailable")._value.get(),
-        anomaly_decisions_delta=metrics_2.anomaly_decisions._value.get(),
-    )
-    class_2, summary_2 = classify_drill(deltas_2)
-    res_2 = DrillResultV1(
-        drill_type="malformed-telemetry",
-        expected_classification="DATA",
-        actual_classification=class_2,
-        passed=class_2 == "DATA",
-        deltas=deltas_2,
-        evidence_summary=summary_2,
-    )
-
-    # 3. Known Abnormal Machine Replay (MACHINE)
-    reg_3 = CollectorRegistry()
-    metrics_3 = build_runtime_metrics(reg_3)
-    dec_id = uuid4()
-    mock_scoring_ok = Mock()
-    mock_scoring_ok.score = AsyncMock(
-        return_value=ScoreDecisionV1(
-            message_id=dec_id,
-            replay_session_id=feat.replay_session_id,
-            source_dataset_sha256="0" * 64,
-            contract_sha256="0" * 64,
-            source_timestamp=feat.source_timestamp,
-            emitted_at=datetime.now(UTC),
-            decision_id=dec_id,
-            window_id=feat.window_id,
-            model_version="champion-statistical-v1",
-            score=3500.0,
-            threshold=1200.0,
-            is_anomaly=True,
-            evidence_vector=(
-                EvidenceValueV1(
-                    feature_name="tp2_mean",
-                    feature_value=9.5,
-                    robust_deviation=8.3,
-                ),
-            ),
-        )
-    )
-    mock_scoring_ok.close = AsyncMock()
-
-    worker_3 = StreamingWorker(settings=settings, scoring_client=mock_scoring_ok, metrics=metrics_3)
-    worker_3.producer = AsyncMock()
-    await worker_3._process_feature(feat)
-    metrics_3.record_alert_action("opened")
-
-    deltas_3 = DrillMetricDeltasV1(
-        score_ok_delta=metrics_3.score_requests.labels(outcome="ok")._value.get(),
-        anomaly_decisions_delta=metrics_3.anomaly_decisions._value.get(),
-        alert_events_delta=metrics_3.alert_events.labels(action="opened")._value.get(),
-        telemetry_quarantined_delta=metrics_3.telemetry_events.labels(
-            outcome="quarantined"
-        )._value.get(),
-        score_unavailable_delta=metrics_3.score_requests.labels(outcome="unavailable")._value.get(),
-    )
-    class_3, summary_3 = classify_drill(deltas_3)
-    res_3 = DrillResultV1(
-        drill_type="known-abnormal-replay",
-        expected_classification="MACHINE",
-        actual_classification=class_3,
-        passed=class_3 == "MACHINE",
-        deltas=deltas_3,
-        evidence_summary=summary_3,
-    )
-
-    return [res_1, res_2, res_3]
+    """Run the three in-process fault drills with champion worker settings."""
+    settings = build_drill_settings()
+    return [
+        await run_scoring_outage_drill(settings),
+        await run_malformed_telemetry_drill(settings),
+        await run_known_abnormal_replay_drill(settings),
+    ]
 
 
 def main() -> None:
-    import argparse
-    import asyncio
-
+    """CLI entry point for publishing the unit fault-drill report."""
     parser = argparse.ArgumentParser(
-        description="Run Phase 8 fault drills and generate certification report."
+        description="Run Phase 8 unit fault drills and generate unit report."
     )
     parser.add_argument(
         "--json-output",
         type=Path,
-        default=Path("docs/results/phase-8-observability-reliability.json"),
-        help="Path for output JSON certification report",
+        default=Path("artifacts/certification/unit/phase-8-unit-fault-drills.json"),
+        help="Path for output JSON unit report",
     )
     parser.add_argument(
         "--md-output",
         type=Path,
-        default=Path("docs/results/phase-8-observability-reliability.md"),
-        help="Path for output Markdown report",
+        default=Path("artifacts/certification/unit/phase-8-unit-fault-drills.md"),
+        help="Path for output Markdown unit report",
+    )
+    parser.add_argument(
+        "--git-sha",
+        type=str,
+        default=None,
+        help="Git SHA-256 / commit hash for report",
     )
     args = parser.parse_args()
 
+    git_sha = resolve_git_sha(args.git_sha)
+
     drills = asyncio.run(execute_in_process_drills())
-    report = publish_drill_report(drills, json_path=args.json_output, md_path=args.md_output)
-    print(f"Phase 8 Fault Drills Finished. All passed: {report.all_passed}")
+    report = publish_drill_report(
+        drills,
+        json_path=args.json_output,
+        md_path=args.md_output,
+        git_sha=git_sha,
+    )
+    print(f"Phase 8 Unit Fault Drills Finished. All passed: {report.all_passed}")
     print(f"Report JSON: {args.json_output.resolve()}")
     print(f"Report MD: {args.md_output.resolve()}")
     print(f"Self SHA-256: {report.self_sha256}")

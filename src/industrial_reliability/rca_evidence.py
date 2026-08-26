@@ -11,6 +11,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from industrial_reliability.persistence import AlertDetailRecord
+from industrial_reliability.report_hashes import canonical_json_bytes
 
 RCA_TOOL_NAMES = (
     "get_alert",
@@ -51,19 +52,9 @@ class EvidenceBundleV1(BaseModel):
     bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-def _canonical_json(data: Any) -> bytes:
-    return json.dumps(
-        data,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-        default=lambda o: o.isoformat() if isinstance(o, datetime) else str(o),
-    ).encode("utf-8")
-
-
 def _evidence_id(tool_name: str, facts: Mapping[str, JsonScalar]) -> str:
     digest = hashlib.sha256(
-        _canonical_json({"facts": dict(sorted(facts.items())), "tool_name": tool_name})
+        canonical_json_bytes({"facts": dict(sorted(facts.items())), "tool_name": tool_name})
     ).hexdigest()
     return f"evidence-{digest[:24]}"
 
@@ -71,7 +62,7 @@ def _evidence_id(tool_name: str, facts: Mapping[str, JsonScalar]) -> str:
 def _compute_bundle_hash(data: dict[str, Any]) -> str:
     copy_data = dict(data)
     copy_data["bundle_sha256"] = ""
-    return hashlib.sha256(_canonical_json(copy_data)).hexdigest()
+    return hashlib.sha256(canonical_json_bytes(copy_data)).hexdigest()
 
 
 def _sanitize_scalar(val: Any) -> JsonScalar:

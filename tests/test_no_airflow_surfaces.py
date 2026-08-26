@@ -3,8 +3,6 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-import yaml
-
 
 def test_repository_has_no_airflow_runtime_surface() -> None:
     # 1. Verify pyproject dependencies
@@ -25,11 +23,8 @@ def test_repository_has_no_airflow_runtime_surface() -> None:
     # 2. Verify docker compose services
     compose_path = Path("compose.yaml")
     assert compose_path.is_file()
-    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
-    services = compose.get("services", {})
-    assert all("airflow" not in name.lower() for name in services), (
-        f"Found airflow in compose services: {services}"
-    )
+    compose_text = compose_path.read_text(encoding="utf-8")
+    assert "airflow" not in compose_text.lower(), "Found airflow in compose.yaml"
 
     # 3. Verify no DAGs or airflow dirs exist
     assert not Path("airflow").exists()

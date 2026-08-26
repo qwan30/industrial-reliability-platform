@@ -337,3 +337,34 @@ async def test_streaming_worker_run_lifecycle() -> None:
         assert worker._running is True
         await worker.stop()
         assert worker._running is False
+
+
+def test_worker_settings_from_env_research_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.helpers_champion import build_research_candidate_from_mock_run
+
+    mock = build_research_candidate_from_mock_run(tmp_path)
+
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    monkeypatch.setenv("SCORING_API_URL", "http://localhost:8000")
+    monkeypatch.setenv("SCORING_PACKAGE_DIR", str(mock.package_dir))
+    monkeypatch.setenv("SCORING_MANIFEST_SHA256", mock.manifest_sha256)
+
+    # Without ALLOW_RESEARCH_CANDIDATE -> fails
+    monkeypatch.delenv("ALLOW_RESEARCH_CANDIDATE", raising=False)
+    with pytest.raises(
+        ValueError, match="research-only package requires ALLOW_RESEARCH_CANDIDATE=true"
+    ):
+        WorkerSettings.from_env()
+
+    # Invalid ALLOW_RESEARCH_CANDIDATE -> ValueError
+    monkeypatch.setenv("ALLOW_RESEARCH_CANDIDATE", "invalid")
+    with pytest.raises(ValueError, match="invalid ALLOW_RESEARCH_CANDIDATE"):
+        WorkerSettings.from_env()
+
+    # With ALLOW_RESEARCH_CANDIDATE=true -> succeeds
+    monkeypatch.setenv("ALLOW_RESEARCH_CANDIDATE", "true")
+    settings = WorkerSettings.from_env()
+    assert settings.model_version == "research-candidate-statistical-v1"

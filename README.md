@@ -126,13 +126,16 @@ python -m industrial_reliability.drift build-reference \
 ```
 
 ### Fault Isolation Drills Certification
-Execute the certified 3-drill fault matrix:
+Execute the certified 3-drill fault-isolation matrix:
 ```powershell
-.\scripts\run_phase8_fault_drills.ps1
+.\scripts\run_phase8_live_fault_drills.ps1
 ```
-Generates cryptographically self-hashed evidence reports at:
-- `docs/results/phase-8-observability-reliability.json`
-- `docs/results/phase-8-observability-reliability.md`
+The drills execute the real streaming-worker fault-isolation logic in-process
+(scoring client, Kafka producer, and metrics registry are in-process doubles),
+and the reports disclose the simulated components with
+`evidence_level: IN_PROCESS`. Generates cryptographically self-hashed reports at:
+- `artifacts/certification/<git-sha>/phase-8-in-process-fault-drills.json`
+- `artifacts/certification/<git-sha>/phase-8-in-process-fault-drills.md`
 
 ## Grounded Root-Cause Analysis (Phase 9)
 
@@ -162,14 +165,32 @@ The React operator console includes an interactive RCA panel in the alert detail
 - Grounded observations linked to clickable evidence citation pills.
 - Explicit non-causal uncertainty disclaimer and recommended operational next checks.
 
-### Certification Gate
-Run the cryptographic Phase 9 certification gate:
-```bash
-python -m industrial_reliability.phase9_gate --output-dir docs/results
+### RCA Certification Gate
+Run the cryptographic Phase 9 RCA certification gate:
+```powershell
+.\scripts\run_phase9_live_gate.ps1
 ```
-Generates self-hashed reports at:
-- `docs/results/phase-9-grounded-rca.json` (SHA-256 verified)
-- `docs/results/phase-9-grounded-rca.md`
+The gate verifies the RCA contract in-process (allowlisted projection tools,
+closed-world citation enforcement, graceful provider fallback, and secret
+scrubbing) and publishes `evidence_level: IN_PROCESS` reports;
+`provider_mode` records whether `RCA_OPENAI_API_KEY` is configured for the
+operational RCA endpoint. Generates self-hashed reports at:
+- `artifacts/certification/<git-sha>/phase-9-rca-fallback.json` (or `phase-9-rca-openai.json` when `RCA_OPENAI_API_KEY` is set)
+- `artifacts/certification/<git-sha>/phase-9-rca-fallback.md`
+
+## Release Certification & Portfolio Demo
+
+### End-to-End Live Demonstration
+Execute the full live platform portfolio demonstration:
+```powershell
+.\scripts\run_portfolio_demo.ps1
+```
+
+### Exact-SHA Release Certification
+Certify complete release packaging against committed git HEAD:
+```bash
+python -m industrial_reliability.release_certification --artifact-dir artifacts/certification/<git-sha> --git-sha <git-sha>
+```
 
 ## License
 

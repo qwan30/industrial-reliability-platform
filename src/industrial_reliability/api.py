@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import time
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,7 +31,7 @@ from industrial_reliability.console_stream import (
     ConsoleEventBroker,
     ConsoleEventV1,
 )
-from industrial_reliability.kafka_io import encode_message
+from industrial_reliability.kafka_io import KafkaSettings, encode_message
 from industrial_reliability.metrics import RuntimeMetrics, mount_api_metrics
 from industrial_reliability.persistence import (
     AlertDetailRecord,
@@ -39,6 +41,9 @@ from industrial_reliability.persistence import (
 )
 from industrial_reliability.rca_evidence import AlertNotFound, gather_evidence
 from industrial_reliability.rca_openai import OpenAiRcaGenerator, evidence_only_report
+from industrial_reliability.runtime_kafka import (
+    AioKafkaCommandProducer,
+)
 from industrial_reliability.runtime_messages import (
     REPLAY_COMMANDS_TOPIC,
     ApiErrorV1,
@@ -51,6 +56,7 @@ from industrial_reliability.runtime_messages import (
 
 RUNTIME_NAMESPACE = NAMESPACE_URL
 ERR_STORE_UNAVAILABLE_MSG = "Database store not configured"
+logger = logging.getLogger(__name__)
 
 
 class StartReplayRequestV1(BaseModel):
@@ -132,8 +138,32 @@ def _store_unavailable_response() -> JSONResponse:
     )
 
 
-def _publish_command(producer: Any, topic: str, key: str, cmd: ReplayCommandV1) -> None:
+def _producer_unavailable_response(message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "success": False,
+            "data": None,
+            "error": {
+                "code": "PRODUCER_UNAVAILABLE",
+                "message": message,
+            },
+        },
+    )
+
+
+async def _publish_command(producer: Any, topic: str, key: str, cmd: ReplayCommandV1) -> None:
+    """Publish a replay command on the application's event loop.
+
+    Both replay endpoints are async and await this helper so an aiokafka
+    producer is always driven on the event loop that owns it; falling back to
+    ``asyncio.run`` from a sync endpoint would bind the producer to a second
+    loop and fail at runtime.
+    """
     if producer is None:
+        return
+    if hasattr(producer, "publish_command"):
+        await producer.publish_command(cmd)
         return
     payload_bytes = encode_message(cmd)
     if hasattr(producer, "send"):
@@ -151,7 +181,19 @@ def create_app(
     metrics: RuntimeMetrics | None = None,
     rca_generator: OpenAiRcaGenerator | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="Industrial Reliability Scoring and Alert API", version="1.0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        if producer is not None and hasattr(producer, "start"):
+            await producer.start()
+        yield
+        if producer is not None and hasattr(producer, "stop"):
+            await producer.stop()
+
+    app = FastAPI(
+        title="Industrial Reliability Scoring and Alert API",
+        version="1.0",
+        lifespan=lifespan,
+    )
 
     if metrics is not None:
         mount_api_metrics(app, metrics)
@@ -274,7 +316,9 @@ def create_app(
         return ScoreResponseV1(data=decision)
 
     @app.post("/v1/replays", status_code=202)
-    def start_replay(body: StartReplayRequestV1) -> JSONResponse:
+    async def start_replay(body: StartReplayRequestV1) -> JSONResponse:
+        if producer is None:
+            return _producer_unavailable_response("Kafka replay command producer is not configured")
         session_id = uuid4()
         now = datetime.now(UTC)
         ds_sha = "0" * 64
@@ -297,7 +341,11 @@ def create_app(
             range_start=body.range_start,
             range_end=body.range_end,
         )
-        _publish_command(producer, REPLAY_COMMANDS_TOPIC, str(session_id), cmd)
+        try:
+            await _publish_command(producer, REPLAY_COMMANDS_TOPIC, str(session_id), cmd)
+        except Exception:
+            logger.exception("Failed to publish replay START command")
+            return _producer_unavailable_response("Failed to publish replay command to Kafka")
         return JSONResponse(
             status_code=202,
             content={
@@ -308,7 +356,9 @@ def create_app(
         )
 
     @app.post("/v1/replays/{replay_session_id}/commands", status_code=202)
-    def control_replay(replay_session_id: UUID, body: ReplayControlRequestV1) -> JSONResponse:
+    async def control_replay(replay_session_id: UUID, body: ReplayControlRequestV1) -> JSONResponse:
+        if producer is None:
+            return _producer_unavailable_response("Kafka replay command producer is not configured")
         now = datetime.now(UTC)
         cmd = ReplayCommandV1(
             schema_version="replay-command-v1",
@@ -324,7 +374,11 @@ def create_app(
             range_start=None,
             range_end=None,
         )
-        _publish_command(producer, REPLAY_COMMANDS_TOPIC, str(replay_session_id), cmd)
+        try:
+            await _publish_command(producer, REPLAY_COMMANDS_TOPIC, str(replay_session_id), cmd)
+        except Exception:
+            logger.exception("Failed to publish replay %s command", body.action)
+            return _producer_unavailable_response("Failed to publish replay command to Kafka")
         return JSONResponse(
             status_code=202,
             content={"success": True, "data": {"status": "accepted"}, "error": None},
@@ -498,16 +552,32 @@ def create_app(
 
 
 def create_app_from_env() -> FastAPI:
-    pkg_dir_str = os.environ.get("CHAMPION_PACKAGE_DIR")
-    manifest_sha = os.environ.get("CHAMPION_MANIFEST_SHA256")
+    pkg_dir_str = os.environ.get("SCORING_PACKAGE_DIR") or os.environ.get("CHAMPION_PACKAGE_DIR")
+    manifest_sha = os.environ.get("SCORING_MANIFEST_SHA256") or os.environ.get(
+        "CHAMPION_MANIFEST_SHA256"
+    )
     if not pkg_dir_str or not manifest_sha:
         raise ValueError(
-            "CHAMPION_PACKAGE_DIR and CHAMPION_MANIFEST_SHA256 must be set in the environment"
+            "SCORING_PACKAGE_DIR and SCORING_MANIFEST_SHA256 must be set in the environment"
         )
+    allow_research_raw = os.environ.get("ALLOW_RESEARCH_CANDIDATE", "").strip().lower()
+    if allow_research_raw not in {"", "true", "false"}:
+        raise ValueError(f"invalid ALLOW_RESEARCH_CANDIDATE: {allow_research_raw}")
+    allow_research = allow_research_raw == "true"
+
     pkg_dir = Path(pkg_dir_str).resolve()
-    scorer = load_champion(pkg_dir, manifest_sha)
+    scorer = load_champion(pkg_dir, manifest_sha, allow_research_candidate=allow_research)
 
     db_url = os.environ.get("DATABASE_URL")
     store = RuntimeStore(db_url) if db_url else None
 
-    return create_app(scorer, store)
+    bootstrap_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "").strip()
+    producer: Any = None
+    if bootstrap_servers:
+        settings = KafkaSettings(
+            bootstrap_servers=bootstrap_servers,
+            client_id=os.environ.get("KAFKA_CLIENT_ID", "irp-api-v1"),
+        )
+        producer = AioKafkaCommandProducer(settings)
+
+    return create_app(scorer, store, producer=producer)

@@ -101,7 +101,12 @@ def _resolve_safe_child(package_dir: Path, filename: str) -> Path:
     return target
 
 
-def load_champion(package_dir: Path, expected_manifest_sha256: str) -> ChampionScorer:
+def load_champion(
+    package_dir: Path,
+    expected_manifest_sha256: str,
+    *,
+    allow_research_candidate: bool = False,
+) -> ChampionScorer:
     resolved_pkg = package_dir.resolve()
     manifest_path = (resolved_pkg / "manifest.json").resolve()
     if not manifest_path.is_file():
@@ -114,6 +119,8 @@ def load_champion(package_dir: Path, expected_manifest_sha256: str) -> ChampionS
         )
 
     manifest = ChampionManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    if manifest.operational_status == "RESEARCH_ONLY" and not allow_research_candidate:
+        raise ChampionIntegrityError("research-only package requires ALLOW_RESEARCH_CANDIDATE=true")
 
     for name, expected_hash in manifest.artifact_sha256.items():
         child_path = _resolve_safe_child(resolved_pkg, name)

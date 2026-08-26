@@ -15,7 +15,14 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from industrial_reliability.phase1b_data import sha256_file
 
@@ -23,6 +30,7 @@ DETECTOR_FILENAME = "detector.joblib"
 BASELINE_FILENAME = "evidence-baseline.npz"
 GOLDEN_CASES_FILENAME = "golden-cases.json"
 MANIFEST_FILENAME = "manifest.json"
+SCORES_PARQUET_FILENAME = "scores.parquet"
 HEX_64_PATTERN = r"^[0-9a-f]{64}$"
 
 
@@ -40,7 +48,10 @@ class ThresholdProvenance(BaseModel):
 class ChampionManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: Literal["champion-package-v1"] = "champion-package-v1"
-    source_champion_schema: Literal["phase1b-champion-v1"] = "phase1b-champion-v1"
+    package_role: Literal["CHAMPION", "RESEARCH_CANDIDATE"] = "CHAMPION"
+    evaluation_verdict: Literal["FEASIBLE", "NOT_FEASIBLE"] = "FEASIBLE"
+    operational_status: Literal["PRODUCTION_CANDIDATE", "RESEARCH_ONLY"] = "PRODUCTION_CANDIDATE"
+    source_champion_schema: Literal["phase1b-champion-v1", "phase1b-run-v1"] = "phase1b-champion-v1"
     source_run_id: str
     model_id: Literal["statistical", "isolation_forest", "autoencoder"]
     model_version: str
@@ -52,12 +63,31 @@ class ChampionManifest(BaseModel):
     golden_case_count: Literal[3] = 3
     artifact_sha256: Mapping[str, str]
 
+    @model_validator(mode="after")
+    def validate_package_role(self) -> ChampionManifest:
+        champion = (
+            self.package_role == "CHAMPION"
+            and self.evaluation_verdict == "FEASIBLE"
+            and self.operational_status == "PRODUCTION_CANDIDATE"
+            and self.source_champion_schema == "phase1b-champion-v1"
+        )
+        research = (
+            self.package_role == "RESEARCH_CANDIDATE"
+            and self.evaluation_verdict == "NOT_FEASIBLE"
+            and self.operational_status == "RESEARCH_ONLY"
+            and self.source_champion_schema == "phase1b-run-v1"
+        )
+        if not (champion or research):
+            raise ValueError("invalid package role and evaluation verdict combination")
+        return self
+
     @field_validator("artifact_sha256")
     @classmethod
     def validate_artifact_hashes(cls, v: Mapping[str, str]) -> Mapping[str, str]:
-        allowed_keys = {DETECTOR_FILENAME, BASELINE_FILENAME, GOLDEN_CASES_FILENAME}
-        if set(v.keys()) != allowed_keys:
-            raise ValueError(f"artifact_sha256 must contain exact keys: {allowed_keys}")
+        required = {DETECTOR_FILENAME, BASELINE_FILENAME, GOLDEN_CASES_FILENAME}
+        allowed = required | {SCORES_PARQUET_FILENAME}
+        if not required <= set(v.keys()) or not set(v.keys()) <= allowed:
+            raise ValueError(f"artifact_sha256 must contain {required} and only allow {allowed}")
         for key, hash_val in v.items():
             if not isinstance(hash_val, str) or len(hash_val) != 64:
                 raise ValueError(f"Invalid sha256 for {key}: {hash_val}")
@@ -113,13 +143,13 @@ def _verify_phase1b_artifacts(
     expected_model = artifact_hashes.get("model_binary")
     expected_baseline = artifact_hashes.get("evidence_baseline")
 
-    scores_file = (resolved_run / "scores.parquet").resolve()
+    scores_file = (resolved_run / SCORES_PARQUET_FILENAME).resolve()
     baseline_file = (resolved_run / BASELINE_FILENAME).resolve()
     model_id = champion_dict.get("model_id")
     model_file = (resolved_run / "models" / f"{model_id}.joblib").resolve()
 
     if not scores_file.is_file() or sha256_file(scores_file) != expected_scores:
-        raise ChampionPackageError("scores.parquet missing or SHA-256 mismatch")
+        raise ChampionPackageError(f"{SCORES_PARQUET_FILENAME} missing or SHA-256 mismatch")
     if not baseline_file.is_file() or sha256_file(baseline_file) != expected_baseline:
         raise ChampionPackageError(f"{BASELINE_FILENAME} missing or SHA-256 mismatch")
     if not model_file.is_file() or sha256_file(model_file) != expected_model:
@@ -139,7 +169,7 @@ def _verify_git_ancestor(git_sha: str | None) -> None:
         raise ChampionPackageError(f"Champion git commit {git_sha} is not an ancestor of HEAD")
 
 
-def _select_golden_cases(
+def select_golden_cases(
     scores_parquet: Path,
     features_parquet: Path,
     champion_dict: dict[str, Any],
@@ -237,7 +267,7 @@ def _select_golden_cases(
     return golden_cases
 
 
-def _serialize_golden_cases(cases: list[GoldenCase]) -> dict[str, Any]:
+def serialize_golden_cases(cases: list[GoldenCase]) -> dict[str, Any]:
     return {
         "schema_version": "champion-golden-cases-v1",
         "cases": [
@@ -291,9 +321,9 @@ def build_champion_package(
     model_id = champion["model_id"]
     model_src = (resolved_run / "models" / f"{model_id}.joblib").resolve()
     baseline_src = (resolved_run / BASELINE_FILENAME).resolve()
-    scores_src = (resolved_run / "scores.parquet").resolve()
+    scores_src = (resolved_run / SCORES_PARQUET_FILENAME).resolve()
 
-    golden = _select_golden_cases(scores_src, features_path, champion, baseline_src)
+    golden = select_golden_cases(scores_src, features_path, champion, baseline_src)
 
     temp_output = (
         resolved_out.parent / f"{resolved_out.name}_temp_{int(datetime.now().timestamp())}"
@@ -309,7 +339,7 @@ def build_champion_package(
         shutil.copy2(model_src, dest_model)
         shutil.copy2(baseline_src, dest_baseline)
 
-        golden_payload = _serialize_golden_cases(golden)
+        golden_payload = serialize_golden_cases(golden)
         dest_golden.write_text(json.dumps(golden_payload, indent=2), encoding="utf-8")
 
         artifact_hashes = {

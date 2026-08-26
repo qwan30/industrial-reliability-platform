@@ -2,23 +2,24 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
 from industrial_reliability.api import create_app, create_app_from_env
 from industrial_reliability.champion import load_champion
-from industrial_reliability.package_champion import build_champion_package
+from tests.helpers_champion import (
+    build_research_candidate_from_mock_run,
+    create_mock_phase1b_champion_run,
+)
 from tests.test_champion import _make_feature_vector
-from tests.test_package_champion import _create_mock_feasible_phase1b_run
 
 
 @pytest.fixture
 def scoring_client(tmp_path: Path) -> tuple[TestClient, dict[str, object], Path, str]:
-    run_dir, feat_path = _create_mock_feasible_phase1b_run(tmp_path)
-    pkg_dir = tmp_path / "pkg"
-    build_result = build_champion_package(run_dir, feat_path, pkg_dir)
-    scorer = load_champion(pkg_dir, build_result.manifest_sha256)
+    mock_run = create_mock_phase1b_champion_run(tmp_path)
+    scorer = load_champion(mock_run.package_dir, mock_run.manifest_sha256)
     app = create_app(scorer)
     client = TestClient(app)
 
@@ -32,7 +33,7 @@ def scoring_client(tmp_path: Path) -> tuple[TestClient, dict[str, object], Path,
         "model_version": scorer.model_version,
         "feature_vector": json.loads(fv.model_dump_json()),
     }
-    return client, request_payload, pkg_dir, build_result.manifest_sha256
+    return client, request_payload, mock_run.package_dir, mock_run.manifest_sha256
 
 
 def test_healthz_and_readyz(
@@ -98,3 +99,54 @@ def test_create_app_from_env(
     client = TestClient(app)
     r = client.get("/healthz")
     assert r.status_code == 200
+
+
+def test_create_app_from_env_research_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from industrial_reliability.champion import ChampionIntegrityError
+
+    mock = build_research_candidate_from_mock_run(tmp_path)
+
+    monkeypatch.setenv("SCORING_PACKAGE_DIR", str(mock.package_dir))
+    monkeypatch.setenv("SCORING_MANIFEST_SHA256", mock.manifest_sha256)
+
+    # Without ALLOW_RESEARCH_CANDIDATE -> fails
+    monkeypatch.delenv("ALLOW_RESEARCH_CANDIDATE", raising=False)
+    with pytest.raises(
+        ChampionIntegrityError, match="research-only package requires ALLOW_RESEARCH_CANDIDATE=true"
+    ):
+        create_app_from_env()
+
+    # Invalid ALLOW_RESEARCH_CANDIDATE -> ValueError
+    monkeypatch.setenv("ALLOW_RESEARCH_CANDIDATE", "yes")
+    with pytest.raises(ValueError, match="invalid ALLOW_RESEARCH_CANDIDATE"):
+        create_app_from_env()
+
+    # Valid ALLOW_RESEARCH_CANDIDATE=true -> succeeds
+    monkeypatch.setenv("ALLOW_RESEARCH_CANDIDATE", "true")
+    app = create_app_from_env()
+    client = TestClient(app)
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    assert r.json() == {"success": True, "data": {"status": "ok"}, "error": None}
+
+    # When producer is None, replay commands return 503
+    r_replay = client.post(
+        "/v1/replays",
+        json={
+            "speed": 100,
+            "range_start": "2020-03-01T00:00:00Z",
+            "range_end": "2020-03-02T00:00:00Z",
+        },
+    )
+    assert r_replay.status_code == 503
+    assert r_replay.json()["error"]["code"] == "PRODUCER_UNAVAILABLE"
+
+    r_cmd = client.post(
+        f"/v1/replays/{uuid4()}/commands",
+        json={"action": "PAUSE"},
+    )
+    assert r_cmd.status_code == 503
+    assert r_cmd.json()["error"]["code"] == "PRODUCER_UNAVAILABLE"

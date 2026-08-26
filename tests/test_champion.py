@@ -14,14 +14,14 @@ from industrial_reliability.champion import (
     ScoringContractError,
     load_champion,
 )
-from industrial_reliability.package_champion import (
-    build_champion_package,
-)
 from industrial_reliability.runtime_messages import (
     CoverageEvidenceV1,
     FeatureVectorV1,
 )
-from tests.test_package_champion import _create_mock_feasible_phase1b_run
+from tests.helpers_champion import (
+    build_research_candidate_from_mock_run,
+    create_mock_phase1b_champion_run,
+)
 
 
 def _make_feature_vector(
@@ -92,10 +92,9 @@ def golden_case_to_feature_vector(case: dict[str, Any], scorer: ChampionScorer) 
 
 
 def test_load_champion_rejects_manifest_or_model_tamper(tmp_path: Path) -> None:
-    run_dir, feat_path = _create_mock_feasible_phase1b_run(tmp_path)
-    pkg_dir = tmp_path / "pkg"
-    build_result = build_champion_package(run_dir, feat_path, pkg_dir)
-    trust_anchor = build_result.manifest_sha256
+    mock_run = create_mock_phase1b_champion_run(tmp_path)
+    pkg_dir = mock_run.package_dir
+    trust_anchor = mock_run.manifest_sha256
 
     # Test invalid trust anchor
     with pytest.raises(ChampionIntegrityError, match="manifest SHA-256 mismatch"):
@@ -108,10 +107,8 @@ def test_load_champion_rejects_manifest_or_model_tamper(tmp_path: Path) -> None:
 
 
 def test_score_rejects_contract_model_and_feature_order(tmp_path: Path) -> None:
-    run_dir, feat_path = _create_mock_feasible_phase1b_run(tmp_path)
-    pkg_dir = tmp_path / "pkg"
-    build_result = build_champion_package(run_dir, feat_path, pkg_dir)
-    scorer = load_champion(pkg_dir, build_result.manifest_sha256)
+    mock_run = create_mock_phase1b_champion_run(tmp_path)
+    scorer = load_champion(mock_run.package_dir, mock_run.manifest_sha256)
 
     # Reversed feature order
     reversed_names = tuple(reversed(scorer.feature_names))
@@ -131,15 +128,29 @@ def test_score_rejects_contract_model_and_feature_order(tmp_path: Path) -> None:
 
 
 def test_all_golden_cases_match_package(tmp_path: Path) -> None:
-    run_dir, feat_path = _create_mock_feasible_phase1b_run(tmp_path)
-    pkg_dir = tmp_path / "pkg"
-    build_result = build_champion_package(run_dir, feat_path, pkg_dir)
-    scorer = load_champion(pkg_dir, build_result.manifest_sha256)
+    mock_run = create_mock_phase1b_champion_run(tmp_path)
+    scorer = load_champion(mock_run.package_dir, mock_run.manifest_sha256)
 
-    golden_data = json.loads((pkg_dir / "golden-cases.json").read_text(encoding="utf-8"))
+    golden_data = json.loads(
+        (mock_run.package_dir / "golden-cases.json").read_text(encoding="utf-8")
+    )
     for case in golden_data["cases"]:
         fv = golden_case_to_feature_vector(case, scorer)
         scored = scorer.score(fv)
         assert scored.score == pytest.approx(case["expected_score"], abs=1e-9)
         assert scored.is_anomaly == case["expected_is_anomaly"]
         assert len(scored.evidence_vector) == len(case["expected_evidence"])
+
+
+def test_load_champion_enforces_allow_research_candidate(tmp_path: Path) -> None:
+    mock = build_research_candidate_from_mock_run(tmp_path)
+
+    # Without flag -> fails
+    with pytest.raises(
+        ChampionIntegrityError, match="research-only package requires ALLOW_RESEARCH_CANDIDATE=true"
+    ):
+        load_champion(mock.package_dir, mock.manifest_sha256, allow_research_candidate=False)
+
+    # With flag -> succeeds
+    scorer = load_champion(mock.package_dir, mock.manifest_sha256, allow_research_candidate=True)
+    assert scorer.model_version == "research-candidate-statistical-v1"

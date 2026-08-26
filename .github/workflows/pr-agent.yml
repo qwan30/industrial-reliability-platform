@@ -1,14 +1,54 @@
 # .github/workflows/pr-agent.yml
+# Docs: https://docs.pr-agent.ai/installation/github/#run-as-a-github-action
 name: PR Agent
+
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, reopened, ready_for_review, synchronize]
+  issue_comment:
+    types: [created]
+
 jobs:
   pr_agent_job:
+    # Skip bot senders (e.g. dependabot) to avoid feedback loops.
+    if: ${{ github.event.sender.type != 'Bot' }}
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: write
+      checks: write
+    name: Run pr agent on every pull request, respond to user comments
     steps:
-    - name: PR Agent action step
-      uses: the-pr-agent/pr-agent@main
-      env:
-        OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: PR Agent action step
+        id: pragent
+        uses: the-pr-agent/pr-agent@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # NOTE: the OPENAI_KEY repo secret actually stores a DeepSeek API key
+          # (verified live against https://api.deepseek.com).
+          # DEEPSEEK.KEY makes PR-Agent export DEEPSEEK_API_KEY for litellm;
+          # DEEPSEEK_API_KEY is also set directly as a belt-and-suspenders.
+          DEEPSEEK.KEY: ${{ secrets.OPENAI_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.OPENAI_KEY }}
+          # DeepSeek V4 models (1M-token context, thinking mode by default).
+          # flash = fast/cheap primary, pro = higher quality fallback.
+          CONFIG.MODEL: "deepseek/deepseek-v4-flash"
+          CONFIG.FALLBACK_MODELS: '["deepseek/deepseek-v4-pro"]'
+          # Default is 32k, which prunes the diff of large PRs heavily;
+          # DeepSeek V4 has a 1M context so 128k is safe and keeps the full diff.
+          CONFIG.MAX_MODEL_TOKENS: "128000"
+          CONFIG.LARGE_PATCH_POLICY: "clip"
+          # V4 models think before answering; large PR reviews can exceed the
+          # default 120s timeout, so allow up to 10 minutes per AI call.
+          CONFIG.AI_TIMEOUT: "600"
+          # Auto-run /review when the PR is opened and on every push.
+          # Without PR_ACTIONS, "synchronize" events are skipped by the action.
+          GITHUB_ACTION_CONFIG.PR_ACTIONS: '["opened", "reopened", "ready_for_review", "synchronize"]'
+          GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
+          # Description and suggestions stay on-demand via comments: /describe, /improve
+          GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "false"
+          GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "false"
+          # Fail the job loudly when a tool errors (e.g. invalid API key),
+          # instead of silently succeeding with no bot output.
+          CONFIG.PROPAGATE_TOOL_ERRORS: "true"

@@ -114,3 +114,6 @@
 - [x] **Finding 10 [P2] Env key deletion:** `check_secret_isolation_from_env` overwrote then deleted `RCA_OPENAI_API_KEY`/`RCA_OPENAI_MODEL`, discarding real values. It now saves and restores the previous environment verbatim (`rca_gate_checks.py`)
 
 - [x] Final local gate verification: Ruff check+format clean, Mypy strict clean (54 files), Pytest 431 passed / 6 skipped, coverage 87.02% (≥ 80% gate)
+
+- [x] All 4 fix commits pushed (`b47e429`, `6cbef63`, `bf4dc10`, `e41e968`); PR remediation summary comment posted
+- [ ] **EXTERNAL BLOCK:** GitHub Actions CI/PR-Agent validation of `e41e968` is queued due to a confirmed GitHub **Actions major outage** (githubstatus: `major_outage`, partial system outage) — the jobs are already queued and will run automatically once GitHub restores Actions. Local validation already proves the gates (Ruff/mypy/pytest/coverage), matching the previous 3 commits' CI-green results.

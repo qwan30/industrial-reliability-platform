@@ -147,6 +147,49 @@ def test_validator_rejects_tampered_self_hash(tmp_path: Path) -> None:
     assert any("Phase 8" in lim for lim in report_out.limitations)
 
 
+def test_validator_rejects_unit_level_evidence(tmp_path: Path) -> None:
+    """A UNIT-level report renamed into the artifact dir must not certify."""
+    _write_phase1b_metrics(tmp_path)
+    _write_self_hashed_report(
+        tmp_path / "phase-8-in-process-fault-drills.json",
+        {
+            "schema_version": "phase8-in-process-fault-drills-v1",
+            "evidence_level": "UNIT",
+            "git_sha": "a" * 40,
+            "all_passed": True,
+            "drills": [],
+        },
+        "self_sha256",
+    )
+
+    report = ReleaseCertificationValidator(artifact_dir=tmp_path).evaluate(git_sha="a" * 40)
+    assert "phase8_observability_fault_drills" not in report.phases_passed
+    assert any("Phase 8" in lim for lim in report.limitations)
+
+
+def test_validator_rejects_renamed_report_with_foreign_schema(tmp_path: Path) -> None:
+    """A unit-gate report renamed to a release filename must not certify."""
+    _write_phase1b_metrics(tmp_path)
+    # phase-9 contract gate report (UNIT evidence, MOCKED_CONTRACT) renamed to
+    # the fallback filename inspected by release certification.
+    _write_self_hashed_report(
+        tmp_path / "phase-9-rca-fallback.json",
+        {
+            "schema_version": "phase-9-rca-contract-v1",
+            "evidence_level": "UNIT",
+            "provider_mode": "MOCKED_CONTRACT",
+            "git_sha": "a" * 40,
+            "verdict": "PASS",
+            "checks": [],
+        },
+        "report_sha256",
+    )
+
+    report = ReleaseCertificationValidator(artifact_dir=tmp_path).evaluate(git_sha="a" * 40)
+    assert "phase9_grounded_rca" not in report.phases_passed
+    assert any("Phase 9" in lim for lim in report.limitations)
+
+
 def test_validator_rejects_evidence_bound_to_different_commit(tmp_path: Path) -> None:
     _write_phase1b_metrics(tmp_path)
     # Passing, self-consistent report produced for a DIFFERENT commit.

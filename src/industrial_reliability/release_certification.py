@@ -22,15 +22,36 @@ _SELF_HASH_FIELDS = ("report_sha256", "self_sha256")
 _CURRENT_SCHEMAS = frozenset(
     {
         "phase8-in-process-fault-drills-v1",
-        "phase8-live-fault-drills-v1",
-        "phase8-live-fault-report-v1",
         "phase-9-rca-openai-v1",
         "phase-9-rca-fallback-v1",
-        "phase-9-rca-live-v1",
-        "phase-9-rca-certification-v1",
-        "phase8-fault-report-v1",
     }
 )
+# Each evidence filename is bound to exactly one expected schema and its
+# passing verdict field, so a report produced by a different gate (for example
+# a UNIT-level unit-drill report) cannot certify a phase merely by being
+# renamed into the artifact directory.
+_P8_EVIDENCE_SPECS = {
+    "phase-8-in-process-fault-drills.json": (
+        "phase8-in-process-fault-drills-v1",
+        "all_passed",
+        True,
+    ),
+    "phase-8-live-fault-drills.json": ("phase8-live-fault-drills-v1", "all_passed", True),
+    "phase-8-observability-reliability.json": (
+        "phase8-fault-report-v1",
+        "all_passed",
+        True,
+    ),
+}
+_P9_EVIDENCE_SPECS = {
+    "phase-9-rca-openai.json": ("phase-9-rca-openai-v1", "verdict", "PASS"),
+    "phase-9-rca-fallback.json": ("phase-9-rca-fallback-v1", "verdict", "PASS"),
+    "phase-9-rca-live.json": ("phase-9-rca-live-v1", "verdict", "PASS"),
+    "phase-9-grounded-rca.json": ("phase-9-rca-certification-v1", "verdict", "PASS"),
+}
+# Unit-level evidence (in-process doubles without gate attestation) must never
+# certify a release phase; only gate-level evidence qualifies.
+_RELEASE_EVIDENCE_LEVELS = frozenset({"IN_PROCESS", "LIVE"})
 
 
 def _load_json_report(file_path: Path) -> dict[str, Any] | None:
@@ -68,6 +89,30 @@ def _report_matches_git_sha(data: dict[str, Any], git_sha: str) -> bool:
     if "git_sha" in data:
         return data.get("git_sha") == git_sha
     return data.get("schema_version") not in _CURRENT_SCHEMAS
+
+
+def _verify_release_evidence(
+    data: dict[str, Any] | None,
+    expected_schema: str,
+    verdict_field: str,
+    passing_value: Any,
+    git_sha: str,
+) -> bool:
+    """Validate one certification report as release evidence.
+
+    The report must match the schema bound to its filename, carry a passing
+    verdict, disclose gate-level evidence (never UNIT), carry a valid embedded
+    self-hash, and be bound to the certified commit.
+    """
+    if data is None:
+        return False
+    return (
+        data.get("schema_version") == expected_schema
+        and data.get(verdict_field) == passing_value
+        and data.get("evidence_level") in _RELEASE_EVIDENCE_LEVELS
+        and _verify_report_self_hash(data)
+        and _report_matches_git_sha(data, git_sha)
+    )
 
 
 @dataclass(frozen=True)
@@ -190,19 +235,15 @@ class ReleaseCertificationValidator:
 
         # 3. Check Phase 8 Observability & Fault drills
         p8_candidates = [
-            self.artifact_dir / "phase-8-in-process-fault-drills.json",
-            self.artifact_dir / "phase-8-live-fault-drills.json",
-            self.artifact_dir / "phase-8-observability-reliability.json",
+            (self.artifact_dir / name, *spec) for name, spec in _P8_EVIDENCE_SPECS.items()
         ]
-        p8_file = next((f for f in p8_candidates if f.is_file()), p8_candidates[-1])
+        p8_file, p8_schema, p8_field, p8_pass = next(
+            (c for c in p8_candidates if c[0].is_file()), p8_candidates[-1]
+        )
 
         if p8_file.is_file():
-            p8_data = _load_json_report(p8_file)
-            p8_valid = (
-                p8_data is not None
-                and p8_data.get("all_passed") is True
-                and _verify_report_self_hash(p8_data)
-                and _report_matches_git_sha(p8_data, resolved_sha)
+            p8_valid = _verify_release_evidence(
+                _load_json_report(p8_file), p8_schema, p8_field, p8_pass, resolved_sha
             )
             if p8_valid:
                 phases_passed.append("phase8_observability_fault_drills")
@@ -212,24 +253,19 @@ class ReleaseCertificationValidator:
             else:
                 limitations.append(
                     "Phase 8 fault-drill evidence missing, failing, unreadable, tampered, "
-                    "or bound to a different commit; phase not certified."
+                    "unit-level, or bound to a different commit; phase not certified."
                 )
 
         # 4. Check Phase 9 Grounded RCA
         p9_candidates = [
-            self.artifact_dir / "phase-9-rca-openai.json",
-            self.artifact_dir / "phase-9-rca-fallback.json",
-            self.artifact_dir / "phase-9-rca-live.json",
-            self.artifact_dir / "phase-9-grounded-rca.json",
+            (self.artifact_dir / name, *spec) for name, spec in _P9_EVIDENCE_SPECS.items()
         ]
-        p9_file = next((f for f in p9_candidates if f.is_file()), p9_candidates[-1])
+        p9_file, p9_schema, p9_field, p9_pass = next(
+            (c for c in p9_candidates if c[0].is_file()), p9_candidates[-1]
+        )
         if p9_file.is_file():
-            p9_data = _load_json_report(p9_file)
-            p9_valid = (
-                p9_data is not None
-                and p9_data.get("verdict") == "PASS"
-                and _verify_report_self_hash(p9_data)
-                and _report_matches_git_sha(p9_data, resolved_sha)
+            p9_valid = _verify_release_evidence(
+                _load_json_report(p9_file), p9_schema, p9_field, p9_pass, resolved_sha
             )
             if p9_valid:
                 phases_passed.append("phase9_grounded_rca")
@@ -237,7 +273,7 @@ class ReleaseCertificationValidator:
             else:
                 limitations.append(
                     "Phase 9 grounded-RCA evidence missing, failing, unreadable, tampered, "
-                    "or bound to a different commit; phase not certified."
+                    "unit-level, or bound to a different commit; phase not certified."
                 )
 
         # Determine verdict

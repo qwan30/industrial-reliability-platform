@@ -178,6 +178,15 @@ def check_graceful_fallback_on_provider_error(model: str) -> tuple[bool, str]:
 
 def check_secret_isolation_from_env() -> tuple[bool, str]:
     """Verify API keys are read strictly via from_env() and scrubbed from reprs."""
+
+    def _restore(key: str, previous: str | None) -> None:
+        if previous is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = previous
+
+    saved_key = os.environ.get("RCA_OPENAI_API_KEY")
+    saved_model = os.environ.get("RCA_OPENAI_MODEL")
     os.environ["RCA_OPENAI_API_KEY"] = "sk-secret-key-gate-check"
     os.environ["RCA_OPENAI_MODEL"] = "gpt-4o"
     try:
@@ -191,8 +200,10 @@ def check_secret_isolation_from_env() -> tuple[bool, str]:
     except Exception as exc:
         return False, str(exc)
     finally:
-        os.environ.pop("RCA_OPENAI_API_KEY", None)
-        os.environ.pop("RCA_OPENAI_MODEL", None)
+        # Restore the caller's environment verbatim so a configured live key
+        # survives the contract-gate run.
+        _restore("RCA_OPENAI_API_KEY", saved_key)
+        _restore("RCA_OPENAI_MODEL", saved_model)
 
 
 def check_secret_scrubbing_repr() -> tuple[bool, str]:

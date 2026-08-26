@@ -97,3 +97,20 @@
 - [x] **Finding 3 [P1] Misleading LIVE evidence (PR Reviewer bot):** Phase 8/Phase 9 gates ran fully in-process (Mock/AsyncMock doubles) yet published `evidence_level: "LIVE"` under `artifacts/certification/live/`. Gates now publish `evidence_level: "IN_PROCESS"` (unit gate stays `UNIT`) with an explicit `simulated_components` disclosure, honest schema versions (`phase8-in-process-fault-drills-v1`, `phase-9-rca-openai-v1`), new filenames (`phase-8-in-process-fault-drills.*`, `phase-9-rca-{fallback,openai}.*`), output dir `artifacts/certification/in_process/`, and README/RUNBOOK/demo-script copy updated (`phase8_live_gate.py`, `phase9_live_gate.py`, `phase9_gate.py`, `fault_report.py`, `release_certification.py`)
 - [x] **Finding 4 [P1] SonarCloud Quality Gate (10.8% duplication on new code, ≤3% required):** Extracted shared helpers — `report_hashes.py` (canonical JSON / self-hash / committed-SHA validation), `rca_gate_checks.py` (all Phase 9 contract checks), `fault_report.py` (drill runners, worker/feature/metrics builders shared by both gates), `tests/helpers_champion.py` (mock Phase 1B champion run + research-candidate builders replacing 5× duplicated ~95-line builders across 9 test files)
 - [x] Full local gate verification: Ruff check+format clean, Mypy strict clean (54 files), Pytest 411 passed / 6 skipped (Docker-dependent integration skips, same as CI)
+
+### Review loop round 2 (new bot findings on `b47e429`)
+
+- [x] **Finding 5 [P1] Missing verdict validation:** Release certification counted Phase 8/9 artifacts on file existence alone. Now the report verdict (`all_passed`/`verdict`) and embedded self-hash are validated before each phase is counted; failing phases record an explicit limitation (`release_certification.py`, `tests/test_release_certification.py`)
+- [x] **Finding 6 [P1] Fabricated git SHA:** `resolve_git_sha` fell back to `"a"*40` when `git rev-parse` failed, defeating the fail-closed exact-SHA guarantee. It now raises `RuntimeError` and callers must pass the SHA explicitly (`report_hashes.py`, `tests/test_report_hashes.py`)
+
+### Review loop round 3 (new bot findings on `6cbef63`)
+
+- [x] **Finding 7 [P1] Exact-SHA not enforced:** Evidence reports' `git_sha` was never compared to the certified SHA. `_report_matches_git_sha` now requires current schemas to embed a matching `git_sha` (legacy schemas without the field remain accepted); evidence bound to a different commit is rejected (`release_certification.py`, `tests/test_release_certification.py`)
+- [x] **Finding 8 [P2] Default package path regression:** `WorkerSettings.from_env()` default restored to `artifacts/champion` (the main-branch default); compose deployments still pin `artifacts/research-candidate` via `SCORING_PACKAGE_DIR`, and the alert-service policy fallback default is documented (`worker.py`, `alert_service.py`)
+
+### Review loop round 4 (new bot findings on `bf4dc10`)
+
+- [x] **Finding 9 [P1] Certification gap:** Evidence validation never checked `evidence_level`, so a UNIT-level report renamed to an inspected filename could certify a phase. Each evidence filename is now bound to exactly one expected schema + verdict field, and `evidence_level` must be gate-level (`IN_PROCESS`/`LIVE`) (`release_certification.py`, `tests/test_release_certification.py`)
+- [x] **Finding 10 [P2] Env key deletion:** `check_secret_isolation_from_env` overwrote then deleted `RCA_OPENAI_API_KEY`/`RCA_OPENAI_MODEL`, discarding real values. It now saves and restores the previous environment verbatim (`rca_gate_checks.py`)
+
+- [x] Final local gate verification: Ruff check+format clean, Mypy strict clean (54 files), Pytest 431 passed / 6 skipped, coverage 87.02% (≥ 80% gate)

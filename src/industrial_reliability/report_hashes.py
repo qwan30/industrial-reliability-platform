@@ -41,15 +41,28 @@ def require_committed_git_sha(git_sha: str) -> str:
 
 
 def resolve_git_sha(git_sha: str | None) -> str:
-    """Resolve the committed HEAD SHA, falling back to a synthetic non-zero SHA."""
+    """Resolve the committed HEAD SHA, failing closed outside a git work tree.
+
+    A synthetic fallback SHA would defeat the exact-SHA certification
+    guarantee, so callers must pass ``git_sha`` explicitly when the committed
+    HEAD cannot be resolved (for example in a non-git environment).
+    """
     if git_sha:
         return git_sha
     try:
-        return subprocess.run(
+        resolved = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             check=True,
             capture_output=True,
             text=True,
         ).stdout.strip()
-    except Exception:
-        return "a" * 40
+    except Exception as exc:
+        raise RuntimeError(
+            "unable to resolve committed git HEAD; pass the committed SHA explicitly "
+            "(for example via --git-sha)"
+        ) from exc
+    if not resolved:
+        raise RuntimeError(
+            "git rev-parse HEAD returned an empty SHA; pass the committed SHA explicitly"
+        )
+    return resolved

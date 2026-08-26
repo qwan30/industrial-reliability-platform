@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import re
 import subprocess
@@ -16,6 +17,45 @@ from typing import Any, Literal
 from industrial_reliability.report_hashes import compute_self_hash
 
 ReleaseVerdict = Literal["FEASIBLE_PLATFORM_RELEASE", "NEGATIVE_RESEARCH_RELEASE", "INVALID"]
+
+_SELF_HASH_FIELDS = ("report_sha256", "self_sha256")
+_SELF_HASH_REQUIRED_SCHEMAS = frozenset(
+    {
+        "phase8-in-process-fault-drills-v1",
+        "phase8-live-fault-drills-v1",
+        "phase8-live-fault-report-v1",
+        "phase-9-rca-openai-v1",
+        "phase-9-rca-fallback-v1",
+        "phase-9-rca-live-v1",
+        "phase-9-rca-certification-v1",
+        "phase8-fault-report-v1",
+    }
+)
+
+
+def _load_json_report(file_path: Path) -> dict[str, Any] | None:
+    """Load a JSON certification report, returning None when unreadable."""
+    try:
+        data = json.loads(file_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _verify_report_self_hash(data: dict[str, Any]) -> bool:
+    """Verify the embedded self-hash when the report schema requires one.
+
+    Current certification schemas always embed ``report_sha256`` or
+    ``self_sha256``; a missing, malformed, or mismatched hash fails closed.
+    Only legacy schemas without a self-hash field may omit it.
+    """
+    hash_field = next((field for field in _SELF_HASH_FIELDS if field in data), None)
+    if hash_field is None:
+        return data.get("schema_version") not in _SELF_HASH_REQUIRED_SCHEMAS
+    stored = data[hash_field]
+    if not isinstance(stored, str) or len(stored) != 64:
+        return False
+    return hmac.compare_digest(stored, compute_self_hash(data, hash_field))
 
 
 @dataclass(frozen=True)
@@ -145,10 +185,22 @@ class ReleaseCertificationValidator:
         p8_file = next((f for f in p8_candidates if f.is_file()), p8_candidates[-1])
 
         if p8_file.is_file():
-            phases_passed.append("phase8_observability_fault_drills")
-            artifact_hashes["phase8_observability"] = hashlib.sha256(
-                p8_file.read_bytes()
-            ).hexdigest()
+            p8_data = _load_json_report(p8_file)
+            p8_valid = (
+                p8_data is not None
+                and p8_data.get("all_passed") is True
+                and _verify_report_self_hash(p8_data)
+            )
+            if p8_valid:
+                phases_passed.append("phase8_observability_fault_drills")
+                artifact_hashes["phase8_observability"] = hashlib.sha256(
+                    p8_file.read_bytes()
+                ).hexdigest()
+            else:
+                limitations.append(
+                    "Phase 8 fault-drill evidence missing, failing, unreadable, or tampered; "
+                    "phase not certified."
+                )
 
         # 4. Check Phase 9 Grounded RCA
         p9_candidates = [
@@ -159,8 +211,20 @@ class ReleaseCertificationValidator:
         ]
         p9_file = next((f for f in p9_candidates if f.is_file()), p9_candidates[-1])
         if p9_file.is_file():
-            phases_passed.append("phase9_grounded_rca")
-            artifact_hashes["phase9_rca"] = hashlib.sha256(p9_file.read_bytes()).hexdigest()
+            p9_data = _load_json_report(p9_file)
+            p9_valid = (
+                p9_data is not None
+                and p9_data.get("verdict") == "PASS"
+                and _verify_report_self_hash(p9_data)
+            )
+            if p9_valid:
+                phases_passed.append("phase9_grounded_rca")
+                artifact_hashes["phase9_rca"] = hashlib.sha256(p9_file.read_bytes()).hexdigest()
+            else:
+                limitations.append(
+                    "Phase 9 grounded-RCA evidence missing, failing, unreadable, or tampered; "
+                    "phase not certified."
+                )
 
         # Determine verdict
         verdict: ReleaseVerdict = (

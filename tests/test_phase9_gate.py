@@ -5,10 +5,10 @@ from pathlib import Path
 
 from industrial_reliability.phase9_gate import (
     Phase9CertificationGate,
-    _compute_self_hash,
     main,
     run_phase9_gate,
 )
+from industrial_reliability.report_hashes import compute_self_hash
 
 
 def test_phase9_gate_all_checks_pass() -> None:
@@ -26,7 +26,7 @@ def test_phase9_gate_all_checks_pass() -> None:
     assert len(report["report_sha256"]) == 64
 
     # Verify self-hash integrity
-    computed_hash = _compute_self_hash(report)
+    computed_hash = compute_self_hash(report, "report_sha256")
     assert report["report_sha256"] == computed_hash
 
 

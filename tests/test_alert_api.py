@@ -10,22 +10,19 @@ from fastapi.testclient import TestClient
 
 from industrial_reliability.api import create_app
 from industrial_reliability.champion import load_champion
-from industrial_reliability.package_champion import build_champion_package
 from industrial_reliability.persistence import (
     AlertDetailRecord,
     AlertSummaryRecord,
     ReplaySessionRecord,
     RuntimeStore,
 )
-from tests.test_package_champion import _create_mock_feasible_phase1b_run
+from tests.helpers_champion import create_mock_phase1b_champion_run
 
 
 @pytest.fixture
 def test_client(tmp_path: Path) -> tuple[TestClient, MagicMock]:
-    run_dir, feat_path = _create_mock_feasible_phase1b_run(tmp_path)
-    pkg_dir = tmp_path / "pkg"
-    build_result = build_champion_package(run_dir, feat_path, pkg_dir)
-    scorer = load_champion(pkg_dir, build_result.manifest_sha256)
+    mock_run = create_mock_phase1b_champion_run(tmp_path)
+    scorer = load_champion(mock_run.package_dir, mock_run.manifest_sha256)
 
     mock_store = MagicMock(spec=RuntimeStore)
     app = create_app(scorer=scorer, store=mock_store)

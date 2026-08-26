@@ -13,23 +13,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from industrial_reliability.report_hashes import compute_self_hash
+
 ReleaseVerdict = Literal["FEASIBLE_PLATFORM_RELEASE", "NEGATIVE_RESEARCH_RELEASE", "INVALID"]
-
-
-def _canonical_json(data: Any) -> bytes:
-    return json.dumps(
-        data,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-        default=lambda o: o.isoformat() if isinstance(o, datetime) else str(o),
-    ).encode("utf-8")
-
-
-def _compute_self_hash(data: dict[str, Any]) -> str:
-    copy_data = dict(data)
-    copy_data["report_sha256"] = ""
-    return hashlib.sha256(_canonical_json(copy_data)).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -151,9 +137,12 @@ class ReleaseCertificationValidator:
         _collect_decision_gates(self.artifact_dir, decision_gates, artifact_hashes)
 
         # 3. Check Phase 8 Observability & Fault drills
-        p8_file = self.artifact_dir / "phase-8-live-fault-drills.json"
-        if not p8_file.is_file():
-            p8_file = self.artifact_dir / "phase-8-observability-reliability.json"
+        p8_candidates = [
+            self.artifact_dir / "phase-8-in-process-fault-drills.json",
+            self.artifact_dir / "phase-8-live-fault-drills.json",
+            self.artifact_dir / "phase-8-observability-reliability.json",
+        ]
+        p8_file = next((f for f in p8_candidates if f.is_file()), p8_candidates[-1])
 
         if p8_file.is_file():
             phases_passed.append("phase8_observability_fault_drills")
@@ -163,8 +152,9 @@ class ReleaseCertificationValidator:
 
         # 4. Check Phase 9 Grounded RCA
         p9_candidates = [
-            self.artifact_dir / "phase-9-rca-live.json",
+            self.artifact_dir / "phase-9-rca-openai.json",
             self.artifact_dir / "phase-9-rca-fallback.json",
+            self.artifact_dir / "phase-9-rca-live.json",
             self.artifact_dir / "phase-9-grounded-rca.json",
         ]
         p9_file = next((f for f in p9_candidates if f.is_file()), p9_candidates[-1])
@@ -197,7 +187,7 @@ class ReleaseCertificationValidator:
             "report_sha256": "",
         }
 
-        report_sha256 = _compute_self_hash(report_dict)
+        report_sha256 = compute_self_hash(report_dict, "report_sha256")
         report_dict["report_sha256"] = report_sha256
 
         return ReleaseCertificationReportV1(

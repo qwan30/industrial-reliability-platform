@@ -146,9 +146,16 @@ class AlertService:
         if self.producer:
             await self.producer.stop()
 
-    async def _process_consumer_batch(self, batch: Any) -> None:
+    async def _process_consumer_batch(self, batch: Any) -> bool:
+        """Process one consumer batch; return True when the loop must halt.
+
+        A ``SESSION_FAILED`` outcome must not commit the failed offset (the
+        record is preserved for inspection), so re-polling would immediately
+        re-fetch and re-fail the same record in a hot loop. Callers must halt
+        consumption instead of re-polling without delay.
+        """
         if self.consumer is None or self.alert_consumer is None:
-            return
+            return False
         for tp, messages in batch.items():
             for record in messages:
                 outcome = await self.alert_consumer.process(record)
@@ -157,22 +164,32 @@ class AlertService:
                         "Session failed for record at offset %d; halting partition commit to preserve failed record",
                         record.offset,
                     )
-                    return
+                    return True
                 await self.consumer.commit({tp: record.offset + 1})
+        return False
 
     async def _run_consumer_loop(self) -> None:
         if self.consumer is None or self.alert_consumer is None:
             return
         try:
             while self._running:
+                halt = False
                 try:
                     batch = await self.consumer.getmany(timeout_ms=1000, max_records=100)
-                    await self._process_consumer_batch(batch)
+                    halt = await self._process_consumer_batch(batch)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
                     logger.exception("Error in alert consumer loop")
                     await asyncio.sleep(0.5)
+                    continue
+                if halt:
+                    logger.critical(
+                        "Halting alert consumer loop after SESSION_FAILED; "
+                        "failed record left uncommitted for inspection"
+                    )
+                    self._running = False
+                    break
         except asyncio.CancelledError:
             logger.debug("Alert consumer loop cancelled")
             raise

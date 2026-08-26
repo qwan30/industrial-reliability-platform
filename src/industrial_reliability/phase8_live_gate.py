@@ -1,368 +1,94 @@
-"""Phase 8 Live Fault Isolation & Resilience Certification Gate."""
+"""Phase 8 fault-isolation certification gate.
+
+The gate re-runs the shared in-process fault drills with research-candidate
+worker settings and publishes them as certification evidence. The drills drive
+the real ``StreamingWorker`` fault-isolation logic against isolated Prometheus
+metric registries with in-process scoring-client and producer doubles; no
+Kafka broker, scoring API, or PostgreSQL is contacted. Reports therefore
+publish ``evidence_level: IN_PROCESS`` with an explicit
+``simulated_components`` disclosure instead of claiming live evidence.
+"""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
-import hashlib
 import json
 import logging
-import re
-import subprocess
 import sys
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
-from unittest.mock import AsyncMock, Mock
-from uuid import uuid4
-
-from prometheus_client import CollectorRegistry
 
 from industrial_reliability.fault_report import (
-    DrillMetricDeltasV1,
-    FaultClass,
-    classify_drill,
+    DrillResultV1,
+    FaultReportV1,
+    build_drill_settings,
+    build_fault_report,
+    run_known_abnormal_replay_drill,
+    run_malformed_telemetry_drill,
+    run_scoring_outage_drill,
 )
-from industrial_reliability.metrics import build_runtime_metrics
-from industrial_reliability.runtime_messages import (
-    CoverageEvidenceV1,
-    EvidenceValueV1,
-    FeatureVectorV1,
-    ScoreDecisionV1,
-)
-from industrial_reliability.scoring_client import RetryableScoringError
-from industrial_reliability.worker import SessionFailedError, StreamingWorker, WorkerSettings
+from industrial_reliability.report_hashes import resolve_git_sha
 
 logger = logging.getLogger(__name__)
 
-DrillType = Literal["scoring-outage", "malformed-telemetry", "known-abnormal-replay"]
+PHASE8_IN_PROCESS_SCHEMA = "phase8-in-process-fault-drills-v1"
+PHASE8_GATE_MODEL_VERSION = "research-statistical-v1"
+PHASE8_REPORT_BASENAME = "phase-8-in-process-fault-drills"
 
 
-@dataclass(frozen=True)
-class LiveDrillResultV1:
-    drill_type: DrillType
-    expected_classification: FaultClass
-    actual_classification: FaultClass
-    passed: bool
-    deltas: DrillMetricDeltasV1
-    evidence_summary: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "drill_type": self.drill_type,
-            "expected_classification": self.expected_classification,
-            "actual_classification": self.actual_classification,
-            "passed": self.passed,
-            "deltas": self.deltas.to_dict(),
-            "evidence_summary": self.evidence_summary,
-        }
-
-
-@dataclass(frozen=True)
-class LiveFaultReportV1:
-    timestamp: str
-    drills: list[LiveDrillResultV1]
-    all_passed: bool
-    self_sha256: str
-    git_sha: str
-    evidence_level: Literal["LIVE"] = "LIVE"
-    schema_version: Literal["phase8-live-fault-drills-v1"] = "phase8-live-fault-drills-v1"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "evidence_level": self.evidence_level,
-            "git_sha": self.git_sha,
-            "timestamp": self.timestamp,
-            "all_passed": self.all_passed,
-            "drills": [d.to_dict() for d in self.drills],
-            "self_sha256": self.self_sha256,
-        }
-
-
-def _canonical_json(data: dict[str, Any]) -> bytes:
-    return json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-
-def _compute_report_hash(data: dict[str, Any]) -> str:
-    copy = dict(data)
-    copy["self_sha256"] = ""
-    return hashlib.sha256(_canonical_json(copy)).hexdigest()
-
-
-async def run_live_scoring_outage_drill(
-    scoring_api_url: str = "http://127.0.0.1:8000",
-) -> LiveDrillResultV1:
-    # 1. Scoring outage drill: verify error isolation when scoring fails
-    reg = CollectorRegistry()
-    metrics = build_runtime_metrics(reg)
-
-    mock_failing_client = Mock()
-    mock_failing_client.score = AsyncMock(
-        side_effect=RetryableScoringError("Connection refused by scoring API")
-    )
-    mock_failing_client.close = AsyncMock()
-
-    settings = WorkerSettings(
-        bootstrap_servers="localhost:9092",
-        scoring_api_url=scoring_api_url,
-        model_version="research-statistical-v1",
-        source_dataset_sha256="0" * 64,
-        contract_sha256="0" * 64,
-        feature_names=("tp2_mean", "dv_pressure_mean"),
-    )
-    worker = StreamingWorker(settings=settings, scoring_client=mock_failing_client, metrics=metrics)
-    worker.producer = AsyncMock()
-
-    now_naive = datetime(2020, 2, 25, 0, 30)
-    feature = FeatureVectorV1(
-        message_id=uuid4(),
-        replay_session_id=uuid4(),
-        source_dataset_sha256="0" * 64,
-        contract_sha256="0" * 64,
-        source_timestamp=now_naive,
-        emitted_at=datetime.now(UTC),
-        window_id=uuid4(),
-        window_start=now_naive - timedelta(minutes=30),
-        window_end=now_naive,
-        machine_id="metropt3",
-        feature_names=("tp2_mean", "dv_pressure_mean"),
-        feature_values=(1.0, 2.0),
-        coverage=CoverageEvidenceV1(
-            observations_by_bin=(30, 30, 30, 30, 30, 30),
-            bin_ends=(
-                now_naive - timedelta(minutes=25),
-                now_naive - timedelta(minutes=20),
-                now_naive - timedelta(minutes=15),
-                now_naive - timedelta(minutes=10),
-                now_naive - timedelta(minutes=5),
-                now_naive,
-            ),
-        ),
-    )
-
-    with contextlib.suppress(SessionFailedError):
-        await worker._process_feature(feature)
-
-    deltas = DrillMetricDeltasV1(
-        score_unavailable_delta=metrics.score_requests.labels(outcome="unavailable")._value.get(),
-        score_ok_delta=metrics.score_requests.labels(outcome="ok")._value.get(),
-        telemetry_quarantined_delta=metrics.telemetry_events.labels(
-            outcome="quarantined"
-        )._value.get(),
-        anomaly_decisions_delta=metrics.anomaly_decisions._value.get(),
-    )
-    actual_class, summary = classify_drill(deltas)
-    passed = actual_class == "SERVICE"
-    return LiveDrillResultV1(
-        drill_type="scoring-outage",
-        expected_classification="SERVICE",
-        actual_classification=actual_class,
-        passed=passed,
-        deltas=deltas,
-        evidence_summary=f"Live scoring outage verified: {summary}",
-    )
-
-
-async def run_live_malformed_telemetry_drill(
-    kafka_bootstrap: str = "127.0.0.1:29092",
-) -> LiveDrillResultV1:
-    # 2. Malformed telemetry drill: verify corrupted records route to quarantine
-    reg = CollectorRegistry()
-    metrics = build_runtime_metrics(reg)
-    settings = WorkerSettings(
-        bootstrap_servers=kafka_bootstrap,
-        scoring_api_url="http://localhost:8000",
-        model_version="research-statistical-v1",
-        source_dataset_sha256="0" * 64,
-        contract_sha256="0" * 64,
-        feature_names=("tp2_mean", "dv_pressure_mean"),
-    )
-    worker = StreamingWorker(settings=settings, scoring_client=AsyncMock(), metrics=metrics)
-    worker.producer = AsyncMock()
-
-    mock_bad_record = Mock(
-        value=b"NOT_A_VALID_JSON_RECORD{{{",
-        topic="irp.telemetry.v1",
-        partition=0,
-        offset=123,
-    )
-    await worker._handle_telemetry_record(mock_bad_record)
-
-    deltas = DrillMetricDeltasV1(
-        telemetry_quarantined_delta=metrics.telemetry_events.labels(
-            outcome="quarantined"
-        )._value.get(),
-        score_unavailable_delta=metrics.score_requests.labels(outcome="unavailable")._value.get(),
-        anomaly_decisions_delta=metrics.anomaly_decisions._value.get(),
-    )
-    actual_class, summary = classify_drill(deltas)
-    passed = actual_class == "DATA"
-    return LiveDrillResultV1(
-        drill_type="malformed-telemetry",
-        expected_classification="DATA",
-        actual_classification=actual_class,
-        passed=passed,
-        deltas=deltas,
-        evidence_summary=f"Live malformed telemetry routing verified: {summary}",
-    )
-
-
-async def run_live_known_abnormal_replay_drill(
-    kafka_bootstrap: str = "127.0.0.1:29092",
-    postgres_url: str = "postgresql://irp:irp_password@127.0.0.1:5432/irp",
-) -> LiveDrillResultV1:
-    # 3. Known abnormal replay drill: verify genuine anomaly triggers alert
-    reg = CollectorRegistry()
-    metrics = build_runtime_metrics(reg)
-
-    now_naive = datetime(2020, 2, 25, 0, 30)
-    decision_id = uuid4()
-    mock_scoring_ok = Mock()
-    mock_scoring_ok.score = AsyncMock(
-        return_value=ScoreDecisionV1(
-            message_id=decision_id,
-            replay_session_id=uuid4(),
-            source_dataset_sha256="0" * 64,
-            contract_sha256="0" * 64,
-            source_timestamp=now_naive,
-            emitted_at=datetime.now(UTC),
-            decision_id=decision_id,
-            window_id=uuid4(),
-            model_version="research-statistical-v1",
-            score=3500.0,
-            threshold=1200.0,
-            is_anomaly=True,
-            evidence_vector=(
-                EvidenceValueV1(
-                    feature_name="tp2_mean",
-                    feature_value=9.5,
-                    robust_deviation=8.3,
-                ),
-            ),
-        )
-    )
-    mock_scoring_ok.close = AsyncMock()
-
-    settings = WorkerSettings(
-        bootstrap_servers=kafka_bootstrap,
-        scoring_api_url="http://localhost:8000",
-        model_version="research-statistical-v1",
-        source_dataset_sha256="0" * 64,
-        contract_sha256="0" * 64,
-        feature_names=("tp2_mean", "dv_pressure_mean"),
-    )
-    worker = StreamingWorker(settings=settings, scoring_client=mock_scoring_ok, metrics=metrics)
-    worker.producer = AsyncMock()
-
-    feature = FeatureVectorV1(
-        message_id=uuid4(),
-        replay_session_id=uuid4(),
-        source_dataset_sha256="0" * 64,
-        contract_sha256="0" * 64,
-        source_timestamp=now_naive,
-        emitted_at=datetime.now(UTC),
-        window_id=uuid4(),
-        window_start=now_naive - timedelta(minutes=30),
-        window_end=now_naive,
-        machine_id="metropt3",
-        feature_names=("tp2_mean", "dv_pressure_mean"),
-        feature_values=(9.5, 2.0),
-        coverage=CoverageEvidenceV1(
-            observations_by_bin=(30, 30, 30, 30, 30, 30),
-            bin_ends=(
-                now_naive - timedelta(minutes=25),
-                now_naive - timedelta(minutes=20),
-                now_naive - timedelta(minutes=15),
-                now_naive - timedelta(minutes=10),
-                now_naive - timedelta(minutes=5),
-                now_naive,
-            ),
-        ),
-    )
-
-    await worker._process_feature(feature)
-    metrics.record_alert_action("opened")
-
-    deltas = DrillMetricDeltasV1(
-        score_ok_delta=metrics.score_requests.labels(outcome="ok")._value.get(),
-        anomaly_decisions_delta=metrics.anomaly_decisions._value.get(),
-        alert_events_delta=metrics.alert_events.labels(action="opened")._value.get(),
-        telemetry_quarantined_delta=metrics.telemetry_events.labels(
-            outcome="quarantined"
-        )._value.get(),
-        score_unavailable_delta=metrics.score_requests.labels(outcome="unavailable")._value.get(),
-    )
-    actual_class, summary = classify_drill(deltas)
-    passed = actual_class == "MACHINE"
-    return LiveDrillResultV1(
-        drill_type="known-abnormal-replay",
-        expected_classification="MACHINE",
-        actual_classification=actual_class,
-        passed=passed,
-        deltas=deltas,
-        evidence_summary=f"Live abnormal replay and alert opening verified: {summary}",
-    )
-
-
-async def execute_live_drills() -> list[LiveDrillResultV1]:
-    results = [
-        await run_live_scoring_outage_drill(),
-        await run_live_malformed_telemetry_drill(),
-        await run_live_known_abnormal_replay_drill(),
+async def execute_live_drills() -> list[DrillResultV1]:
+    """Run the three fault drills in-process with research-candidate settings."""
+    settings = build_drill_settings(model_version=PHASE8_GATE_MODEL_VERSION)
+    return [
+        await run_scoring_outage_drill(settings),
+        await run_malformed_telemetry_drill(settings),
+        await run_known_abnormal_replay_drill(settings),
     ]
-    return results
 
 
 def publish_live_drill_report(
-    drills: list[LiveDrillResultV1],
+    drills: list[DrillResultV1],
     json_path: Path,
     md_path: Path,
     git_sha: str,
-) -> LiveFaultReportV1:
-    if (
-        not isinstance(git_sha, str)
-        or not re.fullmatch(r"[0-9a-f]{40}", git_sha)
-        or git_sha == "0" * 40
-    ):
-        raise ValueError(f"git_sha must be a non-zero lowercase 40-character SHA, got {git_sha!r}")
-
-    all_passed = bool(drills and all(d.passed for d in drills))
-    report_dict: dict[str, Any] = {
-        "schema_version": "phase8-live-fault-drills-v1",
-        "evidence_level": "LIVE",
-        "git_sha": git_sha,
-        "timestamp": datetime.now(UTC).isoformat(),
-        "all_passed": all_passed,
-        "drills": [d.to_dict() for d in drills],
-        "self_sha256": "",
-    }
-    self_hash = _compute_report_hash(report_dict)
-    report_dict["self_sha256"] = self_hash
+) -> FaultReportV1:
+    """Publish the in-process drill certification report as JSON + Markdown."""
+    report = build_fault_report(
+        drills,
+        git_sha,
+        evidence_level="IN_PROCESS",
+        schema_version=PHASE8_IN_PROCESS_SCHEMA,
+    )
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(json.dumps(report_dict, indent=2), encoding="utf-8")
+    json_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(_render_markdown(report), encoding="utf-8")
 
+    return report
+
+
+def _render_markdown(report: FaultReportV1) -> str:
     md_lines = [
-        "# Phase 8 Observability & Reliability Drill Report (Live Evidence)",
+        "# Phase 8 Observability & Reliability Drill Report (In-Process Evidence)",
         "",
-        f"- **Verdict:** `{'PASS' if all_passed else 'FAIL'}`",
-        "- **Evidence Level:** `LIVE`",
-        f"- **Git SHA:** `{git_sha}`",
-        f"- **Timestamp:** `{report_dict['timestamp']}`",
-        f"- **Self SHA-256:** `{self_hash}`",
+        f"- **Verdict:** `{'PASS' if report.all_passed else 'FAIL'}`",
+        f"- **Evidence Level:** `{report.evidence_level}`",
+        f"- **Simulated Components:** `{', '.join(report.simulated_components)}`",
+        f"- **Git SHA:** `{report.git_sha}`",
+        f"- **Timestamp:** `{report.timestamp}`",
+        f"- **Self SHA-256:** `{report.self_sha256}`",
         "",
         "## Fault Isolation Drill Results",
         "",
         "| Drill Type | Expected | Actual | Status | Summary |",
         "| :--- | :--- | :--- | :--- | :--- |",
     ]
-    for d in drills:
+    for d in report.drills:
         status_sym = "PASS" if d.passed else "FAIL"
         md_lines.append(
-            f"| `{d.drill_type}` | `{d.expected_classification}` | `{d.actual_classification}` | **{status_sym}** | {d.evidence_summary} |"
+            f"| `{d.drill_type}` | `{d.expected_classification}` | "
+            f"`{d.actual_classification}` | **{status_sym}** | {d.evidence_summary} |"
         )
 
     md_lines.extend(
@@ -372,55 +98,39 @@ def publish_live_drill_report(
             "- Service fault isolates scoring outages without telemetry drop.",
             "- Data fault isolates corrupted telemetry to quarantine without downstream poison.",
             "- Machine fault triggers legitimate stateful alert lifecycle transition.",
+            "",
+            "## Evidence Disclosure",
+            "- Drills execute the real streaming-worker fault-isolation logic in-process.",
+            "- Scoring client, Kafka producer, and metrics registry are in-process doubles; "
+            "no broker, scoring API, or database is contacted.",
         ]
     )
 
-    md_path.parent.mkdir(parents=True, exist_ok=True)
-    md_path.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
-
-    return LiveFaultReportV1(
-        timestamp=report_dict["timestamp"],
-        drills=drills,
-        all_passed=all_passed,
-        self_sha256=self_hash,
-        git_sha=git_sha,
-        evidence_level="LIVE",
-        schema_version="phase8-live-fault-drills-v1",
-    )
+    return "\n".join(md_lines) + "\n"
 
 
 def run_phase8_live_gate(
     output_dir: Path | None = None,
     git_sha: str | None = None,
-) -> LiveFaultReportV1:
-    target_dir = output_dir or Path("artifacts/certification/live")
+) -> FaultReportV1:
+    target_dir = output_dir or Path("artifacts/certification/in_process")
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    sha = git_sha
-    if not sha:
-        try:
-            sha = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-        except Exception:
-            sha = "a" * 40
+    sha = resolve_git_sha(git_sha)
 
     drills = asyncio.run(execute_live_drills())
-    json_path = target_dir / "phase-8-live-fault-drills.json"
-    md_path = target_dir / "phase-8-live-fault-drills.md"
+    json_path = target_dir / f"{PHASE8_REPORT_BASENAME}.json"
+    md_path = target_dir / f"{PHASE8_REPORT_BASENAME}.md"
     return publish_live_drill_report(drills, json_path=json_path, md_path=md_path, git_sha=sha)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Phase 8 Live Fault Drills Certification Gate")
+    parser = argparse.ArgumentParser(description="Phase 8 Fault Drills Certification Gate")
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=None,
-        help="Directory to write live drill results",
+        help="Directory to write in-process drill results",
     )
     parser.add_argument(
         "--git-sha",
@@ -431,7 +141,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     report = run_phase8_live_gate(output_dir=args.output_dir, git_sha=args.git_sha)
     print(
-        f"Phase 8 Live Fault Gate: {'PASS' if report.all_passed else 'FAIL'} ({len(report.drills)} drills executed)"
+        f"Phase 8 Fault Gate: {'PASS' if report.all_passed else 'FAIL'} "
+        f"({len(report.drills)} drills executed, evidence_level={report.evidence_level})"
     )
     print(f"Report SHA-256: {report.self_sha256}")
     return 0 if report.all_passed else 1

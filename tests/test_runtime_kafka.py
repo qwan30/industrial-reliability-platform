@@ -13,7 +13,6 @@ from fastapi.testclient import TestClient
 from industrial_reliability.api import create_app
 from industrial_reliability.champion import load_champion
 from industrial_reliability.kafka_io import KafkaSettings
-from industrial_reliability.package_champion import build_champion_package
 from industrial_reliability.runtime_kafka import (
     AioKafkaCommandProducer,
     CommandProducer,
@@ -23,7 +22,7 @@ from industrial_reliability.runtime_messages import (
     REPLAY_COMMANDS_TOPIC,
     ReplayCommandV1,
 )
-from tests.test_package_champion import _create_mock_feasible_phase1b_run
+from tests.helpers_champion import create_mock_phase1b_champion_run
 
 
 def test_command_producer_protocol_conformance() -> None:
@@ -99,10 +98,8 @@ async def test_aio_kafka_command_producer() -> None:
 
 
 def test_api_replay_endpoints_publish_to_command_producer(tmp_path: Path) -> None:
-    run_dir, feat_path = _create_mock_feasible_phase1b_run(tmp_path)
-    pkg_dir = tmp_path / "pkg"
-    build_result = build_champion_package(run_dir, feat_path, pkg_dir)
-    scorer = load_champion(pkg_dir, build_result.manifest_sha256)
+    mock_run = create_mock_phase1b_champion_run(tmp_path)
+    scorer = load_champion(mock_run.package_dir, mock_run.manifest_sha256)
 
     producer = InMemoryCommandProducer()
     app = create_app(scorer, producer=producer)
@@ -129,3 +126,51 @@ def test_api_replay_endpoints_publish_to_command_producer(tmp_path: Path) -> Non
     assert len(producer.commands) == 2
     assert producer.commands[1].action == "STOP"
     assert str(producer.commands[1].replay_session_id) == session_id
+
+
+def test_api_replay_endpoints_are_async_and_await_producer(tmp_path: Path) -> None:
+    """Regression: replay endpoints must run on the app event loop.
+
+    Sync endpoints would execute `_publish_command` in a threadpool worker with
+    no running loop, forcing an ``asyncio.run`` fallback that binds the
+    loop-owned aiokafka producer to a second event loop and fails at runtime.
+    """
+    import inspect
+
+    mock_run = create_mock_phase1b_champion_run(tmp_path)
+    scorer = load_champion(mock_run.package_dir, mock_run.manifest_sha256)
+    app = create_app(scorer, producer=InMemoryCommandProducer())
+
+    for route in app.routes:
+        if route.path in {"/v1/replays", "/v1/replays/{replay_session_id}/commands"}:
+            assert inspect.iscoroutinefunction(route.endpoint), (
+                f"{route.path} must be an async endpoint"
+            )
+
+
+def test_api_replay_start_fails_closed_503_on_publish_error(tmp_path: Path) -> None:
+    """Regression: a failing Kafka publish must surface 503, never a 500."""
+    mock_run = create_mock_phase1b_champion_run(tmp_path)
+    scorer = load_champion(mock_run.package_dir, mock_run.manifest_sha256)
+
+    class FailingProducer:
+        async def publish_command(self, command: ReplayCommandV1) -> None:
+            raise RuntimeError("Producer not started")
+
+    app = create_app(scorer, producer=FailingProducer())
+    client = TestClient(app)
+
+    r_start = client.post(
+        "/v1/replays",
+        json={
+            "range_start": "2020-02-25T00:00:00",
+            "range_end": "2020-02-25T01:00:00",
+            "speed": 100,
+        },
+    )
+    assert r_start.status_code == 503
+    assert r_start.json()["error"]["code"] == "PRODUCER_UNAVAILABLE"
+
+    r_cmd = client.post(f"/v1/replays/{uuid4()}/commands", json={"action": "STOP"})
+    assert r_cmd.status_code == 503
+    assert r_cmd.json()["error"]["code"] == "PRODUCER_UNAVAILABLE"

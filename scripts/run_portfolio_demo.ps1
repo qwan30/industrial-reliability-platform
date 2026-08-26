@@ -21,12 +21,12 @@ if (-not (Test-Path $pkgDir)) {
 }
 Write-Host "Research candidate package ready at $pkgDir."
 
-# 3. Execute Phase 8 Live Fault Isolation Drills
-Write-Host "[3/6] Running Phase 8 live fault isolation drills..." -ForegroundColor Green
+# 3. Execute Phase 8 Fault Isolation Drills
+Write-Host "[3/6] Running Phase 8 fault isolation drills (in-process)..." -ForegroundColor Green
 .\scripts\run_phase8_live_fault_drills.ps1
 
-# 4. Execute Phase 9 Live Grounded RCA Gate
-Write-Host "[4/6] Running Phase 9 live grounded RCA gate..." -ForegroundColor Green
+# 4. Execute Phase 9 Grounded RCA Gate
+Write-Host "[4/6] Running Phase 9 grounded RCA gate (in-process)..." -ForegroundColor Green
 .\scripts\run_phase9_live_gate.ps1
 
 # 5. Execute Exact-SHA Release Certification
@@ -40,8 +40,8 @@ Write-Host "====================================================================
 Write-Host "  Portfolio Demo Completed Successfully!" -ForegroundColor Cyan
 Write-Host "========================================================================" -ForegroundColor Cyan
 Write-Host "Certification Artifacts:" -ForegroundColor Yellow
-Write-Host "  - Phase 8 Live Drills: $certDir/phase-8-live-fault-drills.json"
-Write-Host "  - Phase 9 Live RCA:    $certDir/phase-9-rca-fallback.json (or live)"
+Write-Host "  - Phase 8 Drills:      $certDir/phase-8-in-process-fault-drills.json"
+Write-Host "  - Phase 9 RCA:         $certDir/phase-9-rca-fallback.json (or openai)"
 Write-Host "  - Release Cert:        $certDir/release-certification.json"
 Write-Host ""
 Write-Host "Live Web Interfaces:" -ForegroundColor Yellow

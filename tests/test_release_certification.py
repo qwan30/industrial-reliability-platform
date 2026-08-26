@@ -25,8 +25,8 @@ def test_validator_detects_infeasible_research_path(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    (tmp_path / "phase-8-live-fault-drills.json").write_text(
-        json.dumps({"schema_version": "phase8-live-fault-drills-v1", "all_passed": True}),
+    (tmp_path / "phase-8-in-process-fault-drills.json").write_text(
+        json.dumps({"schema_version": "phase8-in-process-fault-drills-v1", "all_passed": True}),
         encoding="utf-8",
     )
     (tmp_path / "phase-9-rca-fallback.json").write_text(

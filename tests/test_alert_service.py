@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -116,9 +117,13 @@ async def test_alert_service_does_not_commit_on_session_failed(tmp_path: Path) -
     # Simulate getmany returning 1 record, but processing returns SESSION_FAILED
     tp = TopicPartition("irp.scores.v1", 0)
     mock_record = Mock(offset=42)
+    poll_count = 0
 
-    async def fake_getmany(**kwargs):
-        service._running = False  # exit loop after first batch
+    async def fake_getmany(**kwargs: Any) -> dict[Any, list[Any]]:
+        nonlocal poll_count
+        poll_count += 1
+        if poll_count > 1:
+            raise AssertionError("consumer loop re-polled after SESSION_FAILED")
         return {tp: [mock_record]}
 
     mock_consumer.getmany.side_effect = fake_getmany
@@ -127,7 +132,56 @@ async def test_alert_service_does_not_commit_on_session_failed(tmp_path: Path) -
     service._running = True
     await service._run_consumer_loop()
 
-    # Verify alert_consumer processed the record
+    # Verify alert_consumer processed the record exactly once
     mock_alert_consumer.process.assert_awaited_once_with(mock_record)
-    # Verify consumer.commit was NOT called because outcome was SESSION_FAILED!
+    # Verify consumer.commit was NOT called because outcome was SESSION_FAILED
     mock_consumer.commit.assert_not_awaited()
+    # Verify the loop halted itself instead of hot-looping on the failed record
+    assert poll_count == 1
+    assert service._running is False
+
+
+@pytest.mark.asyncio
+async def test_alert_service_commits_ok_records_then_halts_on_session_failed(
+    tmp_path: Path,
+) -> None:
+    policy = _make_policy()
+    policy_file = tmp_path / "alert-policy.json"
+    policy_file.write_text(json.dumps(policy.to_dict()), encoding="utf-8")
+
+    settings = AlertServiceSettings(
+        kafka=KafkaSettings(bootstrap_servers="localhost:9092", client_id="test"),
+        database_url="sqlite:///:memory:",
+        policy_path=policy_file,
+    )
+
+    service = AlertService(settings)
+    mock_consumer = AsyncMock()
+    mock_alert_consumer = AsyncMock()
+
+    service.consumer = mock_consumer
+    service.alert_consumer = mock_alert_consumer
+
+    tp = TopicPartition("irp.scores.v1", 0)
+    ok_record = Mock(offset=7)
+    failed_record = Mock(offset=8)
+    batches = [{tp: [ok_record]}, {tp: [failed_record]}]
+
+    async def fake_getmany(**kwargs: Any) -> dict[Any, list[Any]]:
+        if not batches:
+            raise AssertionError("consumer loop re-polled after SESSION_FAILED")
+        return batches.pop(0)
+
+    mock_consumer.getmany.side_effect = fake_getmany
+    mock_alert_consumer.process.side_effect = [
+        ProcessOutcome.COMMITTED,
+        ProcessOutcome.SESSION_FAILED,
+    ]
+
+    service._running = True
+    await service._run_consumer_loop()
+
+    # The OK record was committed; the SESSION_FAILED record was not
+    mock_consumer.commit.assert_awaited_once_with({tp: 8})
+    assert mock_alert_consumer.process.await_count == 2
+    assert service._running is False

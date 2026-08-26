@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import time
 from collections.abc import AsyncIterator
@@ -55,7 +56,7 @@ from industrial_reliability.runtime_messages import (
 
 RUNTIME_NAMESPACE = NAMESPACE_URL
 ERR_STORE_UNAVAILABLE_MSG = "Database store not configured"
-_background_tasks: set[asyncio.Task[Any]] = set()
+logger = logging.getLogger(__name__)
 
 
 class StartReplayRequestV1(BaseModel):
@@ -137,24 +138,38 @@ def _store_unavailable_response() -> JSONResponse:
     )
 
 
-def _publish_command(producer: Any, topic: str, key: str, cmd: ReplayCommandV1) -> None:
+def _producer_unavailable_response(message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "success": False,
+            "data": None,
+            "error": {
+                "code": "PRODUCER_UNAVAILABLE",
+                "message": message,
+            },
+        },
+    )
+
+
+async def _publish_command(producer: Any, topic: str, key: str, cmd: ReplayCommandV1) -> None:
+    """Publish a replay command on the application's event loop.
+
+    Both replay endpoints are async and await this helper so an aiokafka
+    producer is always driven on the event loop that owns it; falling back to
+    ``asyncio.run`` from a sync endpoint would bind the producer to a second
+    loop and fail at runtime.
+    """
     if producer is None:
         return
     if hasattr(producer, "publish_command"):
-        coro = producer.publish_command(cmd)
-        try:
-            loop = asyncio.get_running_loop()
-            task = loop.create_task(coro)
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
-        except RuntimeError:
-            asyncio.run(coro)
-    else:
-        payload_bytes = encode_message(cmd)
-        if hasattr(producer, "send"):
-            producer.send(topic, key=key.encode("utf-8"), value=payload_bytes)
-        elif hasattr(producer, "produce"):
-            producer.produce(topic, key=key.encode("utf-8"), value=payload_bytes)
+        await producer.publish_command(cmd)
+        return
+    payload_bytes = encode_message(cmd)
+    if hasattr(producer, "send"):
+        producer.send(topic, key=key.encode("utf-8"), value=payload_bytes)
+    elif hasattr(producer, "produce"):
+        producer.produce(topic, key=key.encode("utf-8"), value=payload_bytes)
 
 
 def create_app(
@@ -301,19 +316,9 @@ def create_app(
         return ScoreResponseV1(data=decision)
 
     @app.post("/v1/replays", status_code=202)
-    def start_replay(body: StartReplayRequestV1) -> JSONResponse:
+    async def start_replay(body: StartReplayRequestV1) -> JSONResponse:
         if producer is None:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "success": False,
-                    "data": None,
-                    "error": {
-                        "code": "PRODUCER_UNAVAILABLE",
-                        "message": "Kafka replay command producer is not configured",
-                    },
-                },
-            )
+            return _producer_unavailable_response("Kafka replay command producer is not configured")
         session_id = uuid4()
         now = datetime.now(UTC)
         ds_sha = "0" * 64
@@ -336,7 +341,11 @@ def create_app(
             range_start=body.range_start,
             range_end=body.range_end,
         )
-        _publish_command(producer, REPLAY_COMMANDS_TOPIC, str(session_id), cmd)
+        try:
+            await _publish_command(producer, REPLAY_COMMANDS_TOPIC, str(session_id), cmd)
+        except Exception:
+            logger.exception("Failed to publish replay START command")
+            return _producer_unavailable_response("Failed to publish replay command to Kafka")
         return JSONResponse(
             status_code=202,
             content={
@@ -347,19 +356,9 @@ def create_app(
         )
 
     @app.post("/v1/replays/{replay_session_id}/commands", status_code=202)
-    def control_replay(replay_session_id: UUID, body: ReplayControlRequestV1) -> JSONResponse:
+    async def control_replay(replay_session_id: UUID, body: ReplayControlRequestV1) -> JSONResponse:
         if producer is None:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "success": False,
-                    "data": None,
-                    "error": {
-                        "code": "PRODUCER_UNAVAILABLE",
-                        "message": "Kafka replay command producer is not configured",
-                    },
-                },
-            )
+            return _producer_unavailable_response("Kafka replay command producer is not configured")
         now = datetime.now(UTC)
         cmd = ReplayCommandV1(
             schema_version="replay-command-v1",
@@ -375,7 +374,11 @@ def create_app(
             range_start=None,
             range_end=None,
         )
-        _publish_command(producer, REPLAY_COMMANDS_TOPIC, str(replay_session_id), cmd)
+        try:
+            await _publish_command(producer, REPLAY_COMMANDS_TOPIC, str(replay_session_id), cmd)
+        except Exception:
+            logger.exception("Failed to publish replay %s command", body.action)
+            return _producer_unavailable_response("Failed to publish replay command to Kafka")
         return JSONResponse(
             status_code=202,
             content={"success": True, "data": {"status": "accepted"}, "error": None},

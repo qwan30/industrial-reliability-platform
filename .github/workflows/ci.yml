@@ -29,7 +29,7 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy src
-      - run: pytest -m "not slow"
+      - run: pytest -m "not slow and not integration"
       - run: pip check
       - run: python -m build
       - name: Test and Build Operator Console
@@ -38,3 +38,36 @@ jobs:
           npm ci
           npm run test:coverage
           npm run build
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: irp
+          POSTGRES_USER: irp
+          POSTGRES_PASSWORD: irp_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - name: Run Integration Tests
+        env:
+          DATABASE_URL: postgresql://irp:irp_password@localhost:5432/irp
+          REQUIRE_INTEGRATION_SERVICES: "true"
+        run: pytest -m "integration"

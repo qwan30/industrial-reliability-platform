@@ -29,10 +29,11 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy src
-      - run: pytest -m "not slow and not integration"
+      - run: pytest -m "not slow and not integration" --cov
       - run: pip check
       - run: python -m build
       - name: Test and Build Operator Console
+
         working-directory: apps/operator-console
         run: |
           npm ci
@@ -87,4 +88,4 @@ jobs:
         env:
           DATABASE_URL: postgresql://irp:irp_password@localhost:5432/irp
           REQUIRE_INTEGRATION_SERVICES: "true"
-        run: pytest -m "integration" --no-cov
+        run: pytest -m "integration"

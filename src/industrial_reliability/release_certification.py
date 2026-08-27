@@ -19,39 +19,33 @@ from industrial_reliability.report_hashes import compute_self_hash
 ReleaseVerdict = Literal["FEASIBLE_PLATFORM_RELEASE", "NEGATIVE_RESEARCH_RELEASE", "INVALID"]
 
 _SELF_HASH_FIELDS = ("report_sha256", "self_sha256")
+_RELEASE_EVIDENCE_LEVELS = frozenset({"INTEGRATION", "LIVE"})
+
 _CURRENT_SCHEMAS = frozenset(
     {
-        "phase8-in-process-fault-drills-v1",
+        "phase8-live-fault-drills-v1",
         "phase-9-rca-openai-v1",
         "phase-9-rca-fallback-v1",
     }
 )
-# Each evidence filename is bound to exactly one expected schema and its
-# passing verdict field, so a report produced by a different gate (for example
-# a UNIT-level unit-drill report) cannot certify a phase merely by being
-# renamed into the artifact directory.
+
 _P8_EVIDENCE_SPECS = {
-    "phase-8-in-process-fault-drills.json": (
-        "phase8-in-process-fault-drills-v1",
-        "all_passed",
-        True,
-    ),
-    "phase-8-live-fault-drills.json": ("phase8-live-fault-drills-v1", "all_passed", True),
-    "phase-8-observability-reliability.json": (
-        "phase8-fault-report-v1",
-        "all_passed",
-        True,
-    ),
+    "phase-8-live-fault-drills.json": (
+        "phase8-live-fault-drills-v1",
+        "verdict",
+        "PASS",
+    )
 }
+
 _P9_EVIDENCE_SPECS = {
     "phase-9-rca-openai.json": ("phase-9-rca-openai-v1", "verdict", "PASS"),
     "phase-9-rca-fallback.json": ("phase-9-rca-fallback-v1", "verdict", "PASS"),
-    "phase-9-rca-live.json": ("phase-9-rca-live-v1", "verdict", "PASS"),
-    "phase-9-grounded-rca.json": ("phase-9-rca-certification-v1", "verdict", "PASS"),
 }
-# Unit-level evidence (in-process doubles without gate attestation) must never
-# certify a release phase; only gate-level evidence qualifies.
-_RELEASE_EVIDENCE_LEVELS = frozenset({"IN_PROCESS", "LIVE"})
+
+_P9_PROVIDER_MODES = {
+    "phase-9-rca-openai.json": "LIVE_OPENAI",
+    "phase-9-rca-fallback.json": "FALLBACK_ONLY",
+}
 
 
 def _load_json_report(file_path: Path) -> dict[str, Any] | None:
@@ -97,12 +91,14 @@ def _verify_release_evidence(
     verdict_field: str,
     passing_value: Any,
     git_sha: str,
+    expected_provider_mode: str | None = None,
 ) -> bool:
     """Validate one certification report as release evidence.
 
     The report must match the schema bound to its filename, carry a passing
-    verdict, disclose gate-level evidence (never UNIT), carry a valid embedded
-    self-hash, and be bound to the certified commit.
+    verdict, disclose gate-level evidence (INTEGRATION or LIVE), carry a valid
+    embedded self-hash, match expected provider mode if set, and be bound to
+    the certified commit.
     """
     if data is None:
         return False
@@ -110,6 +106,10 @@ def _verify_release_evidence(
         data.get("schema_version") == expected_schema
         and data.get(verdict_field) == passing_value
         and data.get("evidence_level") in _RELEASE_EVIDENCE_LEVELS
+        and (
+            expected_provider_mode is None
+            or data.get("provider_mode") == expected_provider_mode
+        )
         and _verify_report_self_hash(data)
         and _report_matches_git_sha(data, git_sha)
     )
@@ -218,74 +218,93 @@ class ReleaseCertificationValidator:
         # 1. Check Phase 1 / Phase 1B
         p1b_file = self.artifact_dir / "phase-1b-metrics.json"
         is_feasible = False
+        phase1b_valid = False
         if p1b_file.is_file():
-            data = json.loads(p1b_file.read_text(encoding="utf-8"))
-            artifact_hashes["phase1b_metrics"] = hashlib.sha256(p1b_file.read_bytes()).hexdigest()
-            if data.get("verdict") == "FEASIBLE":
-                is_feasible = True
-                phases_passed.append("phase1b")
-            else:
-                phases_passed.append("phase1b_negative_benchmark")
-                limitations.append(
-                    "Phase 1B offline ML feasibility did not meet event detection/false alarm gates on MetroPT-3 holdout."
-                )
+            data = _load_json_report(p1b_file)
+            if data is not None and data.get("schema_version") == "phase1b-benchmark-v1":
+                artifact_hashes["phase1b_metrics"] = hashlib.sha256(
+                    p1b_file.read_bytes()
+                ).hexdigest()
+                phase1b_valid = True
+                if data.get("verdict") == "FEASIBLE":
+                    is_feasible = True
+                    phases_passed.append("phase1b")
+                else:
+                    phases_passed.append("phase1b_negative_benchmark")
+                    limitations.append(
+                        "Phase 1B offline ML feasibility did not meet event detection/false alarm gates on MetroPT-3 holdout."
+                    )
+        if not phase1b_valid:
+            limitations.append(
+                "Phase 1B metrics missing or invalid schema; phase not certified."
+            )
 
         # 2. Check Decision Gates
         _collect_decision_gates(self.artifact_dir, decision_gates, artifact_hashes)
 
         # 3. Check Phase 8 Observability & Fault drills
-        p8_candidates = [
-            (self.artifact_dir / name, *spec) for name, spec in _P8_EVIDENCE_SPECS.items()
-        ]
-        p8_file, p8_schema, p8_field, p8_pass = next(
-            (c for c in p8_candidates if c[0].is_file()), p8_candidates[-1]
-        )
-
-        if p8_file.is_file():
-            p8_valid = _verify_release_evidence(
-                _load_json_report(p8_file), p8_schema, p8_field, p8_pass, resolved_sha
+        phase8_valid = False
+        for filename, (schema, verdict_field, passing_val) in _P8_EVIDENCE_SPECS.items():
+            candidate = self.artifact_dir / filename
+            if candidate.is_file():
+                if _verify_release_evidence(
+                    _load_json_report(candidate),
+                    schema,
+                    verdict_field,
+                    passing_val,
+                    resolved_sha,
+                ):
+                    phase8_valid = True
+                    phases_passed.append("phase8_observability_fault_drills")
+                    artifact_hashes["phase8_observability"] = hashlib.sha256(
+                        candidate.read_bytes()
+                    ).hexdigest()
+                break
+        if not phase8_valid:
+            limitations.append(
+                "Phase 8 fault-drill evidence missing, failing, unreadable, tampered, "
+                "unit-level, or bound to a different commit; phase not certified."
             )
-            if p8_valid:
-                phases_passed.append("phase8_observability_fault_drills")
-                artifact_hashes["phase8_observability"] = hashlib.sha256(
-                    p8_file.read_bytes()
-                ).hexdigest()
-            else:
-                limitations.append(
-                    "Phase 8 fault-drill evidence missing, failing, unreadable, tampered, "
-                    "unit-level, or bound to a different commit; phase not certified."
-                )
 
         # 4. Check Phase 9 Grounded RCA
-        p9_candidates = [
-            (self.artifact_dir / name, *spec) for name, spec in _P9_EVIDENCE_SPECS.items()
-        ]
-        p9_file, p9_schema, p9_field, p9_pass = next(
-            (c for c in p9_candidates if c[0].is_file()), p9_candidates[-1]
-        )
-        if p9_file.is_file():
-            p9_valid = _verify_release_evidence(
-                _load_json_report(p9_file), p9_schema, p9_field, p9_pass, resolved_sha
+        phase9_valid = False
+        for filename, (schema, verdict_field, passing_val) in _P9_EVIDENCE_SPECS.items():
+            candidate = self.artifact_dir / filename
+            if candidate.is_file():
+                expected_mode = _P9_PROVIDER_MODES.get(filename)
+                if _verify_release_evidence(
+                    _load_json_report(candidate),
+                    schema,
+                    verdict_field,
+                    passing_val,
+                    resolved_sha,
+                    expected_provider_mode=expected_mode,
+                ):
+                    phase9_valid = True
+                    phases_passed.append("phase9_grounded_rca")
+                    artifact_hashes["phase9_rca"] = hashlib.sha256(
+                        candidate.read_bytes()
+                    ).hexdigest()
+                break
+        if not phase9_valid:
+            limitations.append(
+                "Phase 9 grounded-RCA evidence missing, failing, unreadable, tampered, "
+                "unit-level, or bound to a different commit; phase not certified."
             )
-            if p9_valid:
-                phases_passed.append("phase9_grounded_rca")
-                artifact_hashes["phase9_rca"] = hashlib.sha256(p9_file.read_bytes()).hexdigest()
-            else:
-                limitations.append(
-                    "Phase 9 grounded-RCA evidence missing, failing, unreadable, tampered, "
-                    "unit-level, or bound to a different commit; phase not certified."
-                )
 
-        # Determine verdict
+        # Determine aggregate verdict
+        mandatory_evidence_valid = phase1b_valid and phase8_valid and phase9_valid
         verdict: ReleaseVerdict = (
-            "FEASIBLE_PLATFORM_RELEASE" if is_feasible else "NEGATIVE_RESEARCH_RELEASE"
+            "FEASIBLE_PLATFORM_RELEASE"
+            if mandatory_evidence_valid and is_feasible
+            else "NEGATIVE_RESEARCH_RELEASE"
+            if mandatory_evidence_valid
+            else "INVALID"
         )
-        if not is_feasible:
-            limitations.extend(
-                [
-                    "Platform models demonstrated offline event detection tradeoffs and are packaged as negative research findings.",
-                    "Runtime streaming worker, replay producer, alert lifecycle, and RCA pipeline remain fully functional and certified.",
-                ]
+        is_certified = mandatory_evidence_valid
+        if mandatory_evidence_valid and not is_feasible:
+            limitations.append(
+                "Platform models demonstrated offline event detection tradeoffs and are packaged as negative research findings."
             )
 
         report_dict: dict[str, Any] = {
@@ -296,7 +315,7 @@ class ReleaseCertificationValidator:
             "phases_passed": phases_passed,
             "decision_gates": decision_gates,
             "artifact_hashes": artifact_hashes,
-            "is_certified": True,
+            "is_certified": is_certified,
             "limitations": limitations,
             "report_sha256": "",
         }

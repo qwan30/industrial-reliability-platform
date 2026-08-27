@@ -196,14 +196,19 @@ def main(argv: list[str] | None = None) -> int:
     manifest_sha = "1" * 64
     contract_sha = "2" * 64
     dataset_sha = "3" * 64
-    if args.package_manifest and args.package_manifest.is_file():
-        try:
-            m_data = json.loads(args.package_manifest.read_text(encoding="utf-8"))
-            manifest_sha = hashlib.sha256(args.package_manifest.read_bytes()).hexdigest()
-            contract_sha = m_data.get("contract_sha256", contract_sha)
-            dataset_sha = m_data.get("source_dataset_sha256", dataset_sha)
-        except Exception:
-            pass
+    if args.package_manifest:
+        if not args.package_manifest.is_file():
+            raise FileNotFoundError(f"Package manifest not found: {args.package_manifest}")
+        m_data = json.loads(args.package_manifest.read_text(encoding="utf-8"))
+        manifest_sha = hashlib.sha256(args.package_manifest.read_bytes()).hexdigest()
+        contract_sha = m_data.get("contract_sha256", contract_sha)
+        dataset_sha = m_data.get("source_dataset_sha256", dataset_sha)
+
+    workload_sha = "4" * 64
+    if args.workload:
+        if not args.workload.is_file():
+            raise FileNotFoundError(f"Workload configuration not found: {args.workload}")
+        workload_sha = hashlib.sha256(args.workload.read_bytes()).hexdigest()
 
     out_dir = args.output_dir or args.output or Path(f"artifacts/benchmarks/{sha}")
     out_dir.mkdir(parents=True, exist_ok=True)

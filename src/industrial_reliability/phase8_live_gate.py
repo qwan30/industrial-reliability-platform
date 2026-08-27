@@ -113,6 +113,12 @@ def run_phase8_live_gate(
     git_sha: str | None = None,
     evidence_level: str = "IN_PROCESS",
 ) -> FaultReportV1:
+    if evidence_level == "LIVE":
+        raise ValueError(
+            "In-process simulated drills cannot claim LIVE evidence level. "
+            "Use IN_PROCESS or run against verified container infrastructure."
+        )
+
     target_dir = output_dir or Path("artifacts/certification/live")
     target_dir.mkdir(parents=True, exist_ok=True)
 

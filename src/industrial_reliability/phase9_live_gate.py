@@ -164,6 +164,11 @@ def run_phase9_live_gate(
     sha = resolve_git_sha(git_sha)
 
     gate = Phase9LiveGate(api_key=api_key, model=model)
+    if evidence_level == "LIVE" and gate.provider_mode != "LIVE_OPENAI":
+        raise ValueError(
+            "Synthetic fallback RCA checks cannot claim LIVE evidence level without verified live OpenAI responses."
+        )
+
     gate.run_all_checks()
     report = gate.generate_report(git_sha=sha, evidence_level=evidence_level)
 

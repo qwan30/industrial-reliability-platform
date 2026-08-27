@@ -4,10 +4,14 @@ import argparse
 import hashlib
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from industrial_reliability.decision_gate import ReplayBenchmarkResultV1
+from industrial_reliability.report_hashes import resolve_git_sha
 
 
 def compute_stream_digest(records: list[dict[str, Any]]) -> str:
@@ -18,13 +22,22 @@ def compute_stream_digest(records: list[dict[str, Any]]) -> str:
     return hasher.hexdigest()
 
 
+def compute_latency_percentiles(samples_ms: Sequence[float]) -> tuple[float, float]:
+    if not samples_ms:
+        return (0.0, 0.0)
+    arr = np.array(samples_ms, dtype=np.float64)
+    p50 = float(np.percentile(arr, 50))
+    p95 = float(np.percentile(arr, 95))
+    return (round(p50, 3), round(p95, 3))
+
+
 def generate_baseline_benchmark(
     *,
-    git_sha: str,
-    champion_sha256: str,
-    contract_sha256: str,
-    source_dataset_sha256: str,
-    workload_sha256: str,
+    git_sha: str | None = None,
+    champion_sha256: str = "1" * 64,
+    contract_sha256: str = "2" * 64,
+    source_dataset_sha256: str = "3" * 64,
+    workload_sha256: str = "4" * 64,
     repetitions: int = 5,
     source_events: int = 18720,
     valid_windows: int = 624,
@@ -33,6 +46,7 @@ def generate_baseline_benchmark(
     alert_digest: str = "f" * 64,
     duplicate_rows: int = 0,
     quarantine_rows: int = 0,
+    latency_samples_ms: Sequence[float] | None = None,
     p50_latency_ms: float = 4.2,
     p95_latency_ms: float = 12.8,
     throughput_events_per_second: float = 12500.0,
@@ -42,10 +56,17 @@ def generate_baseline_benchmark(
     peak_rss_bytes: int = 85000000,
     restart_recovery_passed: bool = True,
 ) -> ReplayBenchmarkResultV1:
+    resolved_sha = resolve_git_sha(git_sha)
+
+    if latency_samples_ms is not None and len(latency_samples_ms) > 0:
+        p50, p95 = compute_latency_percentiles(latency_samples_ms)
+        p50_latency_ms = p50
+        p95_latency_ms = p95
+
     return ReplayBenchmarkResultV1(
         schema_version="replay-benchmark-v1",
         implementation="python-worker",
-        git_sha=git_sha,
+        git_sha=resolved_sha,
         champion_sha256=champion_sha256,
         contract_sha256=contract_sha256,
         source_dataset_sha256=source_dataset_sha256,
@@ -78,10 +99,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--restart-repetition", type=int, default=3)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--git-sha", type=str, default=None)
 
     args = parser.parse_args(argv)
     res = generate_baseline_benchmark(
-        git_sha="0" * 40,
+        git_sha=args.git_sha or "0" * 40,
         champion_sha256="1" * 64,
         contract_sha256="2" * 64,
         source_dataset_sha256="3" * 64,

@@ -53,18 +53,26 @@ describe('AlertPanel component', () => {
     expect(screen.getByTestId('alert-badge-alt-200')).toHaveTextContent('RESOLVED');
   });
 
-  it('fetches and expands alert detail and evidence table on click', async () => {
+  it('fetches and expands alert detail, timeline, and decisions on click', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
         success: true,
         data: {
           alert: mockAlerts[0],
-          events: [],
+          events: [{ action: 'OPENED', source_timestamp: '2020-04-18T00:00:00' }],
           evidence: [
             { feature_name: 'tp2_mean', feature_value: 2.5, robust_deviation: 3.2 },
           ],
-          decisions: [],
+          decisions: [
+            {
+              decision_id: 'dec-1',
+              source_timestamp: '2020-04-18T00:00:00',
+              score: 1400.0,
+              threshold: 1200.0,
+              is_anomaly: true,
+            },
+          ],
           rca: null,
         },
       }),
@@ -79,12 +87,16 @@ describe('AlertPanel component', () => {
       expect(screen.getByTestId('alert-detail-drawer')).toBeInTheDocument();
       expect(screen.getByTestId('evidence-table')).toBeInTheDocument();
       expect(screen.getByText('tp2_mean')).toBeInTheDocument();
+      expect(screen.getByTestId('alert-event-timeline')).toHaveTextContent('OPENED');
+      expect(screen.getByTestId('alert-decision-table')).toHaveTextContent('1400.000');
+      expect(screen.getByTestId('alert-decision-table')).toHaveTextContent('1200.000');
     });
 
     // Clicking again collapses drawer
     fireEvent.click(alertCard);
     expect(screen.queryByTestId('alert-detail-drawer')).not.toBeInTheDocument();
   });
+
 
   it('displays error when fetching alert detail fails', async () => {
     global.fetch = vi.fn().mockResolvedValue({

@@ -176,6 +176,77 @@ export function AlertPanel({ alerts, baseUrl = '' }: AlertPanelProps) {
                           <div style={{ color: '#94a3b8' }}>No specific evidence attributes found.</div>
                         )}
 
+                        <div style={{ fontWeight: 600, color: '#38bdf8', marginTop: '0.25rem' }}>
+                          Event Timeline:
+                        </div>
+                        {alertDetail.events && alertDetail.events.length > 0 ? (
+                          <ol
+                            data-testid="alert-event-timeline"
+                            style={{
+                              margin: 0,
+                              paddingLeft: '1.25rem',
+                              fontSize: '0.75rem',
+                              color: '#f8fafc',
+                            }}
+                          >
+                            {alertDetail.events.map((ev, idx) => (
+                              <li key={idx} style={{ marginBottom: '0.25rem' }}>
+                                <strong>{ev.action}</strong>
+                                {ev.source_timestamp && ` at ${ev.source_timestamp}`}
+                              </li>
+                            ))}
+                          </ol>
+                        ) : (
+                          <div data-testid="alert-event-timeline" style={{ color: '#94a3b8', fontSize: '0.75rem' }}>
+                            No event transitions recorded.
+                          </div>
+                        )}
+
+                        <div style={{ fontWeight: 600, color: '#38bdf8', marginTop: '0.25rem' }}>
+                          Decision History:
+                        </div>
+                        {alertDetail.decisions && alertDetail.decisions.length > 0 ? (
+                          <table
+                            data-testid="alert-decision-table"
+                            style={{
+                              width: '100%',
+                              borderCollapse: 'collapse',
+                              fontSize: '0.75rem',
+                            }}
+                          >
+                            <thead>
+                              <tr style={{ borderBottom: '1px solid #475569', textAlign: 'left' }}>
+                                <th style={{ padding: '0.25rem' }}>Time</th>
+                                <th style={{ padding: '0.25rem' }}>Score / Threshold</th>
+                                <th style={{ padding: '0.25rem' }}>Outcome</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {alertDetail.decisions.map((dec, i) => (
+                                <tr key={i} style={{ borderBottom: '1px solid #334155' }}>
+                                  <td style={{ padding: '0.25rem' }}>{dec.source_timestamp}</td>
+                                  <td style={{ padding: '0.25rem' }}>
+                                    {dec.score.toFixed(3)} / {dec.threshold.toFixed(3)}
+                                  </td>
+                                  <td
+                                    style={{
+                                      padding: '0.25rem',
+                                      color: dec.is_anomaly ? '#ef4444' : '#10b981',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {dec.is_anomaly ? 'ANOMALOUS' : 'NORMAL'}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <div data-testid="alert-decision-table" style={{ color: '#94a3b8', fontSize: '0.75rem' }}>
+                            No decisions recorded.
+                          </div>
+                        )}
+
                         <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', color: '#94a3b8' }}>
                           Policy SHA: <code>{alert.policy_sha256.slice(0, 12)}...</code>
                         </div>
@@ -185,6 +256,7 @@ export function AlertPanel({ alerts, baseUrl = '' }: AlertPanelProps) {
                           initialReport={alertDetail.rca}
                           baseUrl={baseUrl}
                         />
+
                       </div>
                     )}
                   </div>

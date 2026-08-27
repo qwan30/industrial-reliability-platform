@@ -87,4 +87,4 @@ jobs:
         env:
           DATABASE_URL: postgresql://irp:irp_password@localhost:5432/irp
           REQUIRE_INTEGRATION_SERVICES: "true"
-        run: pytest -m "integration"
+        run: pytest -m "integration" --no-cov

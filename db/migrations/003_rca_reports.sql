@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS rca_reports (
     report_id text PRIMARY KEY,
-    alert_id uuid NOT NULL REFERENCES alerts(alert_id) ON DELETE CASCADE,
+    alert_id text NOT NULL REFERENCES alerts(alert_id) ON DELETE CASCADE,
     evidence_bundle_sha256 text NOT NULL,
     status text NOT NULL CHECK (status = 'COMPLETE'),
     provider_model text NOT NULL,

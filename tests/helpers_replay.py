@@ -52,14 +52,16 @@ def make_sample_replay_command(
     speed: int = 1000,
     range_start: datetime | None = None,
     range_end: datetime | None = None,
+    source_dataset_sha256: str | None = None,
+    contract_sha256: str | None = None,
 ) -> ReplayCommandV1:
     r_start = range_start or datetime(2020, 3, 1, 0, 0, 0)
     r_end = range_end or datetime(2020, 3, 1, 0, 1, 0)
     return ReplayCommandV1(
         message_id=uuid4(),
         replay_session_id=session_id or uuid4(),
-        source_dataset_sha256="a" * 64,
-        contract_sha256="b" * 64,
+        source_dataset_sha256=source_dataset_sha256 or "a" * 64,
+        contract_sha256=contract_sha256 or "b" * 64,
         source_timestamp=r_start,
         emitted_at=datetime.now(UTC),
         command_id=uuid4(),

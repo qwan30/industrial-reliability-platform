@@ -9,6 +9,8 @@ import pytest
 
 from industrial_reliability.fault_report import DrillMetricDeltasV1, DrillResultV1
 from industrial_reliability.phase8_live_gate import (
+    PHASE8_LIVE_SCHEMA,
+    PHASE8_REPORT_BASENAME,
     execute_live_drills,
     main,
     publish_live_drill_report,
@@ -43,8 +45,8 @@ def test_publish_live_drill_report(tmp_path: Path) -> None:
         ),
     ]
 
-    json_path = tmp_path / "report.json"
-    md_path = tmp_path / "report.md"
+    json_path = tmp_path / f"{PHASE8_REPORT_BASENAME}.json"
+    md_path = tmp_path / f"{PHASE8_REPORT_BASENAME}.md"
     git_sha = "a" * 40
 
     report = publish_live_drill_report(
@@ -52,24 +54,27 @@ def test_publish_live_drill_report(tmp_path: Path) -> None:
         json_path=json_path,
         md_path=md_path,
         git_sha=git_sha,
+        evidence_level="LIVE",
     )
 
     assert report.all_passed is True
-    assert report.evidence_level == "IN_PROCESS"
+    assert report.evidence_level == "LIVE"
+    assert report.verdict == "PASS"
     assert report.git_sha == git_sha
-    assert report.schema_version == "phase8-in-process-fault-drills-v1"
+    assert report.schema_version == PHASE8_LIVE_SCHEMA
     assert len(report.self_sha256) == 64
     assert report.simulated_components
 
     data = json.loads(json_path.read_text(encoding="utf-8"))
-    assert data["schema_version"] == "phase8-in-process-fault-drills-v1"
-    assert data["evidence_level"] == "IN_PROCESS"
+    assert data["schema_version"] == PHASE8_LIVE_SCHEMA
+    assert data["evidence_level"] == "LIVE"
+    assert data["verdict"] == "PASS"
     assert data["git_sha"] == git_sha
     assert data["self_sha256"] == report.self_sha256
     assert data["simulated_components"]
 
     md_text = md_path.read_text(encoding="utf-8")
-    assert "In-Process Evidence" in md_text
+    assert "Live Fault Drill Report" in md_text
     assert git_sha in md_text
     assert "Simulated Components" in md_text
 
@@ -98,8 +103,8 @@ async def test_execute_live_drills() -> None:
 
 
 def test_phase8_live_gate_cli(tmp_path: Path) -> None:
-    out_dir = tmp_path / "in_process_out"
+    out_dir = tmp_path / "live_out"
     code = main(["--output-dir", str(out_dir), "--git-sha", "b" * 40])
     assert code == 0
-    assert (out_dir / "phase-8-in-process-fault-drills.json").exists()
-    assert (out_dir / "phase-8-in-process-fault-drills.md").exists()
+    assert (out_dir / "phase-8-live-fault-drills.json").exists()
+    assert (out_dir / "phase-8-live-fault-drills.md").exists()

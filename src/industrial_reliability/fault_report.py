@@ -96,6 +96,7 @@ class FaultReportV1:
     evidence_level: str = "UNIT"
     schema_version: str = "phase8-fault-report-v1"
     simulated_components: tuple[str, ...] = DRILL_SIMULATED_COMPONENTS
+    verdict: str = "PASS"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -105,9 +106,11 @@ class FaultReportV1:
             "git_sha": self.git_sha,
             "timestamp": self.timestamp,
             "all_passed": self.all_passed,
+            "verdict": self.verdict,
             "drills": [d.to_dict() for d in self.drills],
             "self_sha256": self.self_sha256,
         }
+
 
 
 def classify_drill(deltas: DrillMetricDeltasV1) -> tuple[FaultClass, str]:
@@ -396,6 +399,7 @@ def build_fault_report(
     require_committed_git_sha(git_sha)
     now_iso = datetime.now(UTC).isoformat()
     all_passed = all(d.passed for d in drills) and len(drills) > 0
+    verdict = "PASS" if all_passed else "FAIL"
     base_data: dict[str, Any] = {
         "schema_version": schema_version,
         "evidence_level": evidence_level,
@@ -403,6 +407,7 @@ def build_fault_report(
         "git_sha": git_sha,
         "timestamp": now_iso,
         "all_passed": all_passed,
+        "verdict": verdict,
         "drills": [d.to_dict() for d in drills],
         "self_sha256": "",
     }
@@ -417,7 +422,9 @@ def build_fault_report(
         evidence_level=evidence_level,
         schema_version=schema_version,
         simulated_components=simulated_components,
+        verdict=verdict,
     )
+
 
 
 def _atomic_write_text(path: Path, text: str) -> None:

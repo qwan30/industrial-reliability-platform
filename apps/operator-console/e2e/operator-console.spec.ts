@@ -225,9 +225,9 @@ test.describe('Operator Console E2E Flow', () => {
     await generateRcaBtn.click();
 
     // Verify RCA content renders
-    await expect(page.getByTestId('rca-status-badge')).toHaveTextContent('COMPLETE');
+    await expect(page.getByTestId('rca-status-badge')).toHaveText('COMPLETE');
     await expect(page.getByTestId('rca-summary')).toContainText('Discharge pressure elevated');
-    await expect(page.getByTestId('rca-citation-badge')).toHaveTextContent('evidence-111111111111111111111111');
+    await expect(page.getByTestId('rca-citation-badge')).toContainText('evidence-111111111111111111111111');
     await expect(page.getByTestId('rca-uncertainty')).toContainText('does not prove a mechanical root cause');
   });
 });

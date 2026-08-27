@@ -457,7 +457,9 @@ git commit -m "fix: wire deployed console rca and alert metrics"
 def test_count_active_alerts() -> None:
     store = RuntimeStore("postgresql://test")
     with patch("industrial_reliability.persistence.psycopg.connect") as connect:
-        connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchone.return_value = {"count": 2}
+        connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchone.return_value = {
+            "count": 2
+        }
         assert store.count_active_alerts() == 2
 
 
@@ -660,7 +662,7 @@ def test_demo_script_owns_stack_start_readiness_and_teardown_message() -> None:
     assert "ALLOW_RESEARCH_CANDIDATE" in script
     assert "SCORING_MANIFEST_SHA256" in script
     assert "operator-console.live.spec.ts" in script
-    assert 'docker compose down' in script
+    assert "docker compose down" in script
     assert "docker compose down -v" not in script
 ```
 
@@ -1141,18 +1143,34 @@ This calibration-range workload measures runtime performance only and never upda
 def test_aggregate_samples_is_recomputable() -> None:
     samples = (
         ReplayBenchmarkSampleV1(
-            repetition=1, source_events=1000, valid_windows=40,
-            p50_latency_ms=100.0, p95_latency_ms=140.0,
-            throughput_events_per_second=250.0, max_consumer_lag=8.0,
-            lag_drain_seconds=1.2, duplicate_rows=0, quarantine_rows=0,
-            cpu_seconds=3.0, peak_rss_bytes=80_000_000, recovery_passed=True,
+            repetition=1,
+            source_events=1000,
+            valid_windows=40,
+            p50_latency_ms=100.0,
+            p95_latency_ms=140.0,
+            throughput_events_per_second=250.0,
+            max_consumer_lag=8.0,
+            lag_drain_seconds=1.2,
+            duplicate_rows=0,
+            quarantine_rows=0,
+            cpu_seconds=3.0,
+            peak_rss_bytes=80_000_000,
+            recovery_passed=True,
         ),
         ReplayBenchmarkSampleV1(
-            repetition=2, source_events=1000, valid_windows=40,
-            p50_latency_ms=110.0, p95_latency_ms=160.0,
-            throughput_events_per_second=245.0, max_consumer_lag=6.0,
-            lag_drain_seconds=0.9, duplicate_rows=0, quarantine_rows=1,
-            cpu_seconds=3.2, peak_rss_bytes=82_000_000, recovery_passed=True,
+            repetition=2,
+            source_events=1000,
+            valid_windows=40,
+            p50_latency_ms=110.0,
+            p95_latency_ms=160.0,
+            throughput_events_per_second=245.0,
+            max_consumer_lag=6.0,
+            lag_drain_seconds=0.9,
+            duplicate_rows=0,
+            quarantine_rows=1,
+            cpu_seconds=3.2,
+            peak_rss_bytes=82_000_000,
+            recovery_passed=True,
         ),
     )
     result = aggregate_samples(

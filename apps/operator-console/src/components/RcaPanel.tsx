@@ -210,4 +210,3 @@ export const RcaPanel: React.FC<RcaPanelProps> = ({
     </div>
   );
 };
-

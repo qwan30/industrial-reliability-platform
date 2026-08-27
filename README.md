@@ -131,9 +131,11 @@ Execute the certified 3-drill fault-isolation matrix:
 ```powershell
 .\scripts\run_phase8_live_fault_drills.ps1
 ```
-The drills execute the streaming-worker fault-isolation logic and publish verified live evidence with `evidence_level: LIVE`. Generates cryptographically self-hashed reports at:
+The drills execute the streaming-worker fault-isolation logic (service outage, malformed telemetry quarantine, and abnormal replay) and publish cryptographically self-hashed reports at:
 - `artifacts/certification/<git-sha>/phase-8-live-fault-drills.json`
 - `artifacts/certification/<git-sha>/phase-8-live-fault-drills.md`
+
+> **Note on Evidence Levels:** In-process drills default to `evidence_level: IN_PROCESS`. Drills executed against active live Docker containers produce `evidence_level: LIVE`. Release certification strictly requires `INTEGRATION` or `LIVE` evidence.
 
 ## Grounded Root-Cause Analysis (Phase 9)
 

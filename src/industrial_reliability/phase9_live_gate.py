@@ -135,10 +135,10 @@ class Phase9LiveGate:
         except Exception as exc:
             self.record_check("fallback_generator_available", False, str(exc))
 
-    def generate_report(self, git_sha: str, evidence_level: str = "LIVE") -> dict[str, Any]:
+    def generate_report(self, git_sha: str, evidence_level: str = "IN_PROCESS") -> dict[str, Any]:
         schema_version = (
             PHASE9_RCA_SCHEMA_LIVE
-            if self.provider_mode == "LIVE_OPENAI"
+            if self.provider_mode == "LIVE_OPENAI" and evidence_level == "LIVE"
             else PHASE9_RCA_SCHEMA_FALLBACK
         )
         return build_gate_report(
@@ -156,7 +156,7 @@ def run_phase9_live_gate(
     git_sha: str | None = None,
     api_key: str | None = None,
     model: str | None = None,
-    evidence_level: str = "LIVE",
+    evidence_level: str = "IN_PROCESS",
 ) -> dict[str, Any]:
     target_dir = output_dir or Path("artifacts/certification/live")
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -201,8 +201,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--evidence-level",
         type=str,
-        default="LIVE",
-        help="Evidence level (LIVE or INTEGRATION)",
+        default="IN_PROCESS",
+        help="Evidence level (IN_PROCESS or INTEGRATION)",
     )
     args = parser.parse_args(argv)
     report = run_phase9_live_gate(

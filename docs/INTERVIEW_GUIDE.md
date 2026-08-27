@@ -48,7 +48,7 @@ The Industrial Reliability Platform is an **evidence-led, fail-closed industrial
                                        |
                                        v (irp.alerts.v1 / outbox)
                              +--------------------+
-                             |  Operator Console  | (React / Vite on :3000)
+                             |  Operator Console  | (React / Vite on :5173)
                              +--------------------+
                                        |
                                        v (POST /v1/alerts/{id}/rca)
@@ -62,23 +62,23 @@ The Industrial Reliability Platform is an **evidence-led, fail-closed industrial
 ## 3. Key Subsystems & Design Choices
 
 ### A. Temporal Segmentation & Sliding-Window Feature Engineering
-- **File:** [`src/industrial_reliability/features.py`](file:///d:/projects/industrial-reliability-platform/src/industrial_reliability/features.py)
+- **File:** [`src/industrial_reliability/features.py`](../src/industrial_reliability/features.py)
 - **Problem:** Real-world sensor telemetry exhibits timestamp jitter, missing seconds, and clock resets. Naive rolling windows introduce temporal distortion.
 - **Solution:** Stateful segmentation breaks windows whenever inter-observation delta exceeds 5 seconds. Windows require $\ge 90\%$ uniform coverage across 6 temporal sub-bins before feature extraction.
 
 ### B. Fault Isolation & Taxonomy
-- **File:** [`src/industrial_reliability/fault_report.py`](file:///d:/projects/industrial-reliability-platform/src/industrial_reliability/fault_report.py)
+- **File:** [`src/industrial_reliability/fault_report.py`](../src/industrial_reliability/fault_report.py)
 - **Taxonomy:**
   1. **Service Outages:** Scoring API 503/timeout $\rightarrow$ worker retries with exponential backoff and buffer preservation; 0 telemetry dropped.
   2. **Ingestion Data Faults:** Corrupted schema or negative timestamps $\rightarrow$ isolated to quarantine topic; 0 downstream scoring corruption.
   3. **Machine Faults:** Authentic sensor shift $\rightarrow$ stateful alert policy transitions (`OPENED` $\rightarrow$ `UPDATED` $\rightarrow$ `RESOLVED`).
 
 ### C. State Machine & Persisted Outbox Pattern
-- **Files:** [`src/industrial_reliability/alert_state.py`](file:///d:/projects/industrial-reliability-platform/src/industrial_reliability/alert_state.py), [`src/industrial_reliability/persistence.py`](file:///d:/projects/industrial-reliability-platform/src/industrial_reliability/persistence.py)
+- **Files:** [`src/industrial_reliability/alert_state.py`](../src/industrial_reliability/alert_state.py), [`src/industrial_reliability/persistence.py`](../src/industrial_reliability/persistence.py)
 - **Invariant:** Alert transitions are calculated pure-functionally (`transition(state, decision, policy)`), written transactionally alongside evidence snapshots and outbox rows in PostgreSQL, and only published after database commit.
 
 ### D. Grounded RCA with Closed-World Citations
-- **Files:** [`src/industrial_reliability/rca_openai.py`](file:///d:/projects/industrial-reliability-platform/src/industrial_reliability/rca_openai.py), [`src/industrial_reliability/rca_evidence.py`](file:///d:/projects/industrial-reliability-platform/src/industrial_reliability/rca_evidence.py)
+- **Files:** [`src/industrial_reliability/rca_openai.py`](../src/industrial_reliability/rca_openai.py), [`src/industrial_reliability/rca_evidence.py`](../src/industrial_reliability/rca_evidence.py)
 - **Projection Tools:** `get_alert`, `get_score_evidence`, `get_model_provenance`, `get_system_health`.
 - **Enforcement:** Observations citing unknown evidence IDs are rejected. Fallback mode returns structured evidence summary with `status="UNAVAILABLE"` when API keys are omitted or providers fail.
 
@@ -88,12 +88,12 @@ The Industrial Reliability Platform is an **evidence-led, fail-closed industrial
 
 | Phase | Description | Status / Verdict | Authoritative Evidence File |
 |---|---|---|---|
-| **Phase 1** | Offline ML Feasibility | **NOT FEASIBLE** (`selected_model: null`) | [`docs/results/phase-1-offline-ml-feasibility.md`](file:///d:/projects/industrial-reliability-platform/docs/results/phase-1-offline-ml-feasibility.md) |
-| **Phase 1B** | Benchmark on MetroPT-3 | **NOT FEASIBLE** | [`docs/results/phase-1b-metrics.json`](file:///d:/projects/industrial-reliability-platform/docs/results/phase-1b-metrics.json) |
-| **Phase 7A** | Airflow Architectural Evaluation | **NOT ADOPTED** (Kafka/Service preferred) | [`docs/decisions/2026-08-24-airflow-not-adopted.md`](file:///d:/projects/industrial-reliability-platform/docs/decisions/2026-08-24-airflow-not-adopted.md) |
-| **Phase 8** | Fault Isolation Drills | **PASS** (`evidence_level: LIVE`) | `artifacts/certification/$sha/phase-8-live-fault-drills.json` |
-| **Phase 9** | Grounded RCA Gate | **PASS** (`evidence_level: LIVE`) | `artifacts/certification/$sha/phase-9-rca-fallback.json` |
-| **Release** | Exact-SHA Release Certification | **PASS** / **VALID** | `artifacts/certification/$sha/release-certification.json` |
+| **Phase 1** | Offline ML Feasibility | **NOT FEASIBLE** (`selected_model: null`) | [`docs/results/phase-1-offline-ml-feasibility.md`](results/phase-1-offline-ml-feasibility.md) |
+| **Phase 1B** | Benchmark on MetroPT-3 | **NOT FEASIBLE** | [`docs/results/phase-1b-metrics.json`](results/phase-1b-metrics.json) |
+| **Phase 7A** | Airflow Architectural Evaluation | **NOT ADOPTED** (Kafka/Service preferred) | [`docs/decisions/2026-08-24-airflow-not-adopted.md`](decisions/2026-08-24-airflow-not-adopted.md) |
+| **Phase 8** | Fault Isolation Drills | **PASS** (`IN_PROCESS` default; `INTEGRATION`/`LIVE` with live services) | `artifacts/certification/$sha/phase-8-live-fault-drills.json` |
+| **Phase 9** | Grounded RCA Gate | **PASS** (`FALLBACK_ONLY` default; `LIVE` with verified provider) | `artifacts/certification/$sha/phase-9-rca-fallback.json` |
+| **Release** | Exact-SHA Release Certification | **NEGATIVE_RESEARCH_RELEASE** (`is_certified: true`) | `artifacts/certification/$sha/release-certification.json` |
 
 ---
 

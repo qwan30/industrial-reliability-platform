@@ -22,4 +22,3 @@ scrape_configs:
     metrics_path: "/metrics"
     static_configs:
       - targets: ["alert-service:9103"]
-

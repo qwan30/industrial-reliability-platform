@@ -1,9 +1,9 @@
 # Codebase State Audit & Forward Roadmap
 
-**Status:** Revised implementation roadmap; remediation not yet executed  
-**Date:** 2026-08-27  
-**Original audit anchor:** git HEAD `72c5209af69ad411d7f9013f798c0fe3c5dc35da` on `feat/phase-9-grounded-rca`.  
-**Roadmap revision anchor:** latest `main` at `300a13679be64457745676a36d0135093affde4b`, after PR #16 merged and the `main` CI run passed; implementation branch `fix/interview-readiness-hardening`.  
+**Status:** Revised implementation roadmap; remediation not yet executed
+**Date:** 2026-08-27
+**Original audit anchor:** git HEAD `72c5209af69ad411d7f9013f798c0fe3c5dc35da` on `feat/phase-9-grounded-rca`.
+**Roadmap revision anchor:** latest `main` at `300a13679be64457745676a36d0135093affde4b`, after PR #16 merged and the `main` CI run passed; implementation branch `fix/interview-readiness-hardening`.
 **Provenance:** The original audit used four read-only analyst passes over source, documentation, delivery infrastructure, and verification. This revision rechecked the claims against current code, local quality gates, published artifacts, Compose wiring, and current PR/CI state. It converts the snapshot into an evidence-gated implementation roadmap for interview readiness.
 **Supersedes nothing; complements:** `docs/superpowers/specs/2026-08-23-industrial-reliability-intelligence-platform-design.md` (original intent) and `docs/superpowers/specs/2026-08-24-post-phase-1-evidence-gated-roadmap-design.md` (the pivot contract). This document records *what the codebase actually is* after Phases 1–11 executed, and the recommended forward direction.
 

@@ -48,10 +48,10 @@ def publish_live_drill_report(
     json_path: Path,
     md_path: Path,
     git_sha: str,
-    evidence_level: str = "LIVE",
+    evidence_level: str = "IN_PROCESS",
     schema_version: str = PHASE8_LIVE_SCHEMA,
 ) -> FaultReportV1:
-    """Publish the live drill certification report as JSON + Markdown."""
+    """Publish the in-process drill report as JSON + Markdown with truthful evidence level."""
     report = build_fault_report(
         drills,
         git_sha,
@@ -111,7 +111,7 @@ def _render_markdown(report: FaultReportV1) -> str:
 def run_phase8_live_gate(
     output_dir: Path | None = None,
     git_sha: str | None = None,
-    evidence_level: str = "LIVE",
+    evidence_level: str = "IN_PROCESS",
 ) -> FaultReportV1:
     target_dir = output_dir or Path("artifacts/certification/live")
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -147,8 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--evidence-level",
         type=str,
-        default="LIVE",
-        help="Evidence level (LIVE or INTEGRATION)",
+        default="IN_PROCESS",
+        help="Evidence level (IN_PROCESS or INTEGRATION)",
     )
     args = parser.parse_args(argv)
     report = run_phase8_live_gate(

@@ -28,6 +28,40 @@ def canonical_sha256(data: dict[str, Any]) -> str:
 
 
 @dataclass(frozen=True)
+class ReplayBenchmarkSampleV1:
+    repetition: int
+    source_events: int
+    valid_windows: int
+    p50_latency_ms: float
+    p95_latency_ms: float
+    throughput_events_per_second: float
+    max_consumer_lag: float
+    lag_drain_seconds: float
+    duplicate_rows: int
+    quarantine_rows: int
+    cpu_seconds: float
+    peak_rss_bytes: int
+    recovery_passed: bool
+
+    def __post_init__(self) -> None:
+        for name, val in [
+            ("p50_latency_ms", self.p50_latency_ms),
+            ("p95_latency_ms", self.p95_latency_ms),
+            ("throughput_events_per_second", self.throughput_events_per_second),
+            ("max_consumer_lag", self.max_consumer_lag),
+            ("lag_drain_seconds", self.lag_drain_seconds),
+            ("cpu_seconds", self.cpu_seconds),
+        ]:
+            if not math.isfinite(val) or val < 0:
+                raise ValueError(
+                    f"Sample metric {name} must be a non-negative finite float, got {val}"
+                )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class ReplayBenchmarkResultV1:
     schema_version: str
     implementation: str

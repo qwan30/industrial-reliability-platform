@@ -1,0 +1,8 @@
+{
+  "schema_version": "replay-workload-v1",
+  "range_start": "2020-02-25T00:00:00",
+  "range_end": "2020-02-25T06:00:00",
+  "speed": 1000,
+  "repetitions": 5,
+  "restart_repetition": 3
+}

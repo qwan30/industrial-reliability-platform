@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -39,8 +40,13 @@ async def test_online_worker_stream_features_and_scores(tmp_path: Path) -> None:
         producer = AIOKafkaProducer(bootstrap_servers="localhost:29092")
         await asyncio.wait_for(producer.start(), timeout=1.5)
         await producer.stop()
-    except Exception:
-        pytest.skip("Kafka broker unavailable at localhost:29092")
+    except Exception as exc:
+        require_live = os.environ.get("REQUIRE_INTEGRATION_SERVICES", "").lower() in ("true", "1")
+        if require_live:
+            raise RuntimeError(
+                f"Required integration Kafka broker unavailable at localhost:29092: {exc}"
+            ) from exc
+        pytest.skip(f"Kafka broker unavailable at localhost:29092: {exc}")
 
     # 1. Setup mock data and detector
     pq_path = _create_mock_parquet(tmp_path, n_rows=200)

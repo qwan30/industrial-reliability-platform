@@ -23,9 +23,9 @@ def test_phase9_live_gate_fallback_mode(tmp_path: Path, monkeypatch: pytest.Monk
     assert len(gate.checks) == 4
 
     git_sha = "c" * 40
-    report = gate.generate_report(git_sha=git_sha, evidence_level="LIVE")
+    report = gate.generate_report(git_sha=git_sha)
     assert report["schema_version"] == "phase-9-rca-fallback-v1"
-    assert report["evidence_level"] == "LIVE"
+    assert report["evidence_level"] == "IN_PROCESS"
     assert report["provider_mode"] == "FALLBACK_ONLY"
     assert report["verdict"] == "PASS"
     assert report["git_sha"] == git_sha

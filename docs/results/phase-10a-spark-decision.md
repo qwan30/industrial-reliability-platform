@@ -7,4 +7,3 @@
 
 ## Rationale
 - Platform path stopped after offline ML feasibility evaluation.
-

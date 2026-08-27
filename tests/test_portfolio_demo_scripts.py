@@ -15,14 +15,13 @@ from deploy.preflight import (
 
 
 def test_preflight_default_config_ports() -> None:
+    assert 5173 in DEFAULT_PREFLIGHT_CONFIG.required_ports
+    assert 29092 in DEFAULT_PREFLIGHT_CONFIG.required_ports
     assert 8000 in DEFAULT_PREFLIGHT_CONFIG.required_ports
-    assert 3000 in DEFAULT_PREFLIGHT_CONFIG.required_ports
     assert 5432 in DEFAULT_PREFLIGHT_CONFIG.required_ports
-    assert 9092 in DEFAULT_PREFLIGHT_CONFIG.required_ports
     assert 9090 in DEFAULT_PREFLIGHT_CONFIG.required_ports
+    assert 3001 in DEFAULT_PREFLIGHT_CONFIG.required_ports
     assert 5000 in DEFAULT_PREFLIGHT_CONFIG.required_ports
-    assert 9102 in DEFAULT_PREFLIGHT_CONFIG.required_ports
-    assert 9103 in DEFAULT_PREFLIGHT_CONFIG.required_ports
 
 
 def test_preflight_verifies_ram_and_disk_passes() -> None:
@@ -32,9 +31,12 @@ def test_preflight_verifies_ram_and_disk_passes() -> None:
             "deploy.preflight.shutil.disk_usage",
             return_value=(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
         ),
+        patch("deploy.preflight.shutil.which", return_value="docker"),
+        patch("deploy.preflight.subprocess.run") as mock_subproc,
         patch("socket.socket") as mock_sock,
     ):
         mock_psutil.virtual_memory.return_value = MagicMock(available=8 * 1024**3)
+        mock_subproc.return_value = MagicMock(returncode=0)
         mock_sock_inst = MagicMock()
         mock_sock_inst.connect_ex.return_value = 1  # Port free
         mock_sock.return_value.__enter__.return_value = mock_sock_inst
@@ -71,9 +73,12 @@ def test_preflight_require_clean_ports_flag() -> None:
             "deploy.preflight.shutil.disk_usage",
             return_value=(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
         ),
+        patch("deploy.preflight.shutil.which", return_value="docker"),
+        patch("deploy.preflight.subprocess.run") as mock_subproc,
         patch("socket.socket") as mock_sock,
     ):
         mock_psutil.virtual_memory.return_value = MagicMock(available=8 * 1024**3)
+        mock_subproc.return_value = MagicMock(returncode=0)
         mock_sock_inst = MagicMock()
         mock_sock_inst.connect_ex.return_value = 0  # Port is bound
         mock_sock.return_value.__enter__.return_value = mock_sock_inst
@@ -96,9 +101,12 @@ def test_preflight_cli_json_output(capsys: pytest.CaptureFixture[str]) -> None:
             "deploy.preflight.shutil.disk_usage",
             return_value=(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
         ),
+        patch("deploy.preflight.shutil.which", return_value="docker"),
+        patch("deploy.preflight.subprocess.run") as mock_subproc,
         patch("socket.socket") as mock_sock,
     ):
         mock_psutil.virtual_memory.return_value = MagicMock(available=8 * 1024**3)
+        mock_subproc.return_value = MagicMock(returncode=0)
         mock_sock_inst = MagicMock()
         mock_sock_inst.connect_ex.return_value = 1
         mock_sock.return_value.__enter__.return_value = mock_sock_inst
@@ -117,7 +125,7 @@ def test_portfolio_demo_script_structure() -> None:
     assert script_path.exists(), "scripts/run_portfolio_demo.ps1 must exist"
     content = script_path.read_text(encoding="utf-8")
     assert "deploy/preflight.py" in content or "deploy\\preflight.py" in content
-    assert "http://127.0.0.1:3000" in content
+    assert "http://127.0.0.1:5173" in content
     assert "http://127.0.0.1:8000" in content
     assert "http://127.0.0.1:9090" in content
     assert "http://127.0.0.1:3001" in content

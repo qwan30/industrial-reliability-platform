@@ -4,9 +4,11 @@ import argparse
 import json
 import shutil
 import socket
+import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 try:
     import psutil
@@ -18,7 +20,9 @@ except ImportError:
 class PreflightConfig:
     min_memory_gb: float = 4.0
     min_disk_gb: float = 10.0
-    required_ports: tuple[int, ...] = (8000, 3000, 5432, 9092, 9090, 5000, 9102, 9103)
+    required_ports: tuple[int, ...] = (5173, 29092, 8000, 5432, 9090, 3001, 5000)
+    check_docker: bool = True
+    check_artifacts: bool = True
 
 
 @dataclass(frozen=True)
@@ -58,7 +62,7 @@ def verify_host_environment(
             f"Insufficient Disk Space: {free_gb:.1f}GB free, {active_config.min_disk_gb}GB required."
         )
 
-    # 3. Check Ports
+    # 3. Check Published Ports
     for port in active_config.required_ports:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(0.5)
@@ -68,6 +72,34 @@ def verify_host_environment(
                     errors.append(msg)
                 else:
                     warnings.append(msg)
+
+    # 4. Check Docker & Docker Compose if enabled
+    if active_config.check_docker:
+        docker_bin = shutil.which("docker")
+        if not docker_bin:
+            errors.append("Docker CLI executable 'docker' is not available in PATH.")
+        else:
+            try:
+                proc = subprocess.run(
+                    [docker_bin, "compose", "version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if proc.returncode != 0:
+                    errors.append(
+                        f"Docker Compose unavailable or returned error: {proc.stderr.strip()}"
+                    )
+            except Exception as exc:
+                errors.append(f"Failed to execute 'docker compose version': {exc}")
+
+    # 5. Check Data & Candidate Artifacts if enabled
+    if active_config.check_artifacts:
+        manifest_path = Path("artifacts/research-candidate/manifest.json")
+        if not manifest_path.is_file():
+            warnings.append(
+                f"Research candidate manifest not found at {manifest_path} (run build_research_candidate)."
+            )
 
     return PreflightResult(passed=len(errors) == 0, errors=errors, warnings=warnings)
 

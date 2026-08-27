@@ -54,11 +54,11 @@ def test_publish_live_drill_report(tmp_path: Path) -> None:
         json_path=json_path,
         md_path=md_path,
         git_sha=git_sha,
-        evidence_level="LIVE",
+        evidence_level="IN_PROCESS",
     )
 
     assert report.all_passed is True
-    assert report.evidence_level == "LIVE"
+    assert report.evidence_level == "IN_PROCESS"
     assert report.verdict == "PASS"
     assert report.git_sha == git_sha
     assert report.schema_version == PHASE8_LIVE_SCHEMA
@@ -67,7 +67,7 @@ def test_publish_live_drill_report(tmp_path: Path) -> None:
 
     data = json.loads(json_path.read_text(encoding="utf-8"))
     assert data["schema_version"] == PHASE8_LIVE_SCHEMA
-    assert data["evidence_level"] == "LIVE"
+    assert data["evidence_level"] == "IN_PROCESS"
     assert data["verdict"] == "PASS"
     assert data["git_sha"] == git_sha
     assert data["self_sha256"] == report.self_sha256

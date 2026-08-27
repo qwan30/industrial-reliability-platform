@@ -66,7 +66,7 @@ def _extract_with_rejections(
     invalid_delta[0] = False
     invalid_prefix = np.cumsum(invalid_delta)
     starts = candidates - window + 1
-    crosses_gap = (invalid_prefix[candidates] - invalid_prefix[starts]) != 0
+    crosses_gap: np.ndarray = (invalid_prefix[candidates] - invalid_prefix[starts]) != 0
 
     split_names = np.full(len(candidates), None, dtype=object)
     candidate_starts = timestamps.iloc[starts].reset_index(drop=True)

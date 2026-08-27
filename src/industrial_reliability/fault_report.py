@@ -112,7 +112,6 @@ class FaultReportV1:
         }
 
 
-
 def classify_drill(deltas: DrillMetricDeltasV1) -> tuple[FaultClass, str]:
     if (
         deltas.score_unavailable_delta > 0.0
@@ -424,7 +423,6 @@ def build_fault_report(
         simulated_components=simulated_components,
         verdict=verdict,
     )
-
 
 
 def _atomic_write_text(path: Path, text: str) -> None:

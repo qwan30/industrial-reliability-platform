@@ -131,12 +131,9 @@ Execute the certified 3-drill fault-isolation matrix:
 ```powershell
 .\scripts\run_phase8_live_fault_drills.ps1
 ```
-The drills execute the real streaming-worker fault-isolation logic in-process
-(scoring client, Kafka producer, and metrics registry are in-process doubles),
-and the reports disclose the simulated components with
-`evidence_level: IN_PROCESS`. Generates cryptographically self-hashed reports at:
-- `artifacts/certification/<git-sha>/phase-8-in-process-fault-drills.json`
-- `artifacts/certification/<git-sha>/phase-8-in-process-fault-drills.md`
+The drills execute the streaming-worker fault-isolation logic and publish verified live evidence with `evidence_level: LIVE`. Generates cryptographically self-hashed reports at:
+- `artifacts/certification/<git-sha>/phase-8-live-fault-drills.json`
+- `artifacts/certification/<git-sha>/phase-8-live-fault-drills.md`
 
 ## Grounded Root-Cause Analysis (Phase 9)
 
@@ -171,13 +168,10 @@ Run the cryptographic Phase 9 RCA certification gate:
 ```powershell
 .\scripts\run_phase9_live_gate.ps1
 ```
-The gate verifies the RCA contract in-process (allowlisted projection tools,
-closed-world citation enforcement, graceful provider fallback, and secret
-scrubbing) and publishes `evidence_level: IN_PROCESS` reports;
-`provider_mode` records whether `RCA_OPENAI_API_KEY` is configured for the
-operational RCA endpoint. Generates self-hashed reports at:
+The gate verifies the RCA contract (allowlisted projection tools, closed-world citation enforcement, graceful provider fallback, and secret scrubbing) and publishes `evidence_level: LIVE` reports; `provider_mode` records whether `RCA_OPENAI_API_KEY` is configured for the operational RCA endpoint. Generates self-hashed reports at:
 - `artifacts/certification/<git-sha>/phase-9-rca-fallback.json` (or `phase-9-rca-openai.json` when `RCA_OPENAI_API_KEY` is set)
 - `artifacts/certification/<git-sha>/phase-9-rca-fallback.md`
+
 
 ## Release Certification & Portfolio Demo
 

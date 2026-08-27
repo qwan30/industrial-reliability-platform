@@ -18,4 +18,3 @@ def test_claims_match_committed_phase1b_metrics() -> None:
 def test_claim_generation_rejects_unknown_model() -> None:
     with pytest.raises(KeyError, match="unknown model_id"):
         generate_portfolio_claims({"models": {}}, "missing")
-

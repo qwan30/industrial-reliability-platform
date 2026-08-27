@@ -165,9 +165,7 @@ def test_validator_rejects_tampered_self_hash(tmp_path: Path) -> None:
         "self_sha256",
     )
     report["drills"] = [{"drill_type": "scoring-outage", "passed": False}]
-    (tmp_path / "phase-8-live-fault-drills.json").write_text(
-        json.dumps(report), encoding="utf-8"
-    )
+    (tmp_path / "phase-8-live-fault-drills.json").write_text(json.dumps(report), encoding="utf-8")
 
     report_out = ReleaseCertificationValidator(artifact_dir=tmp_path).evaluate(git_sha="a" * 40)
     assert "phase8_observability_fault_drills" not in report_out.phases_passed
@@ -248,12 +246,14 @@ def test_validator_rejects_evidence_bound_to_different_commit(tmp_path: Path) ->
 def test_validator_rejects_current_schema_without_self_hash(tmp_path: Path) -> None:
     _write_phase1b_metrics(tmp_path)
     (tmp_path / "phase-8-live-fault-drills.json").write_text(
-        json.dumps({
-            "schema_version": "phase8-live-fault-drills-v1",
-            "evidence_level": "INTEGRATION",
-            "git_sha": "a" * 40,
-            "verdict": "PASS",
-        }),
+        json.dumps(
+            {
+                "schema_version": "phase8-live-fault-drills-v1",
+                "evidence_level": "INTEGRATION",
+                "git_sha": "a" * 40,
+                "verdict": "PASS",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -292,10 +292,12 @@ def test_validator_fails_closed_on_invalid_git_sha(tmp_path: Path, invalid_sha: 
 
 def test_run_release_certification_cli_fails_without_mandatory_evidence(tmp_path: Path) -> None:
     (tmp_path / "phase-1b-metrics.json").write_text(
-        json.dumps({
-            "schema_version": "phase1b-benchmark-v1",
-            "verdict": "NOT FEASIBLE",
-        }),
+        json.dumps(
+            {
+                "schema_version": "phase1b-benchmark-v1",
+                "verdict": "NOT FEASIBLE",
+            }
+        ),
         encoding="utf-8",
     )
     out_file = tmp_path / "release-certification.json"
@@ -341,4 +343,3 @@ def test_run_release_certification_cli_passes_with_mandatory_evidence(tmp_path: 
     assert report["is_certified"] is True
     assert report["git_sha"] == "c" * 40
     assert len(report["report_sha256"]) == 64
-

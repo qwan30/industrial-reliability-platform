@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -35,9 +36,10 @@ async def test_kafka_replay_end_to_end(tmp_path: Path) -> None:
         await producer.stop()
     except Exception as exc:
         if require_live:
-            raise RuntimeError(f"Required integration Kafka unavailable at localhost:29092: {exc}") from exc
+            raise RuntimeError(
+                f"Required integration Kafka unavailable at localhost:29092: {exc}"
+            ) from exc
         pytest.skip("Kafka broker unavailable at localhost:29092")
-
 
     pq_path = _create_mock_parquet(tmp_path, n_rows=6)
     settings = KafkaSettings(bootstrap_servers="localhost:29092")

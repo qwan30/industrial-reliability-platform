@@ -14,7 +14,6 @@ except ImportError:
     psutil = None
 
 
-
 @dataclass(frozen=True)
 class PreflightConfig:
     min_memory_gb: float = 4.0
@@ -74,7 +73,9 @@ def verify_host_environment(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Preflight check for Industrial Reliability Platform")
+    parser = argparse.ArgumentParser(
+        description="Preflight check for Industrial Reliability Platform"
+    )
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     parser.add_argument(
         "--require-clean-ports",

@@ -60,8 +60,9 @@ async def test_alert_service_lifecycle(tmp_path: Path) -> None:
     mock_producer = AsyncMock()
     mock_consumer = AsyncMock()
 
-    from industrial_reliability.metrics import build_runtime_metrics
     from prometheus_client import CollectorRegistry
+
+    from industrial_reliability.metrics import build_runtime_metrics
 
     metrics = build_runtime_metrics(CollectorRegistry())
     service = AlertService(settings, metrics=metrics)
@@ -81,7 +82,6 @@ async def test_alert_service_lifecycle(tmp_path: Path) -> None:
         assert service._running is False
         mock_consumer.stop.assert_awaited_once()
         mock_producer.stop.assert_awaited_once()
-
 
 
 def test_alert_service_rejects_tampered_policy(tmp_path: Path) -> None:

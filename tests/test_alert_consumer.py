@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from prometheus_client import CollectorRegistry
 
 from industrial_reliability.alert_consumer import (
     AlertConsumer,
@@ -13,9 +14,8 @@ from industrial_reliability.alert_consumer import (
 )
 from industrial_reliability.alert_state import AlertState
 from industrial_reliability.kafka_io import encode_message
-from industrial_reliability.persistence import OutboxRow, RuntimeStore
 from industrial_reliability.metrics import build_runtime_metrics
-from prometheus_client import CollectorRegistry
+from industrial_reliability.persistence import OutboxRow, RuntimeStore
 from tests.test_persistence import _make_decision, _make_policy
 
 
@@ -66,8 +66,6 @@ async def test_consumer_records_only_persisted_transition_metrics() -> None:
     normal_record = MockKafkaRecord(encode_message(normal_decision))
     assert await consumer.process(normal_record) == ProcessOutcome.COMMITTED
     assert metrics.alert_events.labels(action="opened")._value.get() == 1
-
-
 
 
 @pytest.mark.asyncio

@@ -106,10 +106,7 @@ def _verify_release_evidence(
         data.get("schema_version") == expected_schema
         and data.get(verdict_field) == passing_value
         and data.get("evidence_level") in _RELEASE_EVIDENCE_LEVELS
-        and (
-            expected_provider_mode is None
-            or data.get("provider_mode") == expected_provider_mode
-        )
+        and (expected_provider_mode is None or data.get("provider_mode") == expected_provider_mode)
         and _verify_report_self_hash(data)
         and _report_matches_git_sha(data, git_sha)
     )
@@ -235,9 +232,7 @@ class ReleaseCertificationValidator:
                         "Phase 1B offline ML feasibility did not meet event detection/false alarm gates on MetroPT-3 holdout."
                     )
         if not phase1b_valid:
-            limitations.append(
-                "Phase 1B metrics missing or invalid schema; phase not certified."
-            )
+            limitations.append("Phase 1B metrics missing or invalid schema; phase not certified.")
 
         # 2. Check Decision Gates
         _collect_decision_gates(self.artifact_dir, decision_gates, artifact_hashes)

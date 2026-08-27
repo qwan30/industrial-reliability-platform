@@ -70,7 +70,6 @@ def test_run_phase10a_gate_with_infeasible_result(tmp_path: Path) -> None:
     assert "satisfies streaming SLA" not in md_content
 
 
-
 def test_phase10a_main_cli(tmp_path: Path) -> None:
     metrics_file = tmp_path / "phase-1b-metrics.json"
     metrics_file.write_text(

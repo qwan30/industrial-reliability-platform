@@ -5,12 +5,12 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from deploy.preflight import (
     DEFAULT_PREFLIGHT_CONFIG,
-    PreflightConfig,
-    main as preflight_main,
     verify_host_environment,
+)
+from deploy.preflight import (
+    main as preflight_main,
 )
 
 
@@ -28,7 +28,10 @@ def test_preflight_default_config_ports() -> None:
 def test_preflight_verifies_ram_and_disk_passes() -> None:
     with (
         patch("deploy.preflight.psutil") as mock_psutil,
-        patch("deploy.preflight.shutil.disk_usage", return_value=(100 * 1024**3, 50 * 1024**3, 50 * 1024**3)),
+        patch(
+            "deploy.preflight.shutil.disk_usage",
+            return_value=(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
+        ),
         patch("socket.socket") as mock_sock,
     ):
         mock_psutil.virtual_memory.return_value = MagicMock(available=8 * 1024**3)
@@ -44,7 +47,10 @@ def test_preflight_verifies_ram_and_disk_passes() -> None:
 def test_preflight_fails_on_low_memory_or_disk() -> None:
     with (
         patch("deploy.preflight.psutil") as mock_psutil,
-        patch("deploy.preflight.shutil.disk_usage", return_value=(100 * 1024**3, 98 * 1024**3, 2 * 1024**3)),  # 2GB free < 10GB
+        patch(
+            "deploy.preflight.shutil.disk_usage",
+            return_value=(100 * 1024**3, 98 * 1024**3, 2 * 1024**3),
+        ),  # 2GB free < 10GB
         patch("socket.socket") as mock_sock,
     ):
         mock_psutil.virtual_memory.return_value = MagicMock(available=1 * 1024**3)  # 1GB free < 4GB
@@ -61,7 +67,10 @@ def test_preflight_fails_on_low_memory_or_disk() -> None:
 def test_preflight_require_clean_ports_flag() -> None:
     with (
         patch("deploy.preflight.psutil") as mock_psutil,
-        patch("deploy.preflight.shutil.disk_usage", return_value=(100 * 1024**3, 50 * 1024**3, 50 * 1024**3)),
+        patch(
+            "deploy.preflight.shutil.disk_usage",
+            return_value=(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
+        ),
         patch("socket.socket") as mock_sock,
     ):
         mock_psutil.virtual_memory.return_value = MagicMock(available=8 * 1024**3)
@@ -83,7 +92,10 @@ def test_preflight_require_clean_ports_flag() -> None:
 def test_preflight_cli_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     with (
         patch("deploy.preflight.psutil") as mock_psutil,
-        patch("deploy.preflight.shutil.disk_usage", return_value=(100 * 1024**3, 50 * 1024**3, 50 * 1024**3)),
+        patch(
+            "deploy.preflight.shutil.disk_usage",
+            return_value=(100 * 1024**3, 50 * 1024**3, 50 * 1024**3),
+        ),
         patch("socket.socket") as mock_sock,
     ):
         mock_psutil.virtual_memory.return_value = MagicMock(available=8 * 1024**3)

@@ -68,4 +68,3 @@ def test_prometheus_scrapes_alert_service() -> None:
     config = Path("ops/prometheus/prometheus.yml").read_text(encoding="utf-8")
     assert 'job_name: "alert-service"' in config
     assert 'targets: ["alert-service:9103"]' in config
-

@@ -29,9 +29,10 @@ def store() -> RuntimeStore:
         return store
     except Exception as exc:
         if require_live:
-            raise RuntimeError(f"Required integration database unavailable at {TEST_DB_URL}: {exc}") from exc
+            raise RuntimeError(
+                f"Required integration database unavailable at {TEST_DB_URL}: {exc}"
+            ) from exc
         pytest.skip("PostgreSQL unavailable at " + TEST_DB_URL)
-
 
 
 @pytest.mark.integration

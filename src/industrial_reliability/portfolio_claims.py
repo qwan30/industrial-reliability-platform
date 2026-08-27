@@ -28,4 +28,3 @@ def generate_portfolio_claims(
         "operational_verdict": str(metrics["verdict"]),
         "unsupported_claims": [],
     }
-

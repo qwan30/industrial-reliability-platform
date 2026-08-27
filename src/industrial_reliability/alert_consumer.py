@@ -50,7 +50,6 @@ class AlertConsumer:
         self.metrics = metrics
         self._failed_sessions: set[UUID] = set()
 
-
     def _assert_identity(self, decision: ScoreDecisionV1) -> None:
         if decision.source_dataset_sha256 != self.policy.source_dataset_sha256:
             raise ValueError(
@@ -119,7 +118,6 @@ class AlertConsumer:
             self.metrics.set_active_alerts(self.store.count_active_alerts())
 
         return ProcessOutcome.COMMITTED
-
 
 
 class AlertOutboxDispatcher:

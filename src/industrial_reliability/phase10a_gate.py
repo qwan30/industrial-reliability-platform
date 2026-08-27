@@ -146,7 +146,6 @@ def run_phase10a_gate(
     return decision
 
 
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Phase 10A Spark Decision Gate")
     parser.add_argument(

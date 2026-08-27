@@ -65,6 +65,10 @@ def test_run_phase10a_gate_with_infeasible_result(tmp_path: Path) -> None:
     assert decision.status == "N/A"
     assert (tmp_path / "phase-10a-spark-decision.json").is_file()
     assert (tmp_path / "phase-10a-spark-decision.md").is_file()
+    md_content = (tmp_path / "phase-10a-spark-decision.md").read_text(encoding="utf-8")
+    assert "Platform path stopped" in md_content
+    assert "satisfies streaming SLA" not in md_content
+
 
 
 def test_phase10a_main_cli(tmp_path: Path) -> None:

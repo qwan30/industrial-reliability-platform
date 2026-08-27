@@ -21,8 +21,9 @@
 ### Offline Evaluation Findings (Phase 1 / 1B):
 - **Statistical Model:** Detected 3/4 events with 2.41% time in alert, but exhibited 5.71 false episodes/day (exceeding the false alarm ceiling).
 - **Isolation Forest:** Detected 4/4 events, but exhibited 15.66% time in alert and 13.15 false episodes/day.
-- **Autoencoder:** Detected 3/4 events, but exhibited 16.32 false episodes/day.
+- **Autoencoder:** Detected 4/4 events, but exhibited 31.68% time in alert and 30.670 false episodes/day.
 - **Result:** **`NOT FEASIBLE`** — No candidate model met the strict operational false-alarm ceiling under zero-leakage holdout evaluation.
+
 
 ---
 

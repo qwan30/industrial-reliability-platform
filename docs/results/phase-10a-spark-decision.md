@@ -7,4 +7,4 @@
 
 ## Rationale
 - Platform path stopped after offline ML feasibility evaluation.
-- Single-node Python streaming worker satisfies streaming SLA without Spark runtime complexity.
+

@@ -5,8 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "industrial-reliability-platform"
 version = "0.1.0"
-description = "Production-oriented industrial anomaly detection and reliability intelligence platform."
+description = "Evidence-led negative-research industrial reliability case study"
 readme = "README.md"
+
 requires-python = ">=3.12,<3.13"
 license = "MIT"
 license-files = ["LICENSE"]

@@ -48,9 +48,24 @@ describe('RcaPanel component', () => {
 
   it('renders complete report when initialReport is provided', () => {
     render(<RcaPanel alertId="alt-100" initialReport={sampleReport} />);
+    expect(screen.getByTestId('rca-panel').className).toBe('');
     expect(screen.getByTestId('rca-status-badge')).toHaveTextContent('COMPLETE');
     expect(screen.getByTestId('rca-summary')).toHaveTextContent(/Elevated discharge pressure/i);
     expect(screen.getByTestId('rca-citation-badge')).toHaveTextContent('evidence-111111111111111111111111');
+    expect(screen.getByTestId('rca-uncertainty')).toHaveTextContent(/does not prove a mechanical root cause/i);
+  });
+
+  it('renders UNAVAILABLE status report with fallback summary and uncertainty', () => {
+    const unavailableReport: RcaReportV1 = {
+      ...sampleReport,
+      status: 'UNAVAILABLE',
+      summary: 'Fallback root-cause analysis: automated provider unavailable.',
+      provider_model: null,
+    };
+    render(<RcaPanel alertId="alt-100" initialReport={unavailableReport} />);
+    expect(screen.getByTestId('rca-panel').className).toBe('');
+    expect(screen.getByTestId('rca-status-badge')).toHaveTextContent('UNAVAILABLE');
+    expect(screen.getByTestId('rca-summary')).toHaveTextContent(/Fallback root-cause analysis/i);
     expect(screen.getByTestId('rca-uncertainty')).toHaveTextContent(/does not prove a mechanical root cause/i);
   });
 
@@ -84,4 +99,5 @@ describe('RcaPanel component', () => {
       expect(screen.getByTestId('rca-error')).toHaveTextContent(/Provider timeout/i);
     });
   });
+
 });

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -26,13 +27,18 @@ from industrial_reliability.runtime_messages import (
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_kafka_replay_end_to_end(tmp_path: Path) -> None:
+    require_live = os.environ.get("REQUIRE_INTEGRATION_SERVICES", "").lower() in ("true", "1")
     try:
         from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
         producer = AIOKafkaProducer(bootstrap_servers="localhost:29092")
         await asyncio.wait_for(producer.start(), timeout=1.5)
         await producer.stop()
-    except Exception:
+    except Exception as exc:
+        if require_live:
+            raise RuntimeError(
+                f"Required integration Kafka unavailable at localhost:29092: {exc}"
+            ) from exc
         pytest.skip("Kafka broker unavailable at localhost:29092")
 
     pq_path = _create_mock_parquet(tmp_path, n_rows=6)

@@ -33,6 +33,11 @@ def store() -> RuntimeStore:
             store.execute_script(migration2.read_text(encoding="utf-8"))
         return store
     except Exception as exc:
+        require_live = os.environ.get("REQUIRE_INTEGRATION_SERVICES", "").lower() in ("true", "1")
+        if require_live:
+            raise RuntimeError(
+                f"Required integration PostgreSQL unavailable at {TEST_DB_URL}: {exc}"
+            ) from exc
         pytest.skip(f"PostgreSQL unavailable at {TEST_DB_URL}: {exc}")
 
 

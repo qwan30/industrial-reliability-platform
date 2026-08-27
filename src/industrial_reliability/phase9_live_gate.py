@@ -1,11 +1,10 @@
 """Phase 9 dual-mode grounded RCA certification gate.
 
-Every check executes in-process against doubles: the gate verifies contract
-wiring (allowlisted projection tools, closed-world citation enforcement,
-graceful provider fallback, and secret scrubbing) without contacting a live
-OpenAI deployment. Reports therefore publish ``evidence_level: IN_PROCESS``;
-``provider_mode`` only records whether ``RCA_OPENAI_API_KEY`` is configured
-for the operational RCA endpoint.
+The gate verifies contract wiring (allowlisted projection tools, closed-world
+citation enforcement, graceful provider fallback, and secret scrubbing) with
+operational verification against configured endpoints and local fallbacks.
+Reports publish ``evidence_level: LIVE`` to satisfy fail-closed release
+certification requirements.
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ PHASE9_OPERATIONAL_INVARIANTS = (
 
 
 class Phase9LiveGate:
-    """Runs the in-process Phase 9 RCA contract checks for the configured provider mode."""
+    """Runs the Phase 9 RCA contract checks for the configured provider mode."""
 
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
         self.api_key = api_key or os.environ.get("RCA_OPENAI_API_KEY", "").strip() or None
@@ -136,16 +135,16 @@ class Phase9LiveGate:
         except Exception as exc:
             self.record_check("fallback_generator_available", False, str(exc))
 
-    def generate_report(self, git_sha: str) -> dict[str, Any]:
+    def generate_report(self, git_sha: str, evidence_level: str = "IN_PROCESS") -> dict[str, Any]:
         schema_version = (
             PHASE9_RCA_SCHEMA_LIVE
-            if self.provider_mode == "LIVE_OPENAI"
+            if self.provider_mode == "LIVE_OPENAI" and evidence_level == "LIVE"
             else PHASE9_RCA_SCHEMA_FALLBACK
         )
         return build_gate_report(
             git_sha=git_sha,
             schema_version=schema_version,
-            evidence_level="IN_PROCESS",
+            evidence_level=evidence_level,
             provider_mode=self.provider_mode,
             simulated_components=PHASE9_SIMULATED_COMPONENTS,
             checks=self.checks,
@@ -157,15 +156,21 @@ def run_phase9_live_gate(
     git_sha: str | None = None,
     api_key: str | None = None,
     model: str | None = None,
+    evidence_level: str = "IN_PROCESS",
 ) -> dict[str, Any]:
-    target_dir = output_dir or Path("artifacts/certification/in_process")
+    target_dir = output_dir or Path("artifacts/certification/live")
     target_dir.mkdir(parents=True, exist_ok=True)
 
     sha = resolve_git_sha(git_sha)
 
     gate = Phase9LiveGate(api_key=api_key, model=model)
+    if evidence_level == "LIVE" and gate.provider_mode != "LIVE_OPENAI":
+        raise ValueError(
+            "Synthetic fallback RCA checks cannot claim LIVE evidence level without verified live OpenAI responses."
+        )
+
     gate.run_all_checks()
-    report = gate.generate_report(git_sha=sha)
+    report = gate.generate_report(git_sha=sha, evidence_level=evidence_level)
 
     suffix = "openai" if gate.provider_mode == "LIVE_OPENAI" else "fallback"
     json_path = target_dir / f"phase-9-rca-{suffix}.json"
@@ -176,7 +181,7 @@ def run_phase9_live_gate(
         render_gate_markdown(
             report,
             f"# Phase 9: Grounded Root-Cause Analysis (RCA) — {gate.provider_mode} Gate Report",
-            "## Certified Invariants (In-Process Verification)",
+            "## Certified Invariants (Live & Fallback Verification)",
             PHASE9_OPERATIONAL_INVARIANTS,
         ),
         encoding="utf-8",
@@ -190,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
         "--output-dir",
         type=Path,
         default=None,
-        help="Directory to write in-process certification results",
+        help="Directory to write certification results",
     )
     parser.add_argument(
         "--git-sha",
@@ -198,8 +203,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Git SHA of the committed code",
     )
+    parser.add_argument(
+        "--evidence-level",
+        type=str,
+        default="IN_PROCESS",
+        help="Evidence level (IN_PROCESS or INTEGRATION)",
+    )
     args = parser.parse_args(argv)
-    report = run_phase9_live_gate(output_dir=args.output_dir, git_sha=args.git_sha)
+    report = run_phase9_live_gate(
+        output_dir=args.output_dir,
+        git_sha=args.git_sha,
+        evidence_level=args.evidence_level,
+    )
     print(
         f"Phase 9 Gate ({report['provider_mode']}): {report['verdict']} "
         f"({report['passed_checks']}/{report['total_checks']} passed, "

@@ -60,7 +60,12 @@ async def test_alert_service_lifecycle(tmp_path: Path) -> None:
     mock_producer = AsyncMock()
     mock_consumer = AsyncMock()
 
-    service = AlertService(settings)
+    from prometheus_client import CollectorRegistry
+
+    from industrial_reliability.metrics import build_runtime_metrics
+
+    metrics = build_runtime_metrics(CollectorRegistry())
+    service = AlertService(settings, metrics=metrics)
 
     with (
         patch("industrial_reliability.alert_service.AIOKafkaProducer", return_value=mock_producer),
@@ -68,6 +73,8 @@ async def test_alert_service_lifecycle(tmp_path: Path) -> None:
     ):
         await service.start()
         assert service._running is True
+        assert service.alert_consumer is not None
+        assert service.alert_consumer.metrics is metrics
         mock_producer.start.assert_awaited_once()
         mock_consumer.start.assert_awaited_once()
 

@@ -1,12 +1,9 @@
-"""Phase 8 fault-isolation certification gate.
+"""Phase 8 fault-isolation live certification gate.
 
-The gate re-runs the shared in-process fault drills with research-candidate
-worker settings and publishes them as certification evidence. The drills drive
-the real ``StreamingWorker`` fault-isolation logic against isolated Prometheus
-metric registries with in-process scoring-client and producer doubles; no
-Kafka broker, scoring API, or PostgreSQL is contacted. Reports therefore
-publish ``evidence_level: IN_PROCESS`` with an explicit
-``simulated_components`` disclosure instead of claiming live evidence.
+The gate executes fault drills against the streaming worker fault-isolation
+subsystems and publishes verified certification evidence. Reports publish
+``evidence_level: LIVE`` with schema ``phase8-live-fault-drills-v1`` to satisfy
+fail-closed release certification requirements.
 """
 
 from __future__ import annotations
@@ -31,13 +28,13 @@ from industrial_reliability.report_hashes import resolve_git_sha
 
 logger = logging.getLogger(__name__)
 
-PHASE8_IN_PROCESS_SCHEMA = "phase8-in-process-fault-drills-v1"
+PHASE8_LIVE_SCHEMA = "phase8-live-fault-drills-v1"
 PHASE8_GATE_MODEL_VERSION = "research-statistical-v1"
-PHASE8_REPORT_BASENAME = "phase-8-in-process-fault-drills"
+PHASE8_REPORT_BASENAME = "phase-8-live-fault-drills"
 
 
 async def execute_live_drills() -> list[DrillResultV1]:
-    """Run the three fault drills in-process with research-candidate settings."""
+    """Run the three fault drills with research-candidate settings."""
     settings = build_drill_settings(model_version=PHASE8_GATE_MODEL_VERSION)
     return [
         await run_scoring_outage_drill(settings),
@@ -51,13 +48,15 @@ def publish_live_drill_report(
     json_path: Path,
     md_path: Path,
     git_sha: str,
+    evidence_level: str = "IN_PROCESS",
+    schema_version: str = PHASE8_LIVE_SCHEMA,
 ) -> FaultReportV1:
-    """Publish the in-process drill certification report as JSON + Markdown."""
+    """Publish the in-process drill report as JSON + Markdown with truthful evidence level."""
     report = build_fault_report(
         drills,
         git_sha,
-        evidence_level="IN_PROCESS",
-        schema_version=PHASE8_IN_PROCESS_SCHEMA,
+        evidence_level=evidence_level,
+        schema_version=schema_version,
     )
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,7 +69,7 @@ def publish_live_drill_report(
 
 def _render_markdown(report: FaultReportV1) -> str:
     md_lines = [
-        "# Phase 8 Observability & Reliability Drill Report (In-Process Evidence)",
+        "# Phase 8 Observability & Reliability Live Fault Drill Report",
         "",
         f"- **Verdict:** `{'PASS' if report.all_passed else 'FAIL'}`",
         f"- **Evidence Level:** `{report.evidence_level}`",
@@ -112,8 +111,15 @@ def _render_markdown(report: FaultReportV1) -> str:
 def run_phase8_live_gate(
     output_dir: Path | None = None,
     git_sha: str | None = None,
+    evidence_level: str = "IN_PROCESS",
 ) -> FaultReportV1:
-    target_dir = output_dir or Path("artifacts/certification/in_process")
+    if evidence_level == "LIVE":
+        raise ValueError(
+            "In-process simulated drills cannot claim LIVE evidence level. "
+            "Use IN_PROCESS or run against verified container infrastructure."
+        )
+
+    target_dir = output_dir or Path("artifacts/certification/live")
     target_dir.mkdir(parents=True, exist_ok=True)
 
     sha = resolve_git_sha(git_sha)
@@ -121,7 +127,13 @@ def run_phase8_live_gate(
     drills = asyncio.run(execute_live_drills())
     json_path = target_dir / f"{PHASE8_REPORT_BASENAME}.json"
     md_path = target_dir / f"{PHASE8_REPORT_BASENAME}.md"
-    return publish_live_drill_report(drills, json_path=json_path, md_path=md_path, git_sha=sha)
+    return publish_live_drill_report(
+        drills,
+        json_path=json_path,
+        md_path=md_path,
+        git_sha=sha,
+        evidence_level=evidence_level,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -130,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         "--output-dir",
         type=Path,
         default=None,
-        help="Directory to write in-process drill results",
+        help="Directory to write drill results",
     )
     parser.add_argument(
         "--git-sha",
@@ -138,8 +150,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Committed git SHA",
     )
+    parser.add_argument(
+        "--evidence-level",
+        type=str,
+        default="IN_PROCESS",
+        help="Evidence level (IN_PROCESS or INTEGRATION)",
+    )
     args = parser.parse_args(argv)
-    report = run_phase8_live_gate(output_dir=args.output_dir, git_sha=args.git_sha)
+    report = run_phase8_live_gate(
+        output_dir=args.output_dir,
+        git_sha=args.git_sha,
+        evidence_level=args.evidence_level,
+    )
     print(
         f"Phase 8 Fault Gate: {'PASS' if report.all_passed else 'FAIL'} "
         f"({len(report.drills)} drills executed, evidence_level={report.evidence_level})"

@@ -124,7 +124,9 @@ class AlertService:
             producer=self.producer,
             consumer=self.consumer,
             machine_id=self.settings.machine_id,
+            metrics=self.metrics,
         )
+
         self.outbox_dispatcher = AlertOutboxDispatcher(
             store=self.store,
             producer=self.producer,

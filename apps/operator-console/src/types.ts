@@ -57,13 +57,28 @@ export interface RcaReportV1 {
   provider_model: string | null;
 }
 
+export interface AlertEventDetail {
+  action: 'OPENED' | 'UPDATED' | 'RESOLVED' | 'REOPENED';
+  source_timestamp?: string;
+  occurred_at?: string;
+}
+
+export interface ScoreDecisionDetail {
+  decision_id: string;
+  source_timestamp: string;
+  score: number;
+  threshold: number;
+  is_anomaly: boolean;
+}
+
 export interface AlertDetail {
   alert: AlertSummary;
-  events: Array<Record<string, unknown>>;
+  events: AlertEventDetail[];
   evidence: EvidenceItem[];
-  decisions: Array<Record<string, unknown>>;
+  decisions: ScoreDecisionDetail[];
   rca: RcaReportV1 | null;
 }
+
 
 export interface EvidenceVectorItem {
   feature_name: string;

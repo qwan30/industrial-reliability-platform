@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test --project=mocked",
+    "test:e2e:live": "playwright test --project=live"
   },
   "dependencies": {
     "react": "^18.3.1",

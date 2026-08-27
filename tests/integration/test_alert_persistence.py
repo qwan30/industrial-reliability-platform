@@ -20,13 +20,18 @@ TEST_DB_URL = os.environ.get("DATABASE_URL", "postgresql://irp:irp_password@loca
 
 @pytest.fixture
 def store() -> RuntimeStore:
+    require_live = os.environ.get("REQUIRE_INTEGRATION_SERVICES", "").lower() in ("true", "1")
     try:
         store = RuntimeStore(TEST_DB_URL)
         store.check_connection()
         migration_sql = Path("db/migrations/001_alert_lifecycle.sql").read_text(encoding="utf-8")
         store.execute_script(migration_sql)
         return store
-    except Exception:
+    except Exception as exc:
+        if require_live:
+            raise RuntimeError(
+                f"Required integration database unavailable at {TEST_DB_URL}: {exc}"
+            ) from exc
         pytest.skip("PostgreSQL unavailable at " + TEST_DB_URL)
 
 

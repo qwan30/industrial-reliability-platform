@@ -56,9 +56,10 @@ curl -X POST http://127.0.0.1:8000/v1/alerts/<alert-id>/rca
 
 ### C. Execute Fault Drill Certification
 ```powershell
-# Run the 3 automated fault drills (Service, Data, Machine) in-process
+# Run the 3 automated fault drills (Service, Data, Machine)
 .\scripts\run_phase8_live_fault_drills.ps1
 ```
+
 
 ### D. Execute Grounded RCA Gate
 ```powershell

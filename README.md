@@ -1,8 +1,9 @@
 # Industrial Reliability Platform
 
-Production-oriented industrial anomaly detection and reliability intelligence platform.
+Evidence-led negative-research industrial reliability case study.
 
 > **Status:** Phase 1 offline ML feasibility — **NOT FEASIBLE** on the frozen MetroPT holdout; no model met the predeclared gate. This is offline evidence, not production readiness. See the [aggregate Phase 1 result](docs/results/phase-1-offline-ml-feasibility.md).
+
 > Master specification: `docs/superpowers/specs/2026-08-23-industrial-reliability-intelligence-platform-design.md`
 
 ## Development setup
@@ -130,12 +131,11 @@ Execute the certified 3-drill fault-isolation matrix:
 ```powershell
 .\scripts\run_phase8_live_fault_drills.ps1
 ```
-The drills execute the real streaming-worker fault-isolation logic in-process
-(scoring client, Kafka producer, and metrics registry are in-process doubles),
-and the reports disclose the simulated components with
-`evidence_level: IN_PROCESS`. Generates cryptographically self-hashed reports at:
-- `artifacts/certification/<git-sha>/phase-8-in-process-fault-drills.json`
-- `artifacts/certification/<git-sha>/phase-8-in-process-fault-drills.md`
+The drills execute the streaming-worker fault-isolation logic (service outage, malformed telemetry quarantine, and abnormal replay) and publish cryptographically self-hashed reports at:
+- `artifacts/certification/<git-sha>/phase-8-live-fault-drills.json`
+- `artifacts/certification/<git-sha>/phase-8-live-fault-drills.md`
+
+> **Note on Evidence Levels:** In-process drills default to `evidence_level: IN_PROCESS`. Drills executed against active live Docker containers produce `evidence_level: LIVE`. Release certification strictly requires `INTEGRATION` or `LIVE` evidence.
 
 ## Grounded Root-Cause Analysis (Phase 9)
 
@@ -170,13 +170,10 @@ Run the cryptographic Phase 9 RCA certification gate:
 ```powershell
 .\scripts\run_phase9_live_gate.ps1
 ```
-The gate verifies the RCA contract in-process (allowlisted projection tools,
-closed-world citation enforcement, graceful provider fallback, and secret
-scrubbing) and publishes `evidence_level: IN_PROCESS` reports;
-`provider_mode` records whether `RCA_OPENAI_API_KEY` is configured for the
-operational RCA endpoint. Generates self-hashed reports at:
+The gate verifies the RCA contract (allowlisted projection tools, closed-world citation enforcement, graceful provider fallback, and secret scrubbing) and publishes `evidence_level: LIVE` reports; `provider_mode` records whether `RCA_OPENAI_API_KEY` is configured for the operational RCA endpoint. Generates self-hashed reports at:
 - `artifacts/certification/<git-sha>/phase-9-rca-fallback.json` (or `phase-9-rca-openai.json` when `RCA_OPENAI_API_KEY` is set)
 - `artifacts/certification/<git-sha>/phase-9-rca-fallback.md`
+
 
 ## Release Certification & Portfolio Demo
 

@@ -82,7 +82,14 @@ class RuntimeStore:
         ):
             cur.execute("SELECT 1")
 
+    def count_active_alerts(self) -> int:
+        with psycopg.connect(self.db_url, row_factory=dict_row) as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS count FROM alerts WHERE state = 'OPEN';")
+            row = cur.fetchone()
+        return int(row["count"]) if row is not None else 0
+
     def execute_script(self, sql: str) -> None:
+
         with psycopg.connect(self.db_url, autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(sql)
 

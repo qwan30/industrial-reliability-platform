@@ -23,25 +23,43 @@ export const RcaPanel: React.FC<RcaPanelProps> = ({
     try {
       const generated = await generateRca(alertId, baseUrl);
       setReport(generated);
-    } catch (err: any) {
-      setError(err.message || 'Failed to generate root-cause analysis');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to generate root-cause analysis');
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 mt-4 space-y-4" data-testid="rca-panel">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <h4 className="text-sm font-semibold text-slate-200">Grounded Root-Cause Analysis</h4>
+    <div
+      style={{
+        backgroundColor: '#1e293b',
+        border: '1px solid #334155',
+        borderRadius: '0.5rem',
+        padding: '1rem',
+        marginTop: '1rem',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1rem',
+      }}
+      data-testid="rca-panel"
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <h4 style={{ margin: 0, fontSize: '0.875rem', fontWeight: 600, color: '#f8fafc' }}>
+            Grounded Root-Cause Analysis
+          </h4>
           {report && (
             <span
-              className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                report.status === 'COMPLETE'
-                  ? 'bg-emerald-900/60 text-emerald-300 border border-emerald-700'
-                  : 'bg-amber-900/60 text-amber-300 border border-amber-700'
-              }`}
+              style={{
+                padding: '0.125rem 0.5rem',
+                fontSize: '0.75rem',
+                fontWeight: 500,
+                borderRadius: '9999px',
+                backgroundColor: report.status === 'COMPLETE' ? '#064e3b' : '#78350f',
+                color: report.status === 'COMPLETE' ? '#10b981' : '#f59e0b',
+                border: `1px solid ${report.status === 'COMPLETE' ? '#047857' : '#b45309'}`,
+              }}
               data-testid="rca-status-badge"
             >
               {report.status}
@@ -49,9 +67,21 @@ export const RcaPanel: React.FC<RcaPanelProps> = ({
           )}
         </div>
         <button
+          type="button"
           onClick={handleGenerate}
           disabled={isLoading}
-          className="px-3 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:opacity-60 text-white rounded transition"
+          aria-busy={isLoading}
+          style={{
+            padding: '0.25rem 0.75rem',
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            backgroundColor: isLoading ? '#1e3a8a' : '#2563eb',
+            opacity: isLoading ? 0.6 : 1.0,
+            color: '#ffffff',
+            borderRadius: '0.25rem',
+            border: 'none',
+            cursor: isLoading ? 'not-allowed' : 'pointer',
+          }}
           data-testid="generate-rca-btn"
         >
           {isLoading ? 'Generating RCA...' : report ? 'Regenerate RCA' : 'Generate RCA'}
@@ -59,31 +89,76 @@ export const RcaPanel: React.FC<RcaPanelProps> = ({
       </div>
 
       {error && (
-        <div className="p-2 text-xs bg-rose-950/60 border border-rose-800 text-rose-300 rounded" data-testid="rca-error">
+        <div
+          style={{
+            padding: '0.5rem',
+            fontSize: '0.75rem',
+            backgroundColor: '#4c0519',
+            border: '1px solid #9f1239',
+            color: '#fda4af',
+            borderRadius: '0.25rem',
+          }}
+          data-testid="rca-error"
+        >
           {error}
         </div>
       )}
 
       {report ? (
-        <div className="space-y-3 text-xs" data-testid="rca-content">
-          <div className="p-3 bg-slate-800/80 rounded border border-slate-700">
-            <span className="font-semibold text-slate-300 block mb-1">Executive Summary</span>
-            <p className="text-slate-200 leading-relaxed" data-testid="rca-summary">{report.summary}</p>
+        <div
+          aria-live="polite"
+          style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.75rem' }}
+          data-testid="rca-content"
+        >
+          <div
+            style={{
+              padding: '0.75rem',
+              backgroundColor: '#0f172a',
+              borderRadius: '0.25rem',
+              border: '1px solid #334155',
+            }}
+          >
+            <span style={{ fontWeight: 600, color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+              Executive Summary
+            </span>
+            <p style={{ margin: 0, color: '#f8fafc', lineHeight: 1.5 }} data-testid="rca-summary">
+              {report.summary}
+            </p>
           </div>
 
           {report.observations.length > 0 && (
-            <div className="space-y-1">
-              <span className="font-semibold text-slate-300 block">Grounded Observations</span>
-              <ul className="space-y-1.5" data-testid="rca-observations">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              <span style={{ fontWeight: 600, color: '#94a3b8', display: 'block' }}>
+                Grounded Observations
+              </span>
+              <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.375rem' }} data-testid="rca-observations">
                 {report.observations.map((obs, idx) => (
-                  <li key={idx} className="p-2 bg-slate-800/50 rounded border border-slate-700/80 flex flex-col space-y-1">
-                    <span className="text-slate-200">{obs.claim}</span>
-                    <div className="flex items-center flex-wrap gap-1 mt-1">
-                      <span className="text-[10px] text-slate-400">Citations:</span>
+                  <li
+                    key={idx}
+                    style={{
+                      padding: '0.5rem',
+                      backgroundColor: '#0f172a',
+                      borderRadius: '0.25rem',
+                      border: '1px solid #334155',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.25rem',
+                    }}
+                  >
+                    <span style={{ color: '#f8fafc' }}>{obs.claim}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.25rem' }}>
+                      <span style={{ fontSize: '0.625rem', color: '#94a3b8' }}>Citations:</span>
                       {obs.evidence_ids.map((evId) => (
                         <span
                           key={evId}
-                          className="px-1.5 py-0.5 bg-slate-700 text-cyan-300 rounded text-[10px] font-mono"
+                          style={{
+                            padding: '0.125rem 0.375rem',
+                            backgroundColor: '#334155',
+                            color: '#38bdf8',
+                            borderRadius: '0.25rem',
+                            fontSize: '0.625rem',
+                            fontFamily: 'monospace',
+                          }}
                           data-testid="rca-citation-badge"
                         >
                           {evId}
@@ -97,9 +172,11 @@ export const RcaPanel: React.FC<RcaPanelProps> = ({
           )}
 
           {report.uncertainty.length > 0 && (
-            <div className="space-y-1">
-              <span className="font-semibold text-slate-300 block">Uncertainty & Limitations</span>
-              <ul className="list-disc list-inside space-y-0.5 text-slate-400 pl-1" data-testid="rca-uncertainty">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              <span style={{ fontWeight: 600, color: '#94a3b8', display: 'block' }}>
+                Uncertainty & Limitations
+              </span>
+              <ul style={{ margin: 0, paddingLeft: '1rem', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '0.125rem' }} data-testid="rca-uncertainty">
                 {report.uncertainty.map((u, idx) => (
                   <li key={idx}>{u}</li>
                 ))}
@@ -108,9 +185,11 @@ export const RcaPanel: React.FC<RcaPanelProps> = ({
           )}
 
           {report.next_checks.length > 0 && (
-            <div className="space-y-1">
-              <span className="font-semibold text-slate-300 block">Recommended Checks</span>
-              <ul className="list-disc list-inside space-y-0.5 text-slate-300 pl-1" data-testid="rca-next-checks">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              <span style={{ fontWeight: 600, color: '#94a3b8', display: 'block' }}>
+                Recommended Checks
+              </span>
+              <ul style={{ margin: 0, paddingLeft: '1rem', color: '#f8fafc', display: 'flex', flexDirection: 'column', gap: '0.125rem' }} data-testid="rca-next-checks">
                 {report.next_checks.map((nc, idx) => (
                   <li key={idx}>{nc}</li>
                 ))}
@@ -118,13 +197,13 @@ export const RcaPanel: React.FC<RcaPanelProps> = ({
             </div>
           )}
 
-          <div className="pt-2 border-t border-slate-800 text-[10px] text-slate-400 flex justify-between">
+          <div style={{ paddingTop: '0.5rem', borderTop: '1px solid #334155', fontSize: '0.625rem', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' }}>
             <span>Bundle SHA: {report.evidence_bundle_sha256.substring(0, 12)}...</span>
             {report.provider_model && <span>Model: {report.provider_model}</span>}
           </div>
         </div>
       ) : (
-        <p className="text-xs text-slate-400 italic">
+        <p style={{ margin: 0, fontSize: '0.75rem', color: '#94a3b8', fontStyle: 'italic' }}>
           No root-cause analysis has been generated for this alert yet. Click "Generate RCA" to inspect grounded telemetry evidence.
         </p>
       )}

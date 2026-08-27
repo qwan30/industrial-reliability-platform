@@ -123,6 +123,14 @@ def run_phase10a_gate(
 
     write_decision(decision, json_path)
 
+    rationale_lines = [
+        f"- {decision.limitations[0] if decision.limitations else 'Evaluated against baseline capacity.'}"
+    ]
+    if decision.baseline is not None:
+        rationale_lines.append(
+            "- Single-node Python streaming worker satisfies streaming SLA without Spark runtime complexity."
+        )
+
     md_lines = [
         "# Phase 10A: Spark Decision Gate — Certification Report",
         "",
@@ -132,8 +140,7 @@ def run_phase10a_gate(
         f"- **Decision SHA-256:** `{decision.decision_sha256}`",
         "",
         "## Rationale",
-        f"- {decision.limitations[0] if decision.limitations else 'Evaluated against baseline capacity.'}",
-        "- Single-node Python streaming worker satisfies streaming SLA without Spark runtime complexity.",
+        *rationale_lines,
     ]
     md_path.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
     return decision

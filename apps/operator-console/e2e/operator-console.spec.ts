@@ -1,7 +1,37 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Operator Console E2E Flow', () => {
+  test.beforeEach(async ({ page }) => {
+    // Intercept healthz check
+    await page.route('**/healthz', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'ok', database: 'ok' }),
+      });
+    });
+  });
+
   test('renders dashboard, starts replay, and inspects live stream and alerts', async ({ page }) => {
+    await page.route('**/v1/replays', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            replay_session_id: 'rep-e2e-1',
+            machine_id: 'metropt3',
+            state: 'RUNNING',
+            speed: 100,
+            range_start: '2020-04-18T00:00:00',
+            range_end: '2020-04-18T00:10:00',
+          },
+          error: null,
+        }),
+      });
+    });
+
     // Navigate to local operator console
     await page.goto('/');
 
@@ -35,6 +65,48 @@ test.describe('Operator Console E2E Flow', () => {
   });
 
   test('inspects alert drawer and generates grounded root-cause analysis', async ({ page }) => {
+    // Intercept SSE stream with initial snapshot
+    await page.route('**/v1/replays/rep-e2e-1/stream', async (route) => {
+      const sseBody = [
+        'event: snapshot\n',
+        'data: ' +
+          JSON.stringify({
+            replay: {
+              replay_session_id: 'rep-e2e-1',
+              machine_id: 'metropt3',
+              state: 'RUNNING',
+              speed: 100,
+              range_start: '2020-04-18T00:00:00',
+              range_end: '2020-04-18T00:10:00',
+            },
+            alerts: [
+              {
+                alert_id: 'alt-e2e-1',
+                replay_session_id: 'rep-e2e-1',
+                machine_id: 'metropt3',
+                state: 'OPEN',
+                first_detection: '2020-04-18T00:00:00',
+                last_detection: '2020-04-18T00:05:00',
+                resolved_at: null,
+                latest_decision_id: 'dec-1',
+                policy_sha256: '0'.repeat(64),
+              },
+            ],
+          }) +
+          '\n\n',
+      ].join('');
+
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        },
+        body: sseBody,
+      });
+    });
+
     // Intercept alert list and detail with RCA mocks
     await page.route('**/v1/replays/*/alerts', async (route) => {
       await route.fulfill({
@@ -133,6 +205,10 @@ test.describe('Operator Console E2E Flow', () => {
 
     await page.goto('/');
 
+    // Connect to replay session
+    await page.getByTestId('session-id-input').fill('rep-e2e-1');
+    await page.getByTestId('connect-session-btn').click();
+
     // Wait for alerts to render and click the first alert row
     const alertRow = page.getByTestId('alert-item-alt-e2e-1');
     await expect(alertRow).toBeVisible();
@@ -149,9 +225,9 @@ test.describe('Operator Console E2E Flow', () => {
     await generateRcaBtn.click();
 
     // Verify RCA content renders
-    await expect(page.getByTestId('rca-status-badge')).toHaveTextContent('COMPLETE');
+    await expect(page.getByTestId('rca-status-badge')).toHaveText('COMPLETE');
     await expect(page.getByTestId('rca-summary')).toContainText('Discharge pressure elevated');
-    await expect(page.getByTestId('rca-citation-badge')).toHaveTextContent('evidence-111111111111111111111111');
+    await expect(page.getByTestId('rca-citation-badge')).toContainText('evidence-111111111111111111111111');
     await expect(page.getByTestId('rca-uncertainty')).toContainText('does not prove a mechanical root cause');
   });
 });

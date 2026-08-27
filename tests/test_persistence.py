@@ -219,7 +219,15 @@ def test_store_read_apis() -> None:
         store.count("invalid_table")
 
 
+def test_count_active_alerts() -> None:
+    store = RuntimeStore("postgresql://test")
+    with patch("industrial_reliability.persistence.psycopg.connect") as connect:
+        connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchone.return_value = {"count": 2}
+        assert store.count_active_alerts() == 2
+
+
 def test_store_get_alert_detail() -> None:
+
     store = RuntimeStore("postgresql://test:test@localhost:5432/test")
     session_id = uuid4()
     alert_id = uuid4()

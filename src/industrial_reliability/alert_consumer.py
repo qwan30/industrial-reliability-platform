@@ -14,6 +14,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from industrial_reliability.alert_policy import LockedAlertPolicyV1
 from industrial_reliability.alert_state import transition
 from industrial_reliability.kafka_io import decode_message, encode_message
+from industrial_reliability.metrics import RuntimeMetrics
 from industrial_reliability.persistence import RuntimeStore
 from industrial_reliability.runtime_messages import (
     REPLAY_STATUS_TOPIC,
@@ -39,13 +40,16 @@ class AlertConsumer:
         producer: AIOKafkaProducer | None = None,
         consumer: AIOKafkaConsumer | None = None,
         machine_id: str = "metropt3",
+        metrics: RuntimeMetrics | None = None,
     ) -> None:
         self.store = store
         self.policy = policy
         self.producer = producer
         self.consumer = consumer
         self.machine_id = machine_id
+        self.metrics = metrics
         self._failed_sessions: set[UUID] = set()
+
 
     def _assert_identity(self, decision: ScoreDecisionV1) -> None:
         if decision.source_dataset_sha256 != self.policy.source_dataset_sha256:
@@ -110,7 +114,12 @@ class AlertConsumer:
         result = transition(state, decision, self.policy)
         self.store.record_decision_transition(decision, result)
 
+        if self.metrics is not None and result.event is not None:
+            self.metrics.record_alert_action(result.event.action.lower())
+            self.metrics.set_active_alerts(self.store.count_active_alerts())
+
         return ProcessOutcome.COMMITTED
+
 
 
 class AlertOutboxDispatcher:

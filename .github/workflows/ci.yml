@@ -44,6 +44,7 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     services:
       postgres:
         image: postgres:17-alpine
@@ -87,5 +88,6 @@ jobs:
       - name: Run Integration Tests
         env:
           DATABASE_URL: postgresql://irp:irp_password@localhost:5432/irp
+          KAFKA_BOOTSTRAP_SERVERS: localhost:29092
           REQUIRE_INTEGRATION_SERVICES: "true"
         run: pytest -m "integration"

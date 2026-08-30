@@ -192,7 +192,7 @@ def _iter_phase1b_windows_with_stats(
             for split_name in ("train", "calibration", "holdout"):
                 split_obj: Split = getattr(contract, split_name)
                 if split_obj.start <= window_start and window_end <= split_obj.end:
-                    matched_split = split_name  # type: ignore[assignment]
+                    matched_split = split_name
                     break
 
             if matched_split is None:

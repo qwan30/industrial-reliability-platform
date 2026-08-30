@@ -41,6 +41,7 @@ def store() -> RuntimeStore:
         pytest.skip(f"PostgreSQL unavailable at {TEST_DB_URL}: {exc}")
 
 
+@pytest.mark.integration
 def test_durable_event_insert_is_idempotent(store: RuntimeStore) -> None:
     session_id = uuid4()
     # Create replay session first to satisfy foreign key

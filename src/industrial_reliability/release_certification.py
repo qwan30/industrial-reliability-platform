@@ -151,6 +151,12 @@ def _verify_phase9_checks(data: dict[str, Any], provider_mode: str | None) -> bo
     )
 
 
+_REQUIRED_DEPENDENCIES: dict[str, set[str]] = {
+    "phase8-live-fault-drills-v1": {"kafka", "postgres", "scoring_api"},
+    "phase-9-rca-openai-v1": {"openai"},
+}
+
+
 def _verify_release_evidence(
     data: dict[str, Any] | None,
     expected_schema: str,
@@ -163,7 +169,8 @@ def _verify_release_evidence(
 
     The report must match the schema bound to its filename, carry a passing
     verdict, disclose gate-level evidence (INTEGRATION or LIVE), carry a valid
-    embedded self-hash, match expected provider mode if set, have complete semantic
+    embedded self-hash, match expected provider mode if set, have no simulated
+    components, have required dependency receipts, have complete semantic
     drills/checks, and be bound to the certified commit.
     """
     if data is None:
@@ -176,6 +183,18 @@ def _verify_release_evidence(
         and _verify_report_self_hash(data)
         and _report_matches_git_sha(data, git_sha)
     ):
+        return False
+
+    if bool(data.get("simulated_components")):
+        return False
+
+    required = _REQUIRED_DEPENDENCIES.get(expected_schema, set())
+    receipts = {
+        item["dependency"]
+        for item in data.get("dependency_receipts", [])
+        if isinstance(item, dict) and "dependency" in item
+    }
+    if not required <= receipts:
         return False
 
     if expected_schema == "phase8-live-fault-drills-v1":

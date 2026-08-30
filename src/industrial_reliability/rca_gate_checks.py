@@ -227,6 +227,7 @@ def build_gate_report(
     provider_mode: str,
     simulated_components: Sequence[str],
     checks: list[dict[str, Any]],
+    dependency_receipts: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Assemble a self-hashed gate report dict with an explicit evidence level."""
     require_committed_git_sha(git_sha)
@@ -236,6 +237,7 @@ def build_gate_report(
         "evidence_level": evidence_level,
         "provider_mode": provider_mode,
         "simulated_components": list(simulated_components),
+        "dependency_receipts": list(dependency_receipts or []),
         "git_sha": git_sha,
         "certified_at": datetime.now(UTC).isoformat(),
         "verdict": "PASS" if all_passed else "FAIL",

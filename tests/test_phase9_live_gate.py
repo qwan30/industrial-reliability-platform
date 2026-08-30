@@ -6,9 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from unittest.mock import Mock
+
 from industrial_reliability.phase9_live_gate import (
     Phase9LiveGate,
+    ProviderCallReceipt,
+    check_live_openai_generation,
     main,
+    run_phase9_live_gate,
 )
 from industrial_reliability.report_hashes import compute_self_hash
 
@@ -77,3 +82,96 @@ def test_phase9_live_gate_cli_openai_suffix(tmp_path: Path) -> None:
     report = gate.generate_report(git_sha="f" * 40, evidence_level="LIVE")
     assert report["schema_version"] == "phase-9-rca-openai-v1"
     assert report["evidence_level"] == "LIVE"
+
+
+def test_dummy_key_does_not_create_live_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "industrial_reliability.phase9_live_gate.check_live_openai_generation",
+        Mock(side_effect=RuntimeError("provider not contacted")),
+    )
+    report = run_phase9_live_gate(
+        output_dir=tmp_path,
+        git_sha="a" * 40,
+        api_key="dummy",
+        model="test-model",
+    )
+    assert report["evidence_level"] == "IN_PROCESS"
+    assert report["provider_mode"] == "FALLBACK_ONLY"
+    assert report["dependency_receipts"] == []
+
+
+def test_live_key_creates_live_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "industrial_reliability.phase9_live_gate.check_live_openai_generation",
+        Mock(
+            return_value=ProviderCallReceipt(
+                dependency="openai",
+                model="gpt-4o-mini",
+                report_id="rca-mock-123",
+                evidence_bundle_sha256="1" * 64,
+            )
+        ),
+    )
+    report = run_phase9_live_gate(
+        output_dir=tmp_path,
+        git_sha="a" * 40,
+        api_key="sk-real-mock",
+        model="gpt-4o-mini",
+    )
+    assert report["evidence_level"] == "LIVE"
+    assert report["provider_mode"] == "LIVE_OPENAI"
+    assert report["dependency_receipts"] == [
+        {
+            "dependency": "openai",
+            "model": "gpt-4o-mini",
+            "report_id": "rca-mock-123",
+            "evidence_bundle_sha256": "1" * 64,
+        }
+    ]
+
+
+def test_check_live_openai_generation_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_report = Mock(
+        status="COMPLETE",
+        provider_model="gpt-4o-mini",
+        report_id="rca-live-456",
+        evidence_bundle_sha256="2" * 64,
+    )
+    mock_generator_cls = Mock()
+    mock_generator_instance = Mock()
+    mock_generator_instance.generate.return_value = mock_report
+    mock_generator_cls.return_value = mock_generator_instance
+
+    monkeypatch.setattr("industrial_reliability.phase9_live_gate.OpenAiRcaGenerator", mock_generator_cls)
+    monkeypatch.setattr("industrial_reliability.phase9_live_gate.OpenAI", Mock())
+
+    receipt = check_live_openai_generation("sk-test", "gpt-4o-mini")
+    assert receipt == ProviderCallReceipt(
+        dependency="openai",
+        model="gpt-4o-mini",
+        report_id="rca-live-456",
+        evidence_bundle_sha256="2" * 64,
+    )
+
+
+def test_check_live_openai_generation_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_report = Mock(
+        status="UNAVAILABLE",
+        provider_model=None,
+        report_id="rca-fallback-123",
+        evidence_bundle_sha256="3" * 64,
+    )
+    mock_generator_cls = Mock()
+    mock_generator_instance = Mock()
+    mock_generator_instance.generate.return_value = mock_report
+    mock_generator_cls.return_value = mock_generator_instance
+
+    monkeypatch.setattr("industrial_reliability.phase9_live_gate.OpenAiRcaGenerator", mock_generator_cls)
+    monkeypatch.setattr("industrial_reliability.phase9_live_gate.OpenAI", Mock())
+
+    with pytest.raises(RuntimeError, match="provider did not return a complete grounded report"):
+        check_live_openai_generation("sk-test", "gpt-4o-mini")

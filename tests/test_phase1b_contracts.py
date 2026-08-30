@@ -3,26 +3,52 @@ import pytest
 from industrial_reliability.phase1b_contracts import (
     ANALOG_SIGNAL_BY_NAME,
     ANALOG_SIGNAL_CONTRACTS,
-    PHASE1B,
+    PHASE1B_CONTRACT_SHA256,
+    PHASE1B_PREPARED_OUTPUT_SHA256,
+    PHASE1B_SOURCE_DATASET_SHA256,
+    PHASE1C,
     AnalogSignalContract,
+    metropt3_contract_manifest,
     phase1b_contract_manifest,
     phase1b_evaluation_events,
     validate_analog_value,
 )
 
 
-def test_phase1b_freezes_source_and_leakage_boundaries() -> None:
-    assert PHASE1B.source_doi == "10.24432/C5VW3R"
-    assert (
-        PHASE1B.archive_sha256 == "aab991a970e58210de853bb8078ce0e63abb4d9412fdc5c79792dae3d8e1721a"
+def test_phase1b_identity_constants_match_immutable_artifacts() -> None:
+    assert PHASE1B_CONTRACT_SHA256 == (
+        "149e164748522fe6dfa844a8de70b29ee1259122962e036ff6a563c1120047d8"
     )
-    assert PHASE1B.expected_rows == 1_516_948
-    assert PHASE1B.license == "CC BY 4.0"
-    assert PHASE1B.csv_member == "MetroPT3(AirCompressor).csv"
-    assert "lps" not in PHASE1B.predictor_columns
-    assert "timestamp" not in PHASE1B.predictor_columns
-    assert PHASE1B.min_bin_observations == 24
-    assert PHASE1B.lookback_bins == 6
+    assert PHASE1B_SOURCE_DATASET_SHA256 == (
+        "aab991a970e58210de853bb8078ce0e63abb4d9412fdc5c79792dae3d8e1721a"
+    )
+    assert PHASE1B_PREPARED_OUTPUT_SHA256 == (
+        "0c31129cc4f4be982a6aec79f448485a2674b2fe79643186737143dccfe6d42a"
+    )
+
+
+def test_phase1c_is_the_only_executable_contract_v2() -> None:
+    manifest = metropt3_contract_manifest(PHASE1C)
+    assert PHASE1C.contract_version == "phase1b-contract-v2"
+    assert manifest["contract_sha256"] == (
+        "31f8689256951067e28c9cbb48a930c1617d8eea8c7133ba1a315f632842e1ad"
+    )
+    assert manifest["contract_sha256"] != PHASE1B_CONTRACT_SHA256
+    assert phase1b_contract_manifest is metropt3_contract_manifest
+
+
+def test_phase1b_freezes_source_and_leakage_boundaries() -> None:
+    assert PHASE1C.source_doi == "10.24432/C5VW3R"
+    assert (
+        PHASE1C.archive_sha256 == "aab991a970e58210de853bb8078ce0e63abb4d9412fdc5c79792dae3d8e1721a"
+    )
+    assert PHASE1C.expected_rows == 1_516_948
+    assert PHASE1C.license == "CC BY 4.0"
+    assert PHASE1C.csv_member == "MetroPT3(AirCompressor).csv"
+    assert "lps" not in PHASE1C.predictor_columns
+    assert "timestamp" not in PHASE1C.predictor_columns
+    assert PHASE1C.min_bin_observations == 24
+    assert PHASE1C.lookback_bins == 6
 
 
 def test_phase1b_events_normalize_minute_precision_half_open() -> None:
@@ -30,14 +56,14 @@ def test_phase1b_events_normalize_minute_precision_half_open() -> None:
     assert len(events) == 4
     assert events[0].source_start.isoformat(timespec="minutes") == "2020-04-18T00:00"
     assert events[0].source_end.isoformat(timespec="minutes") == "2020-04-19T00:00"
-    assert phase1b_contract_manifest()["contract_sha256"]
+    assert metropt3_contract_manifest(PHASE1C)["contract_sha256"]
 
 
 def test_phase1b_contracts_version_units_and_time_semantics() -> None:
-    assert PHASE1B.contract_version == "phase1b-contract-v2"
-    assert PHASE1B.timestamp_semantics == "timezone-naive source clock"
-    assert PHASE1B.nominal_cadence_seconds == 10
-    manifest = phase1b_contract_manifest()
+    assert PHASE1C.contract_version == "phase1b-contract-v2"
+    assert PHASE1C.timestamp_semantics == "timezone-naive source clock"
+    assert PHASE1C.nominal_cadence_seconds == 10
+    manifest = metropt3_contract_manifest(PHASE1C)
     assert manifest["contract_version"] == "phase1b-contract-v2"
     assert manifest["timestamp_semantics"] == "timezone-naive source clock"
     assert manifest["nominal_cadence_seconds"] == 10

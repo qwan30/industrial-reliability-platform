@@ -42,13 +42,13 @@ def _setup_test_champion(base_dir: Path) -> tuple[Path, Path, Path]:
     )
 
     from industrial_reliability.phase1b_benchmark import calibrate_threshold
-    from industrial_reliability.phase1b_contracts import PHASE1B
+    from industrial_reliability.phase1b_contracts import PHASE1C
 
     calib_matrix = np.array(
         [[1.0 + i * 0.5, 2.0 + i * 0.5] for i in range(5, 10)], dtype=np.float64
     )
     calib_scores_arr = detector.score(calib_matrix)
-    computed_threshold = float(calibrate_threshold(calib_scores_arr, PHASE1B))
+    computed_threshold = float(calibrate_threshold(calib_scores_arr, PHASE1C))
 
     feat_records = []
     scores_records = []

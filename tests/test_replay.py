@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import pandas as pd
 import pytest
 
+from industrial_reliability.phase1b_contracts import PHASE1B_CONTRACT_SHA256
 from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.replay import (
     ReplayContractError,
@@ -234,3 +235,11 @@ def test_replay_iter_events_resumes_from_timestamp(tmp_path: Path) -> None:
     assert [e.source_timestamp for e in resumed_events] == [
         e.source_timestamp for e in all_events[3:]
     ]
+
+
+def test_repository_phase1b_parquet_requires_explicit_legacy_contract() -> None:
+    source = ReplaySource(
+        Path("data/processed/phase1b/metropt3/telemetry.parquet"),
+        expected_contract_sha256=PHASE1B_CONTRACT_SHA256,
+    )
+    assert source.identity.contract_sha256 == PHASE1B_CONTRACT_SHA256

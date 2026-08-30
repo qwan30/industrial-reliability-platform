@@ -27,6 +27,7 @@ from industrial_reliability.persistence import (
     ReplayCheckpointState,
     RuntimeStore,
 )
+from industrial_reliability.phase1b_contracts import metropt3_contract_manifest
 from industrial_reliability.replay import (
     ReplayController,
     ReplaySource,
@@ -501,7 +502,12 @@ def run_certification(
     safe_out = output_dir.resolve()
     safe_out.mkdir(parents=True, exist_ok=True)
     safe_pq = parquet_path.resolve()
-    source = ReplaySource(safe_pq, expected_contract_sha256=expected_contract_sha256)
+    contract_sha = (
+        expected_contract_sha256
+        if expected_contract_sha256 is not None
+        else str(metropt3_contract_manifest()["contract_sha256"])
+    )
+    source = ReplaySource(safe_pq, expected_contract_sha256=contract_sha)
     results: dict[str, object] = {"speeds": speeds, "streams": {}}
 
     logical_hashes: set[str] = set()
@@ -593,8 +599,14 @@ def main() -> None:
             start_process_metrics(int(metrics_port), registry)
             logger.info("Metrics server started on port %s", metrics_port)
 
+        expected_contract_sha = os.environ.get("REPLAY_EXPECTED_CONTRACT_SHA256", "").strip()
+        if not expected_contract_sha:
+            raise ValueError("REPLAY_EXPECTED_CONTRACT_SHA256 must be set")
+        source = ReplaySource(
+            args.parquet.resolve(),
+            expected_contract_sha256=expected_contract_sha,
+        )
         settings = KafkaSettings.from_env()
-        source = ReplaySource(args.parquet.resolve())
         db_url = os.environ.get("DATABASE_URL")
         store = RuntimeStore(db_url) if db_url else None
         service = ReplayService(settings, source, store=store, metrics=metrics)

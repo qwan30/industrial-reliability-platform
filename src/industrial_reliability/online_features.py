@@ -13,7 +13,7 @@ from industrial_reliability.causal_features import (
     TelemetrySample,
     compute_feature_values,
 )
-from industrial_reliability.phase1b_contracts import PHASE1B
+from industrial_reliability.phase1b_contracts import PHASE1C
 from industrial_reliability.phase1b_features import _compute_bin_end
 from industrial_reliability.runtime_ids import runtime_id
 from industrial_reliability.runtime_messages import (
@@ -118,7 +118,7 @@ class OnlineFeatureBuilder:
         self.analog_cols = analog_cols
         if digital_cols is None:
             self.digital_cols = tuple(
-                c for c in PHASE1B.digital_columns if c in PHASE1B.predictor_columns
+                c for c in PHASE1C.digital_columns if c in PHASE1C.predictor_columns
             )
         else:
             self.digital_cols = digital_cols

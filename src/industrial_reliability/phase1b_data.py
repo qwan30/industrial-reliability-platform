@@ -16,9 +16,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from industrial_reliability.phase1b_contracts import (
-    PHASE1B,
+    PHASE1C,
     Phase1BContract,
-    phase1b_contract_manifest,
+    metropt3_contract_manifest,
     validate_analog_value,
 )
 
@@ -170,7 +170,7 @@ def _write_telemetry_and_manifest(
         pq.write_table(table, parquet_path, compression="snappy")
         output_sha256 = sha256_file(parquet_path)
 
-        contract_manifest = phase1b_contract_manifest()
+        contract_manifest = metropt3_contract_manifest(contract)
         first_ts = raw_data["timestamp"].iloc[0].to_pydatetime()
         last_ts = raw_data["timestamp"].iloc[-1].to_pydatetime()
 
@@ -225,7 +225,7 @@ def _validate_and_publish(
 def prepare_metropt3(
     archive: Path,
     output_dir: Path,
-    contract: Phase1BContract = PHASE1B,
+    contract: Phase1BContract = PHASE1C,
 ) -> MetroPT3PreparationManifest:
     if output_dir.exists():
         raise FileExistsError(f"destination already exists: {output_dir}")

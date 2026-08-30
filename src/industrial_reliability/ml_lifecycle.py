@@ -31,7 +31,7 @@ from industrial_reliability.ml_provenance import (
     write_run_provenance,
 )
 from industrial_reliability.package_champion import ChampionManifest
-from industrial_reliability.phase1b_contracts import PHASE1B
+from industrial_reliability.phase1b_contracts import PHASE1C
 from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.phase7_gate import load_phase7_attestation
 
@@ -333,7 +333,7 @@ def reproduce_candidate(
     detector = joblib.load(detector_file)
     calib_scores = detector.score(matrix)
 
-    threshold = calibrate_threshold(calib_scores, PHASE1B)
+    threshold = calibrate_threshold(calib_scores, PHASE1C)
 
     # Golden score verification
     golden_cases_path = request.champion_package / "golden-cases.json"

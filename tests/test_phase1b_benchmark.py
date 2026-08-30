@@ -20,13 +20,13 @@ from industrial_reliability.phase1b_benchmark import (
     publish_phase1b_results,
     run_phase1b_benchmark,
 )
-from industrial_reliability.phase1b_contracts import PHASE1B, phase1b_contract_manifest
+from industrial_reliability.phase1b_contracts import PHASE1C, metropt3_contract_manifest
 from industrial_reliability.phase1b_data import sha256_file
 
 
 def test_detector_for_instantiates_all_models() -> None:
     for model_id in MODEL_IDS:
-        det = detector_for(model_id, PHASE1B)
+        det = detector_for(model_id, PHASE1C)
         assert det is not None
 
 
@@ -39,7 +39,7 @@ def test_fit_phase1b_candidate_produces_locked_threshold() -> None:
         model_id="statistical",
         train_features=train,
         calibration_features=calib,
-        contract=PHASE1B,
+        contract=PHASE1C,
     )
     assert isinstance(fitted, FittedCandidate)
     assert np.isfinite(fitted.threshold)
@@ -75,7 +75,7 @@ def _create_synthetic_benchmark_fixtures(tmp_path: Path) -> tuple[Path, Path, Pa
     )
     pq.write_table(pa.Table.from_pandas(tel_df), telemetry_path, compression="snappy")
     tel_sha = sha256_file(telemetry_path)
-    contract_manifest = phase1b_contract_manifest()
+    contract_manifest = metropt3_contract_manifest(PHASE1C)
     contract_sha = str(contract_manifest["contract_sha256"])
 
     prep_data = {
@@ -83,7 +83,7 @@ def _create_synthetic_benchmark_fixtures(tmp_path: Path) -> tuple[Path, Path, Pa
         "contract_sha256": contract_sha,
         "output_sha256": tel_sha,
         "normalized_rows": 1,
-        "canonical_columns": list(PHASE1B.canonical_columns),
+        "canonical_columns": list(PHASE1C.canonical_columns),
         "identical_duplicates_removed": 0,
         "first_timestamp": "2020-02-01T00:00:00",
         "last_timestamp": "2020-02-01T00:00:00",
@@ -202,7 +202,7 @@ def test_run_phase1b_benchmark_end_to_end_synthetic(tmp_path: Path) -> None:
         prepared_dir=prepared_dir,
         feature_path=feat_path,
         artifact_dir=artifact_dir,
-        contract=PHASE1B,
+        contract=PHASE1C,
     )
 
     assert res.verdict in ("FEASIBLE", "NOT FEASIBLE")
@@ -229,5 +229,5 @@ def test_benchmark_rejects_tampered_features(tmp_path: Path) -> None:
             prepared_dir=prepared_dir,
             feature_path=feat_path,
             artifact_dir=artifact_dir,
-            contract=PHASE1B,
+            contract=PHASE1C,
         )

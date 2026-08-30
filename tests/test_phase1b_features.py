@@ -12,7 +12,7 @@ import pytest
 
 from industrial_reliability.artifact_integrity import ArtifactIntegrityError
 from industrial_reliability.causal_features import TelemetrySample
-from industrial_reliability.phase1b_contracts import PHASE1B, phase1b_contract_manifest
+from industrial_reliability.phase1b_contracts import PHASE1C, metropt3_contract_manifest
 from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.phase1b_features import (
     build_phase1b_features,
@@ -71,13 +71,13 @@ def _create_prepared_dir(tmp_path: Path, samples: list[TelemetrySample]) -> Path
     pq.write_table(table, parquet_path, compression="snappy")
     output_sha256 = sha256_file(parquet_path)
 
-    contract_manifest = phase1b_contract_manifest()
+    contract_manifest = metropt3_contract_manifest(PHASE1C)
     manifest_data = {
         "archive_sha256": "1" * 64,
         "contract_sha256": contract_manifest["contract_sha256"],
         "output_sha256": output_sha256,
         "normalized_rows": len(records),
-        "canonical_columns": list(PHASE1B.canonical_columns),
+        "canonical_columns": list(PHASE1C.canonical_columns),
         "identical_duplicates_removed": 0,
         "first_timestamp": records[0]["timestamp"].isoformat(),
         "last_timestamp": records[-1]["timestamp"].isoformat(),
@@ -92,7 +92,7 @@ def _create_prepared_dir(tmp_path: Path, samples: list[TelemetrySample]) -> Path
 def test_six_valid_right_closed_bins_make_one_causal_window() -> None:
     start_time = datetime(2020, 2, 1, 0, 0, 0)
     samples = _generate_samples_for_bins((24, 24, 24, 24, 24, 24), start_time)
-    windows = list(iter_phase1b_windows(samples, PHASE1B))
+    windows = list(iter_phase1b_windows(samples, PHASE1C))
 
     assert len(windows) == 1
     assert windows[0].split == "train"
@@ -104,7 +104,7 @@ def test_invalid_bin_closes_segment_without_filling() -> None:
     start_time = datetime(2020, 2, 1, 0, 0, 0)
     # 3rd bin has only 23 observations -> below min 24
     samples = _generate_samples_for_bins((24, 24, 23, 24, 24, 24, 24, 24, 24), start_time)
-    windows = list(iter_phase1b_windows(samples, PHASE1B))
+    windows = list(iter_phase1b_windows(samples, PHASE1C))
 
     # After the 23-count bin, there are only 6 bins: indices 3, 4, 5, 6, 7, 8 (6 bins)
     # so we should get exactly 1 window at the end!
@@ -129,7 +129,7 @@ def test_build_phase1b_features_e2e(tmp_path: Path) -> None:
     prepared_dir = _create_prepared_dir(tmp_path, samples)
 
     out_parquet = tmp_path / "features" / "features.parquet"
-    feat_manifest = build_phase1b_features(prepared_dir, out_parquet, PHASE1B)
+    feat_manifest = build_phase1b_features(prepared_dir, out_parquet, PHASE1C)
 
     assert out_parquet.exists()
     assert (tmp_path / "features" / "feature_manifest.json").exists()
@@ -148,7 +148,7 @@ def test_build_features_rejects_tampered_prepared_parquet(tmp_path: Path) -> Non
 
     out_parquet = tmp_path / "features" / "features.parquet"
     with pytest.raises(ArtifactIntegrityError, match=r"telemetry\.parquet SHA-256 mismatch"):
-        build_phase1b_features(prepared_dir, out_parquet, PHASE1B)
+        build_phase1b_features(prepared_dir, out_parquet, PHASE1C)
 
 
 def test_window_never_crosses_train_calibration_boundary() -> None:
@@ -156,9 +156,9 @@ def test_window_never_crosses_train_calibration_boundary() -> None:
         (24, 24, 24, 24, 24, 24, 24),
         datetime(2020, 2, 21, 23, 30),
     )
-    windows = list(iter_phase1b_windows(samples, PHASE1B))
+    windows = list(iter_phase1b_windows(samples, PHASE1C))
     assert all(
-        window.split != "calibration" or window.window_start >= PHASE1B.calibration.start
+        window.split != "calibration" or window.window_start >= PHASE1C.calibration.start
         for window in windows
     )
 
@@ -166,7 +166,7 @@ def test_window_never_crosses_train_calibration_boundary() -> None:
 def test_windows_spanning_across_splits_are_skipped() -> None:
     # 12 bins starting 2020-02-21 23:30 (6 train bins ending 23:35..00:00, 6 calib bins ending 00:05..00:30)
     samples = _generate_samples_for_bins((24,) * 12, datetime(2020, 2, 21, 23, 30))
-    windows = list(iter_phase1b_windows(samples, PHASE1B))
+    windows = list(iter_phase1b_windows(samples, PHASE1C))
     assert len(windows) == 2
     assert windows[0].split == "train"
     assert windows[0].window_start == datetime(2020, 2, 21, 23, 30)
@@ -184,7 +184,7 @@ def test_build_phase1b_features_manifest_records_actual_rejection_counts(tmp_pat
     prepared_dir = _create_prepared_dir(tmp_path, samples)
 
     out_parquet = tmp_path / "features" / "features.parquet"
-    feat_manifest = build_phase1b_features(prepared_dir, out_parquet, PHASE1B)
+    feat_manifest = build_phase1b_features(prepared_dir, out_parquet, PHASE1C)
 
     rejection_dict = dict(feat_manifest.rejection_counts)
     assert rejection_dict["invalid_bins_skipped"] == 1

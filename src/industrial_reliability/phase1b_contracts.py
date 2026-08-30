@@ -105,7 +105,11 @@ MetroPT3Contract = Phase1BContract
 
 DEFAULT_CONDITION = "air leak / high stress"
 
-PHASE1B = Phase1BContract(
+PHASE1B_CONTRACT_SHA256 = "149e164748522fe6dfa844a8de70b29ee1259122962e036ff6a563c1120047d8"
+PHASE1B_SOURCE_DATASET_SHA256 = "aab991a970e58210de853bb8078ce0e63abb4d9412fdc5c79792dae3d8e1721a"
+PHASE1B_PREPARED_OUTPUT_SHA256 = "0c31129cc4f4be982a6aec79f448485a2674b2fe79643186737143dccfe6d42a"
+
+PHASE1C = Phase1BContract(
     contract_version="phase1b-contract-v2",
     source_url="https://archive.ics.uci.edu/static/public/791/metropt%2B3%2Bdataset.zip",
     source_doi="10.24432/C5VW3R",
@@ -241,7 +245,7 @@ def phase1b_evaluation_events() -> tuple[Event, ...]:
             local_lps_transition=None,
             disagreement=None,
         )
-        for item in PHASE1B.events
+        for item in PHASE1C.events
     )
 
 
@@ -255,8 +259,10 @@ def _serialize(value: object) -> object:
     return value
 
 
-def phase1b_contract_manifest() -> dict[str, object]:
-    manifest_without_hash = cast(dict[str, object], _serialize(asdict(PHASE1B)))
+def metropt3_contract_manifest(
+    contract: Phase1BContract = PHASE1C,
+) -> dict[str, object]:
+    manifest_without_hash = cast(dict[str, object], _serialize(asdict(contract)))
     payload = json.dumps(
         manifest_without_hash,
         sort_keys=True,
@@ -268,3 +274,6 @@ def phase1b_contract_manifest() -> dict[str, object]:
         **manifest_without_hash,
         "contract_sha256": hashlib.sha256(payload).hexdigest(),
     }
+
+
+phase1b_contract_manifest = metropt3_contract_manifest

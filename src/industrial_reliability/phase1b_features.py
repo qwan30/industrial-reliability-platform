@@ -24,9 +24,9 @@ from industrial_reliability.causal_features import (
 )
 from industrial_reliability.contracts import Split
 from industrial_reliability.phase1b_contracts import (
-    PHASE1B,
+    PHASE1C,
     Phase1BContract,
-    phase1b_contract_manifest,
+    metropt3_contract_manifest,
 )
 from industrial_reliability.phase1b_data import sha256_file
 
@@ -144,7 +144,7 @@ def _window_is_within_split(window: Phase1BWindow, split: Split) -> bool:
 
 def _iter_phase1b_windows_with_stats(
     frame_or_samples: pd.DataFrame | Sequence[TelemetrySample],
-    contract: Phase1BContract = PHASE1B,
+    contract: Phase1BContract = PHASE1C,
 ) -> tuple[list[Phase1BWindow], int, int]:
     analog_cols = contract.analog_columns
     digital_cols = tuple(c for c in contract.digital_columns if c in contract.predictor_columns)
@@ -217,7 +217,7 @@ def _iter_phase1b_windows_with_stats(
 
 def iter_phase1b_windows(
     frame_or_samples: pd.DataFrame | Sequence[TelemetrySample],
-    contract: Phase1BContract = PHASE1B,
+    contract: Phase1BContract = PHASE1C,
 ) -> Iterator[Phase1BWindow]:
     windows, _, _ = _iter_phase1b_windows_with_stats(frame_or_samples, contract)
     yield from windows
@@ -252,7 +252,7 @@ def _windows_to_dataframe(windows: list[Phase1BWindow]) -> pd.DataFrame:
 def build_phase1b_features(
     prepared_dir: Path,
     output_path: Path,
-    contract: Phase1BContract = PHASE1B,
+    contract: Phase1BContract = PHASE1C,
 ) -> Phase1BFeatureManifest:
     resolved_prep = prepared_dir.resolve()
     parquet_file = (resolved_prep / "telemetry.parquet").resolve()
@@ -260,7 +260,7 @@ def build_phase1b_features(
     if not parquet_file.is_file() or not manifest_file.is_file():
         raise FileNotFoundError(f"prepared telemetry missing in {resolved_prep}")
 
-    contract_manifest = phase1b_contract_manifest()
+    contract_manifest = metropt3_contract_manifest(contract)
     contract_sha256_str = str(contract_manifest["contract_sha256"])
     prep_identity = verify_prepared_parquet(parquet_file, contract_sha256_str)
 

@@ -15,7 +15,6 @@ from industrial_reliability.artifact_integrity import (
     PreparedArtifactIdentity,
     verify_prepared_parquet,
 )
-from industrial_reliability.phase1b_contracts import phase1b_contract_manifest
 from industrial_reliability.runtime_ids import runtime_id
 from industrial_reliability.runtime_messages import (
     ReplayCommandV1,
@@ -184,18 +183,16 @@ class ReplaySource:
     def __init__(
         self,
         parquet_path: Path,
-        expected_contract_sha256: str | None = None,
+        expected_contract_sha256: str,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.path = parquet_path.resolve()
         if not self.path.is_file():
             raise FileNotFoundError(f"Parquet source not found: {self.path}")
-        contract_sha = (
-            expected_contract_sha256
-            if expected_contract_sha256 is not None
-            else str(phase1b_contract_manifest()["contract_sha256"])
+        self.identity: PreparedArtifactIdentity = verify_prepared_parquet(
+            self.path,
+            expected_contract_sha256=expected_contract_sha256,
         )
-        self.identity: PreparedArtifactIdentity = verify_prepared_parquet(self.path, contract_sha)
         self.clock = clock if clock is not None else (lambda: datetime.now(UTC))
 
     def iter_events(

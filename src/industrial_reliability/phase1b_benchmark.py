@@ -34,9 +34,9 @@ from industrial_reliability.models import (
     RobustStatisticalDetector,
 )
 from industrial_reliability.phase1b_contracts import (
-    PHASE1B,
+    PHASE1C,
     Phase1BContract,
-    phase1b_contract_manifest,
+    metropt3_contract_manifest,
     phase1b_evaluation_events,
 )
 from industrial_reliability.phase1b_data import sha256_file
@@ -80,7 +80,7 @@ class Phase1BBenchmarkResult:
 
 def detector_for(
     model_id: ModelId,
-    contract: Phase1BContract = PHASE1B,
+    contract: Phase1BContract = PHASE1C,
 ) -> RobustStatisticalDetector | IsolationForestDetector | DenseAutoencoderDetector:
     if model_id == "statistical":
         return RobustStatisticalDetector()
@@ -96,7 +96,7 @@ def fit_phase1b_candidate(
     model_id: ModelId,
     train_features: NDArray[np.float64],
     calibration_features: NDArray[np.float64],
-    contract: Phase1BContract = PHASE1B,
+    contract: Phase1BContract = PHASE1C,
 ) -> FittedCandidate:
     detector = detector_for(model_id, contract).fit(train_features)
     calib_scores = detector.score(calibration_features)
@@ -117,7 +117,7 @@ def evaluate_candidate_holdout(
     fitted: FittedCandidate,
     holdout_df: pd.DataFrame,
     active_features: tuple[str, ...],
-    contract: Phase1BContract = PHASE1B,
+    contract: Phase1BContract = PHASE1C,
 ) -> CandidateResult:
     feature_matrix = holdout_df[list(active_features)].to_numpy(dtype=np.float64)
     scores = fitted.detector.score(feature_matrix)
@@ -183,7 +183,7 @@ def run_phase1b_benchmark(
     prepared_dir: Path,
     feature_path: Path,
     artifact_dir: Path,
-    contract: Phase1BContract = PHASE1B,
+    contract: Phase1BContract = PHASE1C,
 ) -> Phase1BBenchmarkResult:
     resolved_prep = prepared_dir.resolve()
     resolved_feat = feature_path.resolve()
@@ -198,7 +198,7 @@ def run_phase1b_benchmark(
     ):
         raise FileNotFoundError("Prerequisite manifest files missing")
 
-    contract_manifest = phase1b_contract_manifest()
+    contract_manifest = metropt3_contract_manifest(contract)
     expected_contract_sha = str(contract_manifest["contract_sha256"])
 
     verified_data = verify_prepared_parquet(prep_parquet_file, expected_contract_sha)

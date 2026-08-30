@@ -11,7 +11,7 @@ import pytest
 
 from industrial_reliability.kafka_io import KafkaSettings, encode_message
 from industrial_reliability.persistence import ReplayCheckpoint, RuntimeStore
-from industrial_reliability.phase1b_contracts import phase1b_contract_manifest
+from industrial_reliability.phase1b_contracts import metropt3_contract_manifest
 from industrial_reliability.replay import ReplaySource
 from industrial_reliability.replay_service import (
     ReplayService,
@@ -182,7 +182,7 @@ async def test_publish_methods_with_mock_producer(tmp_path: Path) -> None:
 
 
 def test_main_cli_certification(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    contract_sha = str(phase1b_contract_manifest()["contract_sha256"])
+    contract_sha = str(metropt3_contract_manifest()["contract_sha256"])
     pq_path = _create_mock_parquet(tmp_path, n_rows=5, contract_sha256=contract_sha)
     out_dir = tmp_path / "cli_cert"
 

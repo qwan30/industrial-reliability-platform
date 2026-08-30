@@ -13,10 +13,6 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from industrial_reliability.ml_provenance import (
-    PromotionReceiptV1,
-    write_promotion_receipt,
-)
 from industrial_reliability.models import RobustStatisticalDetector
 from industrial_reliability.package_champion import build_champion_package
 from industrial_reliability.phase1b_data import sha256_file
@@ -123,23 +119,6 @@ def _setup_test_champion(base_dir: Path) -> tuple[Path, Path, Path]:
 
     pkg_dir = base_dir / "champion"
     build_champion_package(run_dir, feat_path, pkg_dir)
-
-    receipt = PromotionReceiptV1(
-        schema_version="mlflow-promotion-receipt-v1",
-        mlflow_run_id="run-mlflow-001",
-        registered_model_name="industrial-reliability-anomaly-detector",
-        registered_model_version="1",
-        alias="champion",
-        model_version="champion-statistical-v1",
-        dataset_sha256="b" * 64,
-        contract_sha256="a" * 64,
-        champion_package_sha256=sha256_file(pkg_dir / "manifest.json"),
-        source_git_sha="0" * 40,
-        approver="reliability-engineer",
-        promoted_at="2026-08-25T00:00:00Z",
-        receipt_sha256="",
-    ).with_computed_hash()
-    write_promotion_receipt(pkg_dir / "promotion-receipt.json", receipt)
 
     return run_dir, feat_path, pkg_dir
 

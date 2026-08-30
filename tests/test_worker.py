@@ -9,6 +9,10 @@ from uuid import uuid4
 
 import pytest
 
+from industrial_reliability.artifact_integrity import (
+    ArtifactIntegrityError,
+    verify_file_sha256,
+)
 from industrial_reliability.kafka_io import encode_message
 from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.runtime_messages import (
@@ -425,3 +429,69 @@ async def test_worker_updates_consumer_lag(worker_settings: WorkerSettings) -> N
     )
     await worker.handle_record(record)
     assert metrics.kafka_consumer_lag._value.get() == 20.0
+
+
+def test_worker_settings_bind_drift_reference_to_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from industrial_reliability.drift import _compute_drift_hash
+    from tests.helpers_champion import build_research_candidate_from_mock_run
+
+    mock = build_research_candidate_from_mock_run(tmp_path)
+    drift_path = mock.package_dir / "drift-reference.json"
+    data = json.loads(drift_path.read_text(encoding="utf-8"))
+    data["source_dataset_sha256"] = "f" * 64
+    data["self_sha256"] = ""
+    data["self_sha256"] = _compute_drift_hash(data)
+    drift_path.write_text(json.dumps(data), encoding="utf-8")
+
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    monkeypatch.setenv("SCORING_API_URL", "http://localhost:8000")
+    monkeypatch.setenv("SCORING_PACKAGE_DIR", str(mock.package_dir))
+    monkeypatch.setenv("SCORING_MANIFEST_SHA256", mock.manifest_sha256)
+    monkeypatch.setenv("ALLOW_RESEARCH_CANDIDATE", "true")
+    settings = WorkerSettings.from_env()
+    assert settings.package_manifest is not None
+
+    with pytest.raises(ArtifactIntegrityError, match=r"drift-reference\.json SHA-256 mismatch"):
+        verify_file_sha256(
+            drift_path,
+            settings.package_manifest["artifact_sha256"]["drift-reference.json"],
+            "drift-reference.json",
+        )
+
+
+def test_worker_main_drift_reference_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from industrial_reliability.worker import main
+    from tests.helpers_champion import build_research_candidate_from_mock_run
+
+    mock = build_research_candidate_from_mock_run(tmp_path)
+    drift_path = mock.package_dir / "drift-reference.json"
+
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    monkeypatch.setenv("SCORING_API_URL", "http://localhost:8000")
+    monkeypatch.setenv("SCORING_PACKAGE_DIR", str(mock.package_dir))
+    monkeypatch.setenv("SCORING_MANIFEST_SHA256", mock.manifest_sha256)
+    monkeypatch.setenv("ALLOW_RESEARCH_CANDIDATE", "true")
+    monkeypatch.setenv("DRIFT_REFERENCE_PATH", str(drift_path))
+
+    def fake_asyncio_run(coro: Any) -> None:
+        coro.close()
+
+    with patch(
+        "industrial_reliability.worker.asyncio.run", side_effect=fake_asyncio_run
+    ) as mock_asyncio_run:
+        main()
+        assert mock_asyncio_run.called
+
+    # Tamper drift reference file -> should fail with ArtifactIntegrityError
+    drift_path.write_text("tampered", encoding="utf-8")
+    with (
+        patch("industrial_reliability.worker.asyncio.run", side_effect=fake_asyncio_run),
+        pytest.raises(ArtifactIntegrityError, match=r"drift-reference\.json SHA-256 mismatch"),
+    ):
+        main()

@@ -12,6 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
@@ -66,6 +67,7 @@ class WorkerSettings:
     feature_names: tuple[str, ...]
     client_id: str = "irp-streaming-worker-v1"
     group_id: str = "irp-streaming-worker-v1"
+    package_manifest: dict[str, Any] | None = None
 
     @classmethod
     def from_env(cls) -> WorkerSettings:
@@ -119,6 +121,7 @@ class WorkerSettings:
             source_dataset_sha256=source_dataset_sha256,
             contract_sha256=contract_sha256,
             feature_names=feature_names,
+            package_manifest=manifest_data,
         )
 
 
@@ -496,15 +499,30 @@ def main() -> None:
         start_process_metrics(int(metrics_port), registry)
         logger.info("Metrics server started on port %s", metrics_port)
 
+    settings = WorkerSettings.from_env()
     drift_ref = None
     drift_ref_path = os.environ.get("DRIFT_REFERENCE_PATH", "").strip()
     if drift_ref_path:
+        from industrial_reliability.artifact_integrity import verify_file_sha256
         from industrial_reliability.drift import load_reference
 
-        drift_ref = load_reference(Path(drift_ref_path))
+        if settings.package_manifest is None:
+            raise ValueError("package manifest is required for drift reference verification")
+        artifact_hashes = settings.package_manifest.get("artifact_sha256", {})
+        expected_drift_sha = artifact_hashes.get("drift-reference.json")
+        if not isinstance(expected_drift_sha, str):
+            raise ValueError("scoring package does not bind drift-reference.json")
+        verify_file_sha256(
+            Path(drift_ref_path),
+            expected_drift_sha,
+            "drift-reference.json",
+        )
+        drift_ref = load_reference(
+            Path(drift_ref_path),
+            expected_manifest=settings.package_manifest,
+        )
         logger.info("Loaded drift reference from %s", drift_ref_path)
 
-    settings = WorkerSettings.from_env()
     worker = StreamingWorker(settings, metrics=metrics, drift_reference=drift_ref)
     asyncio.run(worker.run())
 

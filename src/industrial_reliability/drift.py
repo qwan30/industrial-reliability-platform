@@ -210,6 +210,16 @@ def load_reference(path: Path, expected_manifest: dict[str, Any] | None = None) 
             raise ValueError(
                 f"Contract SHA mismatch in drift reference: expected {expected_manifest['contract_sha256']}, got {data['contract_sha256']}"
             )
+        expected_features = tuple(
+            expected_manifest.get("feature_names")
+            or expected_manifest.get("active_feature_names")
+            or ()
+        )
+        if tuple(data["active_feature_names"]) != expected_features:
+            raise ValueError(
+                "feature order mismatch in drift reference: "
+                f"expected {expected_features}, got {tuple(data['active_feature_names'])}"
+            )
 
     return DriftReferenceV1(
         model_version=data["model_version"],

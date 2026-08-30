@@ -32,7 +32,10 @@ from industrial_reliability.ml_provenance import (
 from industrial_reliability.package_champion import ChampionManifest
 from industrial_reliability.phase1b_contracts import PHASE1C
 from industrial_reliability.phase1b_data import sha256_file
-from industrial_reliability.phase7_gate import load_phase7_attestation
+from industrial_reliability.phase7_gate import (
+    Phase7GateResult,
+    load_phase7_attestation,
+)
 
 EXPERIMENT_NAME = "industrial-reliability-offline"
 REGISTERED_MODEL_NAME: Literal["industrial-reliability-anomaly-detector"] = (
@@ -441,6 +444,27 @@ def reproduce_candidate(
     )
 
 
+def _validate_promotion_identity(
+    tags: Mapping[str, str],
+    gate: Phase7GateResult,
+    manifest: ChampionManifest,
+    manifest_sha: str,
+) -> None:
+    expected = {
+        "dataset_sha256": manifest.source_dataset_sha256,
+        "contract_sha256": manifest.contract_sha256,
+        "feature_schema_sha256": canonical_sha256({"features": list(manifest.feature_names)}),
+        "source_git_sha": gate.source_git_sha,
+        "champion_package_sha256": manifest_sha,
+        "alert_policy_sha256": gate.alert_policy_sha256,
+    }
+    for name, value in expected.items():
+        if tags.get(name) != value:
+            raise ValueError(f"{name} run tag does not match attested identity")
+        if gate.verified_hashes.get(name) != value:
+            raise ValueError(f"{name} Phase 7 hash does not match attested identity")
+
+
 def promote_candidate(
     request: PromotionRequest,
     *,
@@ -501,6 +525,9 @@ def promote_candidate(
     if source_git_sha != request.expected_source_git_sha or gate.source_git_sha != source_git_sha:
         raise ValueError("Source Git SHA mismatch")
 
+    # Validate identity hashes against tags and gate attestation before registry mutation
+    _validate_promotion_identity(tags, gate, manifest, manifest_sha)
+
     # 9. if manifest.package_role != "CHAMPION": raise ValueError("package_role must be CHAMPION")
     if manifest.package_role != "CHAMPION":
         raise ValueError("package_role must be CHAMPION")
@@ -518,10 +545,6 @@ def promote_candidate(
         raise FileExistsError(f"Refusing to overwrite promotion receipt: {request.output}")
 
     # Register model (ALL checks passed)
-    dataset_sha256 = tags.get("dataset_sha256", "0" * 64)
-    contract_sha256 = tags.get("contract_sha256", "0" * 64)
-    champion_package_sha256 = tags.get("champion_package_sha256", manifest_sha)
-
     model_uri = f"runs:/{request.run_id}/champion-model"
     client.create_registered_model(REGISTERED_MODEL_NAME)
     mv = client.create_model_version(
@@ -539,10 +562,10 @@ def promote_candidate(
         registered_model_version=reg_version,
         alias="champion",
         model_version=manifest.model_version,
-        dataset_sha256=dataset_sha256,
-        contract_sha256=contract_sha256,
-        champion_package_sha256=champion_package_sha256,
-        source_git_sha=source_git_sha,
+        dataset_sha256=manifest.source_dataset_sha256,
+        contract_sha256=manifest.contract_sha256,
+        champion_package_sha256=manifest_sha,
+        source_git_sha=gate.source_git_sha,
         approver=request.approver.strip(),
         promoted_at=promoted_at,
         receipt_sha256="",

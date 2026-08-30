@@ -26,6 +26,7 @@ from industrial_reliability.ml_lifecycle import (
 )
 from industrial_reliability.ml_provenance import (
     PromotionReceiptV1,
+    canonical_sha256,
     load_promotion_receipt,
     verify_promotion_receipt,
 )
@@ -162,8 +163,17 @@ def _create_mock_gate_attestation_file(
     verdict: str = "PASS",
     package_manifest_sha256: str = "d" * 64,
     source_git_sha: str = "0" * 40,
-    alert_policy_sha256: str = "e" * 64,
+    alert_policy_sha256: str | None = None,
+    dataset_sha256: str = "b" * 64,
+    contract_sha256: str = "a" * 64,
+    feature_schema_sha256: str | None = None,
 ) -> Phase7GateResult:
+    if alert_policy_sha256 is None:
+        alert_policy_sha256 = canonical_sha256({"policy": "default-locked-policy"})
+    if feature_schema_sha256 is None:
+        feature_schema_sha256 = canonical_sha256(
+            {"features": ["tp2_mean", "dv_pressure_mean"]}
+        )
     gate = Phase7GateResult(
         schema_version="phase7-gate-v1",
         source_git_sha=source_git_sha,
@@ -174,9 +184,9 @@ def _create_mock_gate_attestation_file(
         candidate_run_id=candidate_run_id,
         reproduction_run_id=reproduction_run_id,
         verified_hashes={
-            "dataset_sha256": "a" * 64,
-            "contract_sha256": "b" * 64,
-            "feature_schema_sha256": "c" * 64,
+            "dataset_sha256": dataset_sha256,
+            "contract_sha256": contract_sha256,
+            "feature_schema_sha256": feature_schema_sha256,
             "source_git_sha": source_git_sha,
             "champion_package_sha256": package_manifest_sha256,
             "alert_policy_sha256": alert_policy_sha256,
@@ -627,4 +637,51 @@ def test_reproduction_rejects_tampered_detector_before_joblib_load(tmp_path: Pat
             mlflow_client=FakeMlflowClient(),
         )
     unsafe_load.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "dataset_sha256",
+        "contract_sha256",
+        "feature_schema_sha256",
+        "champion_package_sha256",
+        "alert_policy_sha256",
+    ],
+)
+def test_promotion_rejects_run_tag_changed_after_attestation(
+    tmp_path: Path,
+    tag: str,
+) -> None:
+    run_dir, _features, package = _create_mock_feasible_phase1b_run(tmp_path)
+    client = FakeMlflowClient()
+    candidate = import_candidate(
+        ImportCandidateRequest(package, run_dir),
+        mlflow_client=client,
+    )
+    gate_path = tmp_path / "phase7-gate.json"
+    _create_mock_gate_attestation_file(
+        gate_path,
+        candidate.run_id,
+        package_manifest_sha256=candidate.package_manifest_sha256,
+        source_git_sha=candidate.provenance.source_git_sha,
+        alert_policy_sha256=candidate.provenance.alert_policy_sha256,
+    )
+    client.tags[candidate.run_id][tag] = "f" * 64
+
+    with pytest.raises(ValueError, match=tag):
+        promote_candidate(
+            PromotionRequest(
+                run_id=candidate.run_id,
+                approver="reliability-lead",
+                expected_source_git_sha=candidate.provenance.source_git_sha,
+                output=tmp_path / "receipt.json",
+                champion_package=package,
+                phase7_gate=gate_path,
+            ),
+            mlflow_client=client,
+        )
+    assert client.model_versions == {}
+    assert client.aliases == {}
+
 

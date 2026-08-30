@@ -47,3 +47,13 @@ The dataset contains 15 analog and digital sensor streams sampled at approximate
 - **Binning:** 5-minute right-closed bins requiring $\ge 24$ readings ($\ge 80\%$ window density).
 - **Lookback:** 6 consecutive valid 5-minute bins (30-minute lookback window, 5-minute stride).
 - **Segmentation:** Any timestamp regression, missing bin, or sequence gap closes the active segment and purges rolling state. No interpolation or synthetic backfill is performed.
+- **Split Containment:** Every candidate 30-minute feature window must be wholly contained within a single split (`split.start <= window_start` and `window_end <= split.end`). Windows that cross partition boundaries (such as train-to-calibration or calibration-to-holdout transitions) are explicitly skipped and rejected to guarantee strict temporal isolation without cross-split feature leakage. Corrected full-data outputs are versioned instead of in-place replacing historical Phase 1B artifacts.
+
+### Executable physical contract
+
+The executable contract records each analog unit and a conservative hard ingestion
+envelope. Values outside the envelope are rejected or quarantined, never clipped.
+These bounds detect clear unit/sensor contract violations; they are not anomaly
+thresholds. Source timestamps remain timezone-naive because the dataset supplies no
+offset. Nominal cadence is 10 seconds. Contract-v2 full-data output is published as
+Phase 1C and does not overwrite Phase 1B evidence.

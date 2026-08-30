@@ -20,10 +20,8 @@ The Industrial Reliability Platform is a high-throughput, local-first industrial
 docker compose up -d
 
 # 2. Run database migrations
-# Migrations execute automatically on startup or via:
-# psql -h 127.0.0.1 -U irp -d irp -f db/migrations/001_initial_schema.sql
-# psql -h 127.0.0.1 -U irp -d irp -f db/migrations/002_alert_persistence.sql
-# psql -h 127.0.0.1 -U irp -d irp -f db/migrations/003_rca_reports.sql
+# Migrations execute automatically on stack startup via the db-migrate service, or manually via:
+python -m industrial_reliability.migrations --database-url postgresql://irp:irp_password@localhost:5432/irp --path db/migrations
 ```
 
 ### Verified Service Endpoints (Localhost Only):
@@ -60,7 +58,6 @@ curl -X POST http://127.0.0.1:8000/v1/alerts/<alert-id>/rca
 .\scripts\run_phase8_live_fault_drills.ps1
 ```
 
-
 ### D. Execute Grounded RCA Gate
 ```powershell
 # Run the Phase 9 RCA certification gate (in-process contract checks)
@@ -71,6 +68,15 @@ curl -X POST http://127.0.0.1:8000/v1/alerts/<alert-id>/rca
 ```powershell
 # Execute the end-to-end portfolio demonstration
 .\scripts\run_portfolio_demo.ps1
+```
+
+### F. Execute PostgreSQL Backup & Restore Recovery Drill
+```powershell
+# Run the automated backup, restore, and table parity recovery drill
+.\scripts\test_postgres_restore.ps1
+
+# Or on Linux / macOS:
+./scripts/test_postgres_restore.sh
 ```
 
 ---

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -7,6 +9,7 @@ from uuid import UUID, uuid4
 import pandas as pd
 import pytest
 
+from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.replay import (
     ReplayContractError,
     ReplayController,
@@ -16,7 +19,31 @@ from industrial_reliability.replay import (
 from industrial_reliability.runtime_messages import ReplayCommandV1
 
 
-def _create_mock_parquet(path: Path, n_rows: int = 20) -> Path:
+def write_prepared_manifest(
+    parquet: Path,
+    source_dataset_sha256: str = "a" * 64,
+    contract_sha256: str = "b" * 64,
+) -> dict[str, str]:
+    manifest = {
+        "archive_sha256": source_dataset_sha256,
+        "contract_sha256": contract_sha256,
+        "output_sha256": sha256_file(parquet),
+    }
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+    manifest["manifest_sha256"] = hashlib.sha256(canonical.encode()).hexdigest()
+    parquet.with_name("manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def _create_mock_parquet(
+    path: Path,
+    n_rows: int = 20,
+    source_dataset_sha256: str = "a" * 64,
+    contract_sha256: str = "b" * 64,
+) -> Path:
     base_ts = datetime(2020, 3, 1, 0, 0, 0)
     timestamps = [base_ts + timedelta(seconds=10 * i) for i in range(n_rows)]
     data = {
@@ -40,6 +67,11 @@ def _create_mock_parquet(path: Path, n_rows: int = 20) -> Path:
     df = pd.DataFrame(data)
     pq_path = path / "telemetry.parquet"
     df.to_parquet(pq_path, index=False)
+    write_prepared_manifest(
+        pq_path,
+        source_dataset_sha256=source_dataset_sha256,
+        contract_sha256=contract_sha256,
+    )
     return pq_path
 
 
@@ -80,7 +112,7 @@ def test_pacing_changes_only_wall_clock_delay() -> None:
 
 def test_same_range_has_same_stream_at_every_speed(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=15)
-    source = ReplaySource(pq_path)
+    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
     session_id = uuid4()
     range_start = datetime(2020, 3, 1, 0, 0, 0)
     range_end = datetime(2020, 3, 1, 0, 2, 0)  # 12 rows (0 to 110s)
@@ -160,3 +192,21 @@ def test_replay_controller_state_machine() -> None:
     status = ctrl.status()
     assert status.state == "COMPLETED"
     assert status.last_sequence == 12
+
+
+def test_replay_source_uses_verified_identity(tmp_path: Path) -> None:
+    parquet = _create_mock_parquet(
+        tmp_path,
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+    )
+    source = ReplaySource(parquet, expected_contract_sha256="b" * 64)
+    command = _start_command(
+        uuid4(),
+        datetime(2020, 3, 1),
+        datetime(2020, 3, 1, 0, 1),
+    )
+    event = next(source.iter_events(command))
+    assert event.source_dataset_sha256 == source.identity.source_dataset_sha256
+    assert event.contract_sha256 == source.identity.contract_sha256
+

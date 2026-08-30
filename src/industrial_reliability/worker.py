@@ -360,6 +360,26 @@ class StreamingWorker:
         if session_id in self._failed_sessions:
             return
 
+        if (
+            event.source_dataset_sha256 != self.settings.source_dataset_sha256
+            or event.contract_sha256 != self.settings.contract_sha256
+        ):
+            await self.publish_quarantine(
+                raw_bytes,
+                topic,
+                partition,
+                offset,
+                "TELEMETRY_IDENTITY_MISMATCH",
+                "telemetry identity does not match scoring package",
+            )
+            await self._fail_session(
+                session_id,
+                "TELEMETRY_IDENTITY_MISMATCH",
+                self.last_sequence.get(session_id, 0),
+                event.source_timestamp,
+            )
+            return
+
         # Track offset for session
         self.session_offsets[session_id][tp] = OffsetAndMetadata(offset + 1, "")
 

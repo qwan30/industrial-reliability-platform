@@ -185,6 +185,22 @@ class ReplayService:
             await self.publish_status(failed_ctrl.status())
             return
 
+        if (
+            command.source_dataset_sha256 != self.source.identity.source_dataset_sha256
+            or command.contract_sha256 != self.source.identity.contract_sha256
+        ):
+            failed = ReplayController.created(
+                command.replay_session_id,
+                self.source.identity.source_dataset_sha256,
+                self.source.identity.contract_sha256,
+            ).mark_failed(
+                "REPLAY_SOURCE_IDENTITY_MISMATCH",
+                0,
+                command.source_timestamp,
+            )
+            await self.publish_status(failed.status())
+            return
+
         ctrl = ReplayController.created(
             command.replay_session_id,
             command.source_dataset_sha256,
@@ -315,11 +331,12 @@ def run_certification(
     range_end: datetime,
     speeds: list[int],
     output_dir: Path,
+    expected_contract_sha256: str | None = None,
 ) -> dict[str, object]:
     safe_out = output_dir.resolve()
     safe_out.mkdir(parents=True, exist_ok=True)
     safe_pq = parquet_path.resolve()
-    source = ReplaySource(safe_pq)
+    source = ReplaySource(safe_pq, expected_contract_sha256=expected_contract_sha256)
     results: dict[str, object] = {"speeds": speeds, "streams": {}}
 
     logical_hashes: set[str] = set()
@@ -333,8 +350,8 @@ def run_certification(
         cmd = ReplayCommandV1(
             message_id=uuid4(),
             replay_session_id=session_id,
-            source_dataset_sha256="a" * 64,
-            contract_sha256="b" * 64,
+            source_dataset_sha256=source.identity.source_dataset_sha256,
+            contract_sha256=source.identity.contract_sha256,
             source_timestamp=range_start,
             emitted_at=datetime.now(UTC),
             command_id=uuid4(),
@@ -375,10 +392,16 @@ def main() -> None:
     parser.add_argument("--certify-range-end", type=datetime.fromisoformat, required=False)
     parser.add_argument("--speeds", type=int, nargs="+", default=[1, 100, 1000])
     parser.add_argument("--output", type=Path, default=Path("artifacts/certification/phase-3"))
+    default_parquet = Path(
+        os.environ.get(
+            "REPLAY_PARQUET_PATH",
+            "data/processed/phase1b/metropt3/telemetry.parquet",
+        )
+    )
     parser.add_argument(
         "--parquet",
         type=Path,
-        default=Path("data/processed/phase1b/metropt3/telemetry.parquet"),
+        default=default_parquet,
     )
     args = parser.parse_args()
 

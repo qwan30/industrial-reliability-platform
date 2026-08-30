@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from industrial_reliability.kafka_io import KafkaSettings, encode_message
+from industrial_reliability.phase1b_contracts import phase1b_contract_manifest
 from industrial_reliability.replay import ReplaySource
 from industrial_reliability.replay_service import (
     ReplayService,
@@ -34,7 +35,7 @@ class MockRecord:
 async def test_replay_service_handles_valid_start_and_completion(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=5)
     settings = KafkaSettings(bootstrap_servers="localhost:9092")
-    source = ReplaySource(pq_path)
+    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
     service = ReplayService(settings, source, enable_pacing=False)
 
     published_telemetry = []
@@ -61,7 +62,7 @@ async def test_replay_service_handles_valid_start_and_completion(tmp_path: Path)
 async def test_replay_service_pause_resume_stop_lifecycle(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=20)
     settings = KafkaSettings(bootstrap_servers="localhost:9092")
-    source = ReplaySource(pq_path)
+    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
     service = ReplayService(settings, source, enable_pacing=True)
 
     published_status = []
@@ -94,7 +95,7 @@ async def test_replay_service_pause_resume_stop_lifecycle(tmp_path: Path) -> Non
 async def test_publish_methods_with_mock_producer(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=2)
     settings = KafkaSettings(bootstrap_servers="localhost:9092")
-    source = ReplaySource(pq_path)
+    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
     service = ReplayService(settings, source)
 
     mock_producer = AsyncMock()
@@ -115,7 +116,8 @@ async def test_publish_methods_with_mock_producer(tmp_path: Path) -> None:
 
 
 def test_main_cli_certification(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    pq_path = _create_mock_parquet(tmp_path, n_rows=5)
+    contract_sha = str(phase1b_contract_manifest()["contract_sha256"])
+    pq_path = _create_mock_parquet(tmp_path, n_rows=5, contract_sha256=contract_sha)
     out_dir = tmp_path / "cli_cert"
 
     test_args = [
@@ -134,3 +136,38 @@ def test_main_cli_certification(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(sys, "argv", test_args)
     main()
     assert (out_dir / "certification_summary.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_replay_service_rejects_source_identity_mismatch(tmp_path: Path) -> None:
+    pq_path = _create_mock_parquet(
+        tmp_path,
+        n_rows=5,
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+    )
+    settings = KafkaSettings(bootstrap_servers="localhost:9092")
+    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
+    service = ReplayService(settings, source, enable_pacing=False)
+
+    published_telemetry = []
+    published_status = []
+    service.publish_telemetry = AsyncMock(side_effect=lambda ev: published_telemetry.append(ev))  # type: ignore[method-assign]
+    service.publish_status = AsyncMock(side_effect=lambda st: published_status.append(st))  # type: ignore[method-assign]
+
+    session_id = uuid4()
+    cmd = make_sample_replay_command(
+        action="START",
+        session_id=session_id,
+        speed=1000,
+        source_dataset_sha256="c" * 64,
+        contract_sha256="b" * 64,
+    )
+    await service.handle_command(cmd)
+
+    assert service.active_session is None
+    assert len(published_telemetry) == 0
+    assert len(published_status) == 1
+    assert published_status[0].state == "FAILED"
+    assert published_status[0].error_code == "REPLAY_SOURCE_IDENTITY_MISMATCH"
+

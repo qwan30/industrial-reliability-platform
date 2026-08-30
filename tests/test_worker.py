@@ -368,3 +368,26 @@ def test_worker_settings_from_env_research_candidate(
     monkeypatch.setenv("ALLOW_RESEARCH_CANDIDATE", "true")
     settings = WorkerSettings.from_env()
     assert settings.model_version == "research-candidate-statistical-v1"
+
+
+@pytest.mark.asyncio
+async def test_worker_quarantines_event_identity_mismatch(
+    worker_settings: WorkerSettings,
+) -> None:
+    from prometheus_client import CollectorRegistry
+    from industrial_reliability.metrics import build_runtime_metrics
+
+    scoring_client = AsyncMock()
+    metrics = build_runtime_metrics(CollectorRegistry())
+    worker = StreamingWorker(
+        worker_settings,
+        scoring_client=scoring_client,
+        metrics=metrics,
+    )
+    worker.producer = AsyncMock()
+    event = make_sample_telemetry_event().model_copy(update={"source_dataset_sha256": "f" * 64})
+    await worker.handle_record(MockKafkaRecord(TELEMETRY_TOPIC, encode_message(event)))
+    scoring_client.score.assert_not_awaited()
+    assert metrics.telemetry_events.labels(outcome="quarantined")._value.get() == 1
+
+

@@ -150,3 +150,50 @@ def test_build_features_rejects_tampered_prepared_parquet(tmp_path: Path) -> Non
     with pytest.raises(ArtifactIntegrityError, match=r"telemetry\.parquet SHA-256 mismatch"):
         build_phase1b_features(prepared_dir, out_parquet, PHASE1B)
 
+
+def test_window_never_crosses_train_calibration_boundary() -> None:
+    samples = _generate_samples_for_bins(
+        (24, 24, 24, 24, 24, 24, 24),
+        datetime(2020, 2, 21, 23, 30),
+    )
+    windows = list(iter_phase1b_windows(samples, PHASE1B))
+    assert all(
+        window.split != "calibration" or window.window_start >= PHASE1B.calibration.start
+        for window in windows
+    )
+
+
+def test_windows_spanning_across_splits_are_skipped() -> None:
+    # 12 bins starting 2020-02-21 23:30 (6 train bins ending 23:35..00:00, 6 calib bins ending 00:05..00:30)
+    samples = _generate_samples_for_bins((24,) * 12, datetime(2020, 2, 21, 23, 30))
+    windows = list(iter_phase1b_windows(samples, PHASE1B))
+    assert len(windows) == 2
+    assert windows[0].split == "train"
+    assert windows[0].window_start == datetime(2020, 2, 21, 23, 30)
+    assert windows[0].window_end == datetime(2020, 2, 22, 0, 0)
+    assert windows[1].split == "calibration"
+    assert windows[1].window_start == datetime(2020, 2, 22, 0, 0)
+    assert windows[1].window_end == datetime(2020, 2, 22, 0, 30)
+
+
+def test_build_phase1b_features_manifest_records_actual_rejection_counts(tmp_path: Path) -> None:
+    # 7 train bins (ends 23:30..00:00 -> 2 train windows), 6 calib bins (ends 00:05..00:30 -> 1 calib window), 1 invalid bin (10 obs), 6 calib bins
+    start_time = datetime(2020, 2, 21, 23, 25)
+    counts = (24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 10, 24, 24, 24, 24, 24, 24)
+    samples = _generate_samples_for_bins(counts, start_time)
+    prepared_dir = _create_prepared_dir(tmp_path, samples)
+
+    out_parquet = tmp_path / "features" / "features.parquet"
+    feat_manifest = build_phase1b_features(prepared_dir, out_parquet, PHASE1B)
+
+    rejection_dict = dict(feat_manifest.rejection_counts)
+    assert rejection_dict["invalid_bins_skipped"] == 1
+    assert rejection_dict["cross_split_windows_skipped"] == 5
+    assert "train_constant_removed" in rejection_dict
+
+    manifest_json_path = tmp_path / "features" / "feature_manifest.json"
+    manifest_data = json.loads(manifest_json_path.read_text(encoding="utf-8"))
+    json_rejection_dict = dict(manifest_data["rejection_counts"])
+    assert json_rejection_dict["invalid_bins_skipped"] == 1
+    assert json_rejection_dict["cross_split_windows_skipped"] == 5
+

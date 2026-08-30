@@ -48,6 +48,8 @@ def test_package_contains_one_model_and_three_golden_cases(tmp_path: Path) -> No
     assert (pkg_dir / "detector.joblib").exists()
     assert (pkg_dir / "evidence-baseline.npz").exists()
     assert (pkg_dir / "golden-cases.json").exists()
+    assert (pkg_dir / "drift-reference.json").exists()
+    assert "drift-reference.json" in result.manifest.artifact_sha256
 
     golden_json = json.loads((pkg_dir / "golden-cases.json").read_text(encoding="utf-8"))
     assert golden_json["schema_version"] == "champion-golden-cases-v1"
@@ -60,6 +62,7 @@ def test_package_manifest_validates_role_combinations() -> None:
         "detector.joblib": "a" * 64,
         "evidence-baseline.npz": "b" * 64,
         "golden-cases.json": "c" * 64,
+        "drift-reference.json": "d" * 64,
     }
 
     # Valid CHAMPION
@@ -137,3 +140,5 @@ def test_build_research_candidate_package(tmp_path: Path) -> None:
     assert (mock.package_dir / "alert-policy.json").exists()
     assert (mock.package_dir / "detector.joblib").exists()
     assert (mock.package_dir / "golden-cases.json").exists()
+    assert (mock.package_dir / "drift-reference.json").exists()
+    assert "drift-reference.json" in res.manifest.artifact_sha256

@@ -391,3 +391,37 @@ async def test_worker_quarantines_event_identity_mismatch(
     assert metrics.telemetry_events.labels(outcome="quarantined")._value.get() == 1
 
 
+@pytest.mark.asyncio
+async def test_worker_updates_consumer_lag(worker_settings: WorkerSettings) -> None:
+    from prometheus_client import CollectorRegistry
+    from industrial_reliability.metrics import build_runtime_metrics
+
+    metrics = build_runtime_metrics(CollectorRegistry())
+    worker = StreamingWorker(
+        worker_settings,
+        metrics=metrics,
+    )
+    mock_consumer = AsyncMock()
+    mock_consumer.highwater = lambda tp: 100
+    mock_consumer.position = AsyncMock(return_value=80)
+    worker.consumer = mock_consumer
+    worker.producer = AsyncMock()
+    mock_scoring = AsyncMock()
+    mock_scoring.score = AsyncMock(side_effect=_make_mock_decision)
+    worker.scoring_client = mock_scoring
+
+    start_ts = datetime(2020, 3, 1, 4, 0, 0)
+    ev = make_sample_telemetry_event(
+        sequence=1,
+        source_timestamp=start_ts,
+    )
+    record = MockKafkaRecord(
+        topic=TELEMETRY_TOPIC,
+        value=encode_message(ev),
+        partition=0,
+        offset=80,
+    )
+    await worker.handle_record(record)
+    assert metrics.kafka_consumer_lag._value.get() == 20.0
+
+

@@ -193,3 +193,19 @@ def test_drift_cli(
     captured = capsys.readouterr()
     assert "Successfully built drift reference" in captured.out
     assert out_path.is_file()
+
+
+def test_drift_requires_feature_overlap() -> None:
+    ref = DriftReferenceV1(
+        model_version="v1",
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+        active_feature_names=("f1", "f2"),
+        num_train_samples=100,
+        bin_edges={"f1": [-np.inf, 1.0, np.inf], "f2": [-np.inf, 2.0, np.inf]},
+        reference_proportions={"f1": [0.5, 0.5], "f2": [0.5, 0.5]},
+        self_sha256="placeholder",
+    )
+    current = {"other_feature": [1.0, 2.0]}
+    with pytest.raises(ValueError, match="drift reference and current features have no feature overlap"):
+        max_population_stability_index(current, ref)

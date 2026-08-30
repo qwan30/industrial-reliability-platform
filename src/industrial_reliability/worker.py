@@ -450,12 +450,23 @@ class StreamingWorker:
             if status.last_sequence is not None and current_seq >= status.last_sequence:
                 await self._complete_session(status)
 
+    async def _update_consumer_lag(self, partition: TopicPartition) -> None:
+        if self.consumer is None or self.metrics is None:
+            return
+        highwater = self.consumer.highwater(partition)
+        if highwater is not None:
+            position = await self.consumer.position(partition)
+            self.metrics.set_consumer_lag(highwater - position)
+
     async def handle_record(self, record: object) -> None:
         topic = getattr(record, "topic", "")
         if topic == TELEMETRY_TOPIC:
             await self._handle_telemetry_record(record)
         elif topic == REPLAY_STATUS_TOPIC:
             await self._handle_status_record(record)
+        partition = getattr(record, "partition", 0)
+        if topic:
+            await self._update_consumer_lag(TopicPartition(topic, partition))
 
     async def run(self) -> None:
         await self.start()

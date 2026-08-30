@@ -115,6 +115,7 @@ services:
       SCORING_MANIFEST_SHA256: ${SCORING_MANIFEST_SHA256:-}
       ALLOW_RESEARCH_CANDIDATE: ${ALLOW_RESEARCH_CANDIDATE:-false}
       DATABASE_URL: postgresql://irp:irp_password@postgres:5432/irp
+      DRIFT_REFERENCE_PATH: /runtime/scoring-package/drift-reference.json
       METRICS_PORT: "9102"
     depends_on:
       kafka:
@@ -174,6 +175,7 @@ services:
     ports: ["127.0.0.1:9090:9090"]
     volumes:
       - "./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      - "./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro"
       - "prometheus-data:/prometheus"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"

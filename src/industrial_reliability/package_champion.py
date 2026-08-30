@@ -24,11 +24,13 @@ from pydantic import (
     model_validator,
 )
 
+from industrial_reliability.drift import build_reference, save_reference
 from industrial_reliability.phase1b_data import sha256_file
 
 DETECTOR_FILENAME = "detector.joblib"
 BASELINE_FILENAME = "evidence-baseline.npz"
 GOLDEN_CASES_FILENAME = "golden-cases.json"
+DRIFT_REFERENCE_FILENAME = "drift-reference.json"
 MANIFEST_FILENAME = "manifest.json"
 SCORES_PARQUET_FILENAME = "scores.parquet"
 HEX_64_PATTERN = r"^[0-9a-f]{64}$"
@@ -85,7 +87,12 @@ class ChampionManifest(BaseModel):
     @field_validator("artifact_sha256")
     @classmethod
     def validate_artifact_hashes(cls, v: Mapping[str, str]) -> Mapping[str, str]:
-        required = {DETECTOR_FILENAME, BASELINE_FILENAME, GOLDEN_CASES_FILENAME}
+        required = {
+            DETECTOR_FILENAME,
+            BASELINE_FILENAME,
+            GOLDEN_CASES_FILENAME,
+            DRIFT_REFERENCE_FILENAME,
+        }
         allowed = required | {SCORES_PARQUET_FILENAME}
         if not required <= set(v.keys()) or not set(v.keys()) <= allowed:
             raise ValueError(f"artifact_sha256 must contain {required} and only allow {allowed}")
@@ -335,6 +342,7 @@ def build_champion_package(
         dest_model = _resolve_path(temp_output, DETECTOR_FILENAME)
         dest_baseline = _resolve_path(temp_output, BASELINE_FILENAME)
         dest_golden = _resolve_path(temp_output, GOLDEN_CASES_FILENAME)
+        dest_drift = _resolve_path(temp_output, DRIFT_REFERENCE_FILENAME)
         dest_manifest = _resolve_path(temp_output, MANIFEST_FILENAME)
 
         shutil.copy2(model_src, dest_model)
@@ -343,10 +351,22 @@ def build_champion_package(
         golden_payload = serialize_golden_cases(golden)
         dest_golden.write_text(json.dumps(golden_payload, indent=2), encoding="utf-8")
 
+        drift_ref = build_reference(
+            features_path,
+            {
+                "model_version": champion["model_version"],
+                "source_dataset_sha256": champion["source_dataset_sha256"],
+                "contract_sha256": champion["contract_sha256"],
+                "feature_names": tuple(champion["active_feature_names"]),
+            },
+        )
+        save_reference(drift_ref, dest_drift)
+
         artifact_hashes = {
             DETECTOR_FILENAME: sha256_file(dest_model),
             BASELINE_FILENAME: sha256_file(dest_baseline),
             GOLDEN_CASES_FILENAME: sha256_file(dest_golden),
+            DRIFT_REFERENCE_FILENAME: sha256_file(dest_drift),
         }
 
         package_manifest = ChampionManifest(

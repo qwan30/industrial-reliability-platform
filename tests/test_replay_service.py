@@ -208,6 +208,115 @@ async def test_replay_service_records_checkpoints_during_streaming(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_start_checkpoint_has_no_cursor_before_first_publish(tmp_path: Path) -> None:
+    source = ReplaySource(
+        _create_mock_parquet(tmp_path, n_rows=5),
+        expected_contract_sha256="b" * 64,
+    )
+    store = MagicMock(spec=RuntimeStore)
+    service = ReplayService(
+        KafkaSettings("localhost:9092"),
+        source,
+        store=store,
+        enable_pacing=False,
+    )
+    service.publish_telemetry = AsyncMock(side_effect=RuntimeError("simulated crash"))  # type: ignore[method-assign]
+    service.publish_status = AsyncMock()  # type: ignore[method-assign]
+    command = make_sample_replay_command(
+        action="START",
+        session_id=uuid4(),
+        speed=1000,
+    )
+
+    await service.handle_command(command)
+    assert service.active_session is not None
+    await service.active_session.task
+
+    initial = store.record_replay_checkpoint.call_args_list[0]
+    assert initial.args == (command, "RUNNING", 0, None)
+
+
+@pytest.mark.asyncio
+async def test_resume_from_zero_replays_range_start_and_publishes_completed(
+    tmp_path: Path,
+) -> None:
+    source = ReplaySource(
+        _create_mock_parquet(tmp_path, n_rows=6),
+        expected_contract_sha256="b" * 64,
+    )
+    store = MagicMock(spec=RuntimeStore)
+    service = ReplayService(
+        KafkaSettings("localhost:9092"),
+        source,
+        store=store,
+        enable_pacing=False,
+    )
+    telemetry = []
+    statuses = []
+    service.publish_telemetry = AsyncMock(side_effect=telemetry.append)  # type: ignore[method-assign]
+    service.publish_status = AsyncMock(side_effect=statuses.append)  # type: ignore[method-assign]
+    command = make_sample_replay_command(
+        action="START",
+        session_id=uuid4(),
+        speed=1000,
+    )
+    expected = list(source.iter_events(command))
+    checkpoint = ReplayCheckpoint(
+        replay_session_id=command.replay_session_id,
+        command=command,
+        state="RUNNING",
+        last_sequence=0,
+        source_timestamp=None,
+    )
+
+    await service.resume_checkpoint(checkpoint)
+
+    assert [(event.sequence, event.source_timestamp) for event in telemetry] == [
+        (event.sequence, event.source_timestamp) for event in expected
+    ]
+    assert statuses[-1].state == "COMPLETED"
+    assert statuses[-1].last_sequence == len(expected)
+
+
+@pytest.mark.asyncio
+async def test_resume_failure_records_and_publishes_failed(tmp_path: Path) -> None:
+    source = ReplaySource(
+        _create_mock_parquet(tmp_path, n_rows=3),
+        expected_contract_sha256="b" * 64,
+    )
+    store = MagicMock(spec=RuntimeStore)
+    service = ReplayService(
+        KafkaSettings("localhost:9092"),
+        source,
+        store=store,
+        enable_pacing=False,
+    )
+    statuses = []
+    service.publish_telemetry = AsyncMock(side_effect=RuntimeError("publish failed"))  # type: ignore[method-assign]
+    service.publish_status = AsyncMock(side_effect=statuses.append)  # type: ignore[method-assign]
+    command = make_sample_replay_command(
+        action="START",
+        session_id=uuid4(),
+        speed=1000,
+    )
+    checkpoint = ReplayCheckpoint(
+        replay_session_id=command.replay_session_id,
+        command=command,
+        state="RUNNING",
+        last_sequence=0,
+        source_timestamp=None,
+    )
+
+    await service.resume_checkpoint(checkpoint)
+
+    failed = store.record_replay_checkpoint.call_args_list[-1]
+    assert failed.kwargs["state"] == "FAILED"
+    assert statuses[-1].state == "FAILED"
+    assert statuses[-1].error_code == "REPLAY_STREAM_ERROR"
+
+
+
+@pytest.mark.asyncio
 async def test_replay_service_start_raises_on_multiple_incomplete_replays(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=5)
     settings = KafkaSettings(bootstrap_servers="localhost:9092")
@@ -258,6 +367,7 @@ async def test_replay_service_resume_checkpoint(tmp_path: Path) -> None:
 
     published_telemetry = []
     service.publish_telemetry = AsyncMock(side_effect=lambda ev: published_telemetry.append(ev))  # type: ignore[method-assign]
+    service.publish_status = AsyncMock()  # type: ignore[method-assign]
 
     cmd = make_sample_replay_command(
         action="START",

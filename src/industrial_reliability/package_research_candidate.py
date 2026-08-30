@@ -9,9 +9,11 @@ import shutil
 from pathlib import Path
 
 from industrial_reliability.alert_policy import lock_alert_policy
+from industrial_reliability.drift import build_reference, save_reference
 from industrial_reliability.package_champion import (
     BASELINE_FILENAME,
     DETECTOR_FILENAME,
+    DRIFT_REFERENCE_FILENAME,
     GOLDEN_CASES_FILENAME,
     MANIFEST_FILENAME,
     SCORES_PARQUET_FILENAME,
@@ -81,6 +83,7 @@ def build_research_candidate_package(
         published_model = temp_output / DETECTOR_FILENAME
         published_baseline = temp_output / BASELINE_FILENAME
         published_golden = temp_output / GOLDEN_CASES_FILENAME
+        published_drift = temp_output / DRIFT_REFERENCE_FILENAME
         published_scores = temp_output / SCORES_PARQUET_FILENAME
         shutil.copy2(model_path, published_model)
         shutil.copy2(baseline_path, published_baseline)
@@ -89,7 +92,18 @@ def build_research_candidate_package(
             json.dumps(serialize_golden_cases(golden), indent=2),
             encoding="utf-8",
         )
+        drift_ref = build_reference(
+            safe_features_path,
+            {
+                "model_version": "research-candidate-statistical-v1",
+                "source_dataset_sha256": run["source_dataset_sha256"],
+                "contract_sha256": run["contract_sha256"],
+                "feature_names": tuple(features["active_feature_names"]),
+            },
+        )
+        save_reference(drift_ref, published_drift)
         manifest = ChampionManifest(
+            schema_version="champion-package-v2",
             source_champion_schema="phase1b-run-v1",
             source_run_id=run["run_id"],
             package_role="RESEARCH_CANDIDATE",
@@ -99,6 +113,8 @@ def build_research_candidate_package(
             model_version="research-candidate-statistical-v1",
             contract_sha256=run["contract_sha256"],
             source_dataset_sha256=run["source_dataset_sha256"],
+            prepared_output_sha256=run["prepared_output_sha256"],
+            feature_output_sha256=run["feature_output_sha256"],
             feature_names=tuple(features["active_feature_names"]),
             threshold=float(run["models"]["statistical"]["threshold"]),
             threshold_provenance=ThresholdProvenance(),
@@ -106,6 +122,7 @@ def build_research_candidate_package(
                 DETECTOR_FILENAME: sha256_file(published_model),
                 BASELINE_FILENAME: sha256_file(published_baseline),
                 GOLDEN_CASES_FILENAME: sha256_file(published_golden),
+                DRIFT_REFERENCE_FILENAME: sha256_file(published_drift),
                 SCORES_PARQUET_FILENAME: sha256_file(published_scores),
             },
         )

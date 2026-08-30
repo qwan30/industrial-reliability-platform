@@ -3,27 +3,24 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict, dataclass, field
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from industrial_reliability.ml_lifecycle import (
-    CandidateResult,
-    ImportCandidateRequest,
-    ReproductionRequest,
-    ReproductionResult,
-    import_candidate,
-    reproduce_candidate,
-)
 from industrial_reliability.ml_provenance import (
-    PromotionReceiptV1,
     canonical_dumps,
-    load_promotion_receipt,
-    verify_promotion_receipt,
+    canonical_sha256,
     verify_run_provenance,
 )
 from industrial_reliability.package_champion import ChampionManifest
+
+if TYPE_CHECKING:
+    from industrial_reliability.ml_lifecycle import (
+        CandidateResult,
+        ReproductionResult,
+    )
 
 THRESHOLD_TOLERANCE = 1e-9
 SCORE_TOLERANCE = 1e-6
@@ -40,17 +37,57 @@ class Phase7GateResult:
     candidate_run_id: str
     reproduction_run_id: str
     verified_hashes: dict[str, str]
+    package_manifest_sha256: str
+    alert_policy_sha256: str
     reasons: list[str] = field(default_factory=list)
+    self_sha256: str = ""
+
+    def compute_hash(self) -> str:
+        d = asdict(self)
+        d.pop("self_sha256", None)
+        return canonical_sha256(d)
+
+    def with_computed_hash(self) -> Phase7GateResult:
+        return replace(self, self_sha256=self.compute_hash())
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> Phase7GateResult:
+        return cls(
+            schema_version=str(data["schema_version"]),
+            source_git_sha=str(data["source_git_sha"]),
+            timestamp=str(data["timestamp"]),
+            verdict=data["verdict"],
+            threshold_delta=float(data["threshold_delta"]),
+            golden_scores_max_delta=float(data["golden_scores_max_delta"]),
+            candidate_run_id=str(data["candidate_run_id"]),
+            reproduction_run_id=str(data["reproduction_run_id"]),
+            verified_hashes=dict(data.get("verified_hashes", {})),
+            package_manifest_sha256=str(data["package_manifest_sha256"]),
+            alert_policy_sha256=str(data["alert_policy_sha256"]),
+            reasons=list(data.get("reasons", [])),
+            self_sha256=str(data.get("self_sha256", "")),
+        )
+
+
+def load_phase7_attestation(path: Path) -> Phase7GateResult:
+    content = path.read_text(encoding="utf-8")
+    data = json.loads(content)
+    result = Phase7GateResult.from_dict(data)
+    expected = result.compute_hash()
+    if result.self_sha256 != expected:
+        raise ValueError(
+            f"Phase 7 attestation hash mismatch: expected {expected}, got {result.self_sha256}"
+        )
+    return result
 
 
 def evaluate_phase7_gate(
     *,
     candidate: CandidateResult,
     reproduction: ReproductionResult,
-    receipt: PromotionReceiptV1,
     expected_threshold: float,
     expected_golden_scores: tuple[float, ...] | list[float],
 ) -> Phase7GateResult:
@@ -67,11 +104,6 @@ def evaluate_phase7_gate(
     except Exception as e:
         reasons.append(f"Reproduction provenance self-hash verification failed: {e}")
 
-    try:
-        verify_promotion_receipt(receipt)
-    except Exception as e:
-        reasons.append(f"Promotion receipt self-hash verification failed: {e}")
-
     # 2. Check lifecycle states
     if candidate.provenance.lifecycle_state != "candidate":
         reasons.append(
@@ -82,7 +114,7 @@ def evaluate_phase7_gate(
             f"Reproduction run lifecycle_state is {reproduction.provenance.lifecycle_state!r}, expected 'reproduction'"
         )
 
-    # 3. Check hash consistency across candidate, reproduction, and promotion receipt
+    # 3. Check hash consistency across candidate and reproduction
     hashes = {
         "dataset_sha256": candidate.provenance.dataset_sha256,
         "contract_sha256": candidate.provenance.contract_sha256,
@@ -100,13 +132,13 @@ def evaluate_phase7_gate(
         reasons.append("Feature schema SHA-256 mismatch between candidate and reproduction")
     if reproduction.provenance.champion_package_sha256 != hashes["champion_package_sha256"]:
         reasons.append("Champion package SHA-256 mismatch between candidate and reproduction")
+    if reproduction.provenance.source_git_sha != hashes["source_git_sha"]:
+        reasons.append("Source Git SHA mismatch between candidate and reproduction")
+    if reproduction.provenance.alert_policy_sha256 != hashes["alert_policy_sha256"]:
+        reasons.append("Alert policy SHA-256 mismatch between candidate and reproduction")
 
-    if receipt.dataset_sha256 != hashes["dataset_sha256"]:
-        reasons.append("Dataset SHA-256 mismatch between candidate and promotion receipt")
-    if receipt.contract_sha256 != hashes["contract_sha256"]:
-        reasons.append("Contract SHA-256 mismatch between candidate and promotion receipt")
-    if receipt.champion_package_sha256 != hashes["champion_package_sha256"]:
-        reasons.append("Champion package SHA-256 mismatch between candidate and promotion receipt")
+    if candidate.package_manifest_sha256 != hashes["champion_package_sha256"]:
+        reasons.append("Package manifest SHA-256 mismatch in candidate result")
 
     # 4. Check numerical reproducibility tolerances
     th_delta = abs(float(reproduction.threshold) - float(expected_threshold))
@@ -142,13 +174,17 @@ def evaluate_phase7_gate(
         candidate_run_id=candidate.run_id,
         reproduction_run_id=reproduction.run_id,
         verified_hashes=hashes,
+        package_manifest_sha256=hashes["champion_package_sha256"],
+        alert_policy_sha256=hashes["alert_policy_sha256"],
         reasons=reasons,
-    )
+        self_sha256="",
+    ).with_computed_hash()
 
 
 def write_phase7_gate_report(path: Path, result: Phase7GateResult) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    content = canonical_dumps(result.to_dict())
+    res_with_hash = result.with_computed_hash()
+    content = canonical_dumps(res_with_hash.to_dict())
     temp_path = path.with_suffix(".tmp")
     temp_path.write_text(content, encoding="utf-8")
     temp_path.replace(path)
@@ -159,17 +195,23 @@ def run_phase7_gate(
     champion_package: Path,
     features_path: Path,
     phase1b_run_dir: Path,
-    receipt_path: Path | None = None,
     output_dir: Path | None = None,
     tracking_uri: str | None = None,
+    expected_source_git_sha: str | None = None,
+    alert_policy_path: Path | None = None,
+    mlflow_client: Any = None,
 ) -> Phase7GateResult:
-    receipt_file = receipt_path or (champion_package / "promotion-receipt.json")
-    if not receipt_file.is_file():
-        raise FileNotFoundError(f"Promotion receipt not found at {receipt_file}")
-
-    receipt = load_promotion_receipt(receipt_file)
+    from industrial_reliability.ml_lifecycle import (
+        ImportCandidateRequest,
+        ReproductionRequest,
+        import_candidate,
+        reproduce_candidate,
+    )
 
     manifest_file = champion_package / "manifest.json"
+    if not manifest_file.is_file():
+        raise FileNotFoundError(f"Champion package manifest not found at {manifest_file}")
+
     manifest = ChampionManifest.model_validate_json(manifest_file.read_text(encoding="utf-8"))
 
     # Load golden cases
@@ -182,8 +224,11 @@ def run_phase7_gate(
         ImportCandidateRequest(
             champion_package=champion_package,
             phase1b_run_dir=phase1b_run_dir,
+            expected_source_git_sha=expected_source_git_sha,
+            alert_policy_path=alert_policy_path,
             tracking_uri=tracking_uri,
-        )
+        ),
+        mlflow_client=mlflow_client,
     )
 
     # Run reproduction
@@ -192,14 +237,16 @@ def run_phase7_gate(
             features_path=features_path,
             phase1b_run_dir=phase1b_run_dir,
             champion_package=champion_package,
+            expected_source_git_sha=expected_source_git_sha,
+            alert_policy_path=alert_policy_path,
             tracking_uri=tracking_uri,
-        )
+        ),
+        mlflow_client=mlflow_client,
     )
 
     gate_result = evaluate_phase7_gate(
         candidate=cand_res,
         reproduction=repro_res,
-        receipt=receipt,
         expected_threshold=float(manifest.threshold),
         expected_golden_scores=expected_golden,
     )
@@ -216,18 +263,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--champion-package", type=Path, required=True)
     parser.add_argument("--features-path", type=Path, required=True)
     parser.add_argument("--phase1b-run-dir", type=Path, required=True)
-    parser.add_argument("--receipt", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/phase7"))
     parser.add_argument("--tracking-uri", type=str, default=None)
+    parser.add_argument("--expected-source-git-sha", type=str, default=None)
+    parser.add_argument("--alert-policy", type=Path, default=None)
 
     args = parser.parse_args(argv)
     result = run_phase7_gate(
         champion_package=args.champion_package,
         features_path=args.features_path,
         phase1b_run_dir=args.phase1b_run_dir,
-        receipt_path=args.receipt,
         output_dir=args.output_dir,
         tracking_uri=args.tracking_uri,
+        expected_source_git_sha=args.expected_source_git_sha,
+        alert_policy_path=args.alert_policy,
     )
     print(f"Phase 7 Gate Verdict: {result.verdict}")
     if result.reasons:

@@ -419,3 +419,54 @@ def test_rca_report_is_frozen() -> None:
     report = RcaReportV1.model_validate(_valid_rca_payload())
     with pytest.raises(ValidationError):
         report.status = "UNAVAILABLE"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("tp2", 21.0),
+        ("tp2", -2.0),
+        ("tp3", -2.0),
+        ("tp3", 21.0),
+        ("h1", -2.0),
+        ("h1", 21.0),
+        ("dv_pressure", -2.0),
+        ("dv_pressure", 21.0),
+        ("reservoirs", -2.0),
+        ("reservoirs", 21.0),
+        ("oil_temperature", 151.0),
+        ("oil_temperature", -45.0),
+        ("motor_current", 51.0),
+        ("motor_current", -1.0),
+    ],
+)
+def test_runtime_rejects_hard_physical_envelope(field: str, value: float) -> None:
+    payload = {
+        "schema_version": "telemetry-event-v1",
+        "message_id": uuid4(),
+        "replay_session_id": uuid4(),
+        "source_dataset_sha256": "a" * 64,
+        "contract_sha256": "b" * 64,
+        "source_timestamp": datetime(2020, 3, 1, 0, 0),
+        "emitted_at": datetime.now(UTC),
+        "machine_id": "compressor-01",
+        "sequence": 1,
+        "tp2": 1.0,
+        "tp3": 2.0,
+        "h1": 3.0,
+        "dv_pressure": 4.0,
+        "reservoirs": 5.0,
+        "oil_temperature": 6.0,
+        "motor_current": 7.0,
+        "comp": 1,
+        "dv_electric": 0,
+        "towers": 1,
+        "mpg": 0,
+        "lps": 1,
+        "pressure_switch": 0,
+        "oil_level": 1,
+        "caudal_impulses": 0,
+    }
+    payload[field] = value
+    with pytest.raises(ValidationError, match=field):
+        TelemetryEventV1.model_validate(payload)

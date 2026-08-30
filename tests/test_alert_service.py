@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -192,3 +193,82 @@ async def test_alert_service_commits_ok_records_then_halts_on_session_failed(
     mock_consumer.commit.assert_awaited_once_with({tp: 8})
     assert mock_alert_consumer.process.await_count == 2
     assert service._running is False
+
+
+@pytest.mark.asyncio
+async def test_alert_service_commits_quarantined_record(tmp_path: Path) -> None:
+    policy = _make_policy()
+    policy_file = tmp_path / "alert-policy.json"
+    policy_file.write_text(json.dumps(policy.to_dict()), encoding="utf-8")
+
+    settings = AlertServiceSettings(
+        kafka=KafkaSettings(bootstrap_servers="localhost:9092", client_id="test"),
+        database_url="sqlite:///:memory:",
+        policy_path=policy_file,
+    )
+
+    service = AlertService(settings)
+    mock_consumer = AsyncMock()
+    mock_alert_consumer = AsyncMock()
+
+    service.consumer = mock_consumer
+    service.alert_consumer = mock_alert_consumer
+
+    tp = TopicPartition("irp.scores.v1", 0)
+    bad_record = Mock(offset=15)
+    mock_consumer.getmany.side_effect = [
+        {tp: [bad_record]},
+        asyncio.CancelledError(),
+    ]
+    mock_alert_consumer.process.return_value = ProcessOutcome.QUARANTINED
+
+    service._running = True
+    with pytest.raises(asyncio.CancelledError):
+        await service._run_consumer_loop()
+
+    mock_alert_consumer.process.assert_awaited_once_with(bad_record)
+    mock_consumer.commit.assert_awaited_once_with({tp: 16})
+
+
+@pytest.mark.asyncio
+async def test_alert_service_unhandled_exception_leaves_offset_uncommitted(
+    tmp_path: Path,
+) -> None:
+    policy = _make_policy()
+    policy_file = tmp_path / "alert-policy.json"
+    policy_file.write_text(json.dumps(policy.to_dict()), encoding="utf-8")
+
+    settings = AlertServiceSettings(
+        kafka=KafkaSettings(bootstrap_servers="localhost:9092", client_id="test"),
+        database_url="sqlite:///:memory:",
+        policy_path=policy_file,
+    )
+
+    service = AlertService(settings)
+    mock_consumer = AsyncMock()
+    mock_alert_consumer = AsyncMock()
+
+    service.consumer = mock_consumer
+    service.alert_consumer = mock_alert_consumer
+
+    tp = TopicPartition("irp.scores.v1", 0)
+    bad_record = Mock(offset=20)
+    loop_count = 0
+
+    async def fake_getmany(**kwargs: Any) -> dict[Any, list[Any]]:
+        nonlocal loop_count
+        loop_count += 1
+        if loop_count == 1:
+            return {tp: [bad_record]}
+        service._running = False
+        return {}
+
+    mock_consumer.getmany.side_effect = fake_getmany
+    mock_alert_consumer.process.side_effect = RuntimeError("Quarantine publish failed")
+
+    service._running = True
+    await service._run_consumer_loop()
+
+    mock_alert_consumer.process.assert_awaited_once_with(bad_record)
+    # Offsets must NOT have been committed due to unhandled error
+    mock_consumer.commit.assert_not_awaited()

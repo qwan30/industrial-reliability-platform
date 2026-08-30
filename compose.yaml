@@ -9,12 +9,27 @@ services:
       POSTGRES_DB: irp
     volumes:
       - "postgres-data:/var/lib/postgresql/data"
-      - "./db/migrations:/docker-entrypoint-initdb.d:ro"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U irp -d irp"]
       interval: 3s
       timeout: 3s
       retries: 20
+
+  db-migrate:
+    build: .
+    command:
+      - python
+      - -m
+      - industrial_reliability.migrations
+      - --database-url
+      - postgresql://irp:irp_password@postgres:5432/irp
+      - --path
+      - /app/db/migrations
+    volumes:
+      - "./db/migrations:/app/db/migrations:ro"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   kafka:
     image: apache/kafka:4.0.0
@@ -56,11 +71,12 @@ services:
       RCA_OPENAI_MODEL: ${RCA_OPENAI_MODEL:-}
       RCA_TIMEOUT_SECONDS: ${RCA_TIMEOUT_SECONDS:-20}
     depends_on:
-
       kafka:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
       interval: 5s
@@ -77,10 +93,16 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: industrial-reliability
       REPLAY_PARQUET_PATH: /runtime/data/metropt3/telemetry.parquet
+      REPLAY_PACKAGE_MANIFEST: /runtime/scoring-package/manifest.json
       METRICS_PORT: "9101"
+      DATABASE_URL: postgresql://irp:irp_password@postgres:5432/irp
     depends_on:
       kafka:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
 
   streaming-worker:
     build: .
@@ -94,6 +116,7 @@ services:
       SCORING_MANIFEST_SHA256: ${SCORING_MANIFEST_SHA256:-}
       ALLOW_RESEARCH_CANDIDATE: ${ALLOW_RESEARCH_CANDIDATE:-false}
       DATABASE_URL: postgresql://irp:irp_password@postgres:5432/irp
+      DRIFT_REFERENCE_PATH: /runtime/scoring-package/drift-reference.json
       METRICS_PORT: "9102"
     depends_on:
       kafka:
@@ -102,6 +125,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
 
   alert-service:
     build: .
@@ -118,6 +143,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
 
   operator-console:
     build:
@@ -149,6 +176,7 @@ services:
     ports: ["127.0.0.1:9090:9090"]
     volumes:
       - "./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      - "./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro"
       - "prometheus-data:/prometheus"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"

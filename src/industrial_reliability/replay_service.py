@@ -9,7 +9,7 @@ import hashlib
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -22,6 +22,13 @@ from industrial_reliability.kafka_io import (
     encode_message,
 )
 from industrial_reliability.metrics import RuntimeMetrics, start_process_metrics
+from industrial_reliability.package_champion import ChampionManifest
+from industrial_reliability.persistence import (
+    ReplayCheckpoint,
+    ReplayCheckpointState,
+    RuntimeStore,
+)
+from industrial_reliability.phase1b_contracts import metropt3_contract_manifest
 from industrial_reliability.replay import (
     ReplayController,
     ReplaySource,
@@ -51,16 +58,29 @@ class RunningSession:
     stop_event: asyncio.Event
 
 
+def _checkpoint_state(
+    pause_event: asyncio.Event,
+    stop_event: asyncio.Event,
+) -> ReplayCheckpointState:
+    if stop_event.is_set():
+        return "STOPPED"
+    if not pause_event.is_set():
+        return "PAUSED"
+    return "RUNNING"
+
+
 class ReplayService:
     def __init__(
         self,
         settings: KafkaSettings,
         replay_source: ReplaySource,
+        store: RuntimeStore | None = None,
         enable_pacing: bool = True,
         metrics: RuntimeMetrics | None = None,
     ) -> None:
         self.settings = settings
         self.source = replay_source
+        self.store = store
         self.enable_pacing = enable_pacing
         self.metrics = metrics
         self.producer: AIOKafkaProducer | None = None
@@ -88,6 +108,120 @@ class ReplayService:
         if self.metrics is not None:
             self.metrics.set_dependency_ready("kafka", True)
         self._running = True
+
+        if self.store is not None:
+            incomplete = self.store.load_incomplete_replays()
+            if len(incomplete) > 1:
+                raise RuntimeError(
+                    "multiple incomplete replay sessions require operator resolution"
+                )
+            if incomplete:
+                checkpoint = incomplete[0]
+                if checkpoint.state not in ("RUNNING", "PAUSED"):
+                    raise RuntimeError(f"cannot resume checkpoint in state {checkpoint.state}")
+                pause_event = asyncio.Event()
+                if checkpoint.state == "RUNNING":
+                    pause_event.set()
+                stop_event = asyncio.Event()
+                controller = ReplayController.created(
+                    checkpoint.replay_session_id,
+                    checkpoint.command.source_dataset_sha256,
+                    checkpoint.command.contract_sha256,
+                ).apply(checkpoint.command)
+                controller = replace(
+                    controller,
+                    state=checkpoint.state,
+                    last_sequence=checkpoint.last_sequence,
+                    current_source_timestamp=checkpoint.source_timestamp,
+                )
+                task = asyncio.create_task(
+                    self.resume_checkpoint(checkpoint, pause_event, stop_event),
+                    name=f"replay-resume-{checkpoint.replay_session_id}",
+                )
+                self.active_session = RunningSession(
+                    controller=controller,
+                    task=task,
+                    pause_event=pause_event,
+                    stop_event=stop_event,
+                )
+
+    async def resume_checkpoint(
+        self,
+        checkpoint: ReplayCheckpoint,
+        pause_event: asyncio.Event | None = None,
+        stop_event: asyncio.Event | None = None,
+    ) -> None:
+        if pause_event is None:
+            pause_event = asyncio.Event()
+            pause_event.set()
+        if stop_event is None:
+            stop_event = asyncio.Event()
+
+        ctrl = ReplayController.created(
+            checkpoint.replay_session_id,
+            checkpoint.command.source_dataset_sha256,
+            checkpoint.command.contract_sha256,
+        ).apply(checkpoint.command)
+        last_sequence = checkpoint.last_sequence
+        last_timestamp = checkpoint.source_timestamp
+
+        try:
+            for event in self.source.iter_events(
+                checkpoint.command,
+                start_sequence=checkpoint.last_sequence + 1,
+                resume_from_timestamp=checkpoint.source_timestamp,
+            ):
+                await pause_event.wait()
+                if stop_event.is_set():
+                    return
+                await self.publish_telemetry(event)
+                last_sequence = event.sequence
+                last_timestamp = event.source_timestamp
+                if self.store is not None:
+                    self.store.record_replay_checkpoint(
+                        command=checkpoint.command,
+                        state=_checkpoint_state(pause_event, stop_event),
+                        last_sequence=last_sequence,
+                        source_timestamp=last_timestamp,
+                    )
+
+            await pause_event.wait()
+            if stop_event.is_set():
+                return
+            terminal_timestamp = (
+                last_timestamp
+                or checkpoint.command.range_start
+                or checkpoint.command.source_timestamp
+            )
+            ctrl = ctrl.mark_completed(last_sequence, terminal_timestamp)
+            if self.store is not None:
+                self.store.record_replay_checkpoint(
+                    command=checkpoint.command,
+                    state="COMPLETED",
+                    last_sequence=last_sequence,
+                    source_timestamp=terminal_timestamp,
+                )
+            await self.publish_status(ctrl.status())
+        except Exception as err:
+            logger.exception("Recovered replay session failed: %s", err)
+            terminal_timestamp = (
+                last_timestamp
+                or checkpoint.command.range_start
+                or checkpoint.command.source_timestamp
+            )
+            ctrl = ctrl.mark_failed(
+                error_code="REPLAY_STREAM_ERROR",
+                last_sequence=last_sequence,
+                source_timestamp=terminal_timestamp,
+            )
+            if self.store is not None:
+                self.store.record_replay_checkpoint(
+                    command=checkpoint.command,
+                    state="FAILED",
+                    last_sequence=last_sequence,
+                    source_timestamp=terminal_timestamp,
+                )
+            await self.publish_status(ctrl.status())
 
     async def stop(self) -> None:
         self._running = False
@@ -185,6 +319,25 @@ class ReplayService:
             await self.publish_status(failed_ctrl.status())
             return
 
+        if (
+            command.source_dataset_sha256 != self.source.identity.source_dataset_sha256
+            or command.contract_sha256 != self.source.identity.contract_sha256
+        ):
+            failed = ReplayController.created(
+                command.replay_session_id,
+                self.source.identity.source_dataset_sha256,
+                self.source.identity.contract_sha256,
+            ).mark_failed(
+                "REPLAY_SOURCE_IDENTITY_MISMATCH",
+                0,
+                command.source_timestamp,
+            )
+            await self.publish_status(failed.status())
+            return
+
+        if self.store is not None:
+            self.store.record_replay_checkpoint(command, "RUNNING", 0, None)
+
         ctrl = ReplayController.created(
             command.replay_session_id,
             command.source_dataset_sha256,
@@ -213,9 +366,11 @@ class ReplayService:
             and self.active_session.controller.session_id == command.replay_session_id
             and not self.active_session.task.done()
         ):
-            self.active_session.pause_event.clear()
             ctrl = self.active_session.controller.apply(command)
+            if self.store is not None:
+                self.store.update_replay_checkpoint_state(ctrl.session_id, "PAUSED")
             self.active_session.controller = ctrl
+            self.active_session.pause_event.clear()
             await self.publish_status(ctrl.status())
 
     async def _handle_resume_command(self, command: ReplayCommandV1) -> None:
@@ -225,6 +380,8 @@ class ReplayService:
             and not self.active_session.task.done()
         ):
             ctrl = self.active_session.controller.apply(command)
+            if self.store is not None:
+                self.store.update_replay_checkpoint_state(ctrl.session_id, "RUNNING")
             self.active_session.controller = ctrl
             self.active_session.pause_event.set()
             await self.publish_status(ctrl.status())
@@ -235,10 +392,12 @@ class ReplayService:
             and self.active_session.controller.session_id == command.replay_session_id
             and not self.active_session.task.done()
         ):
+            ctrl = self.active_session.controller.apply(command)
+            if self.store is not None:
+                self.store.update_replay_checkpoint_state(ctrl.session_id, "STOPPED")
+            self.active_session.controller = ctrl
             self.active_session.stop_event.set()
             self.active_session.pause_event.set()
-            ctrl = self.active_session.controller.apply(command)
-            self.active_session.controller = ctrl
             await self.publish_status(ctrl.status())
 
     async def handle_command(self, command: ReplayCommandV1) -> None:
@@ -295,8 +454,25 @@ class ReplayService:
                 last_seq = event.sequence
 
                 await self.publish_telemetry(event)
+                if self.store is not None:
+                    self.store.record_replay_checkpoint(
+                        command=start_cmd,
+                        state=_checkpoint_state(pause_event, stop_event),
+                        last_sequence=last_seq,
+                        source_timestamp=last_ts,
+                    )
 
+            await pause_event.wait()
+            if stop_event.is_set():
+                return
             ctrl = ctrl.mark_completed(last_seq, last_ts)
+            if self.store is not None:
+                self.store.record_replay_checkpoint(
+                    command=start_cmd,
+                    state="COMPLETED",
+                    last_sequence=last_seq,
+                    source_timestamp=last_ts,
+                )
             await self.publish_status(ctrl.status())
 
         except Exception as err:
@@ -306,6 +482,13 @@ class ReplayService:
                 last_sequence=last_seq,
                 source_timestamp=last_ts,
             )
+            if self.store is not None:
+                self.store.record_replay_checkpoint(
+                    command=start_cmd,
+                    state="FAILED",
+                    last_sequence=last_seq,
+                    source_timestamp=last_ts,
+                )
             await self.publish_status(ctrl.status())
 
 
@@ -315,11 +498,36 @@ def run_certification(
     range_end: datetime,
     speeds: list[int],
     output_dir: Path,
+    expected_contract_sha256: str | None = None,
+    expected_source_dataset_sha256: str | None = None,
+    expected_output_sha256: str | None = None,
+    package_manifest: ChampionManifest | None = None,
 ) -> dict[str, object]:
     safe_out = output_dir.resolve()
     safe_out.mkdir(parents=True, exist_ok=True)
     safe_pq = parquet_path.resolve()
-    source = ReplaySource(safe_pq)
+    if package_manifest is not None:
+        contract_sha = expected_contract_sha256 or package_manifest.contract_sha256
+        source_sha = expected_source_dataset_sha256 or package_manifest.source_dataset_sha256
+        output_sha = expected_output_sha256 or package_manifest.prepared_output_sha256
+    else:
+        manifest_path = safe_pq.with_name("manifest.json")
+        contract_meta = metropt3_contract_manifest()
+        contract_sha = expected_contract_sha256 or str(contract_meta["contract_sha256"])
+        source_sha = expected_source_dataset_sha256 or str(contract_meta.get("archive_sha256", ""))
+        if expected_output_sha256 is not None:
+            output_sha = expected_output_sha256
+        elif manifest_path.is_file():
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            output_sha = str(data.get("output_sha256", ""))
+        else:
+            output_sha = ""
+    source = ReplaySource(
+        safe_pq,
+        expected_contract_sha256=contract_sha,
+        expected_source_dataset_sha256=source_sha,
+        expected_output_sha256=output_sha,
+    )
     results: dict[str, object] = {"speeds": speeds, "streams": {}}
 
     logical_hashes: set[str] = set()
@@ -333,8 +541,8 @@ def run_certification(
         cmd = ReplayCommandV1(
             message_id=uuid4(),
             replay_session_id=session_id,
-            source_dataset_sha256="a" * 64,
-            contract_sha256="b" * 64,
+            source_dataset_sha256=source.identity.source_dataset_sha256,
+            contract_sha256=source.identity.contract_sha256,
             source_timestamp=range_start,
             emitted_at=datetime.now(UTC),
             command_id=uuid4(),
@@ -375,10 +583,16 @@ def main() -> None:
     parser.add_argument("--certify-range-end", type=datetime.fromisoformat, required=False)
     parser.add_argument("--speeds", type=int, nargs="+", default=[1, 100, 1000])
     parser.add_argument("--output", type=Path, default=Path("artifacts/certification/phase-3"))
+    default_parquet = Path(
+        os.environ.get(
+            "REPLAY_PARQUET_PATH",
+            "data/processed/phase1b/metropt3/telemetry.parquet",
+        )
+    )
     parser.add_argument(
         "--parquet",
         type=Path,
-        default=Path("data/processed/phase1b/metropt3/telemetry.parquet"),
+        default=default_parquet,
     )
     args = parser.parse_args()
 
@@ -405,9 +619,25 @@ def main() -> None:
             start_process_metrics(int(metrics_port), registry)
             logger.info("Metrics server started on port %s", metrics_port)
 
+        package_manifest_path = Path(
+            os.environ.get(
+                "REPLAY_PACKAGE_MANIFEST",
+                "/runtime/scoring-package/manifest.json",
+            )
+        )
+        package_manifest = ChampionManifest.model_validate_json(
+            package_manifest_path.read_text(encoding="utf-8")
+        )
+        source = ReplaySource(
+            args.parquet.resolve(),
+            expected_contract_sha256=package_manifest.contract_sha256,
+            expected_source_dataset_sha256=package_manifest.source_dataset_sha256,
+            expected_output_sha256=package_manifest.prepared_output_sha256,
+        )
         settings = KafkaSettings.from_env()
-        source = ReplaySource(args.parquet.resolve())
-        service = ReplayService(settings, source, metrics=metrics)
+        db_url = os.environ.get("DATABASE_URL")
+        store = RuntimeStore(db_url) if db_url else None
+        service = ReplayService(settings, source, store=store, metrics=metrics)
         asyncio.run(service.run())
 
 

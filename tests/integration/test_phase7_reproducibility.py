@@ -13,10 +13,6 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from industrial_reliability.ml_provenance import (
-    PromotionReceiptV1,
-    write_promotion_receipt,
-)
 from industrial_reliability.models import RobustStatisticalDetector
 from industrial_reliability.package_champion import build_champion_package
 from industrial_reliability.phase1b_data import sha256_file
@@ -46,13 +42,13 @@ def _setup_test_champion(base_dir: Path) -> tuple[Path, Path, Path]:
     )
 
     from industrial_reliability.phase1b_benchmark import calibrate_threshold
-    from industrial_reliability.phase1b_contracts import PHASE1B
+    from industrial_reliability.phase1b_contracts import PHASE1C
 
     calib_matrix = np.array(
         [[1.0 + i * 0.5, 2.0 + i * 0.5] for i in range(5, 10)], dtype=np.float64
     )
     calib_scores_arr = detector.score(calib_matrix)
-    computed_threshold = float(calibrate_threshold(calib_scores_arr, PHASE1B))
+    computed_threshold = float(calibrate_threshold(calib_scores_arr, PHASE1C))
 
     feat_records = []
     scores_records = []
@@ -110,6 +106,7 @@ def _setup_test_champion(base_dir: Path) -> tuple[Path, Path, Path]:
         "active_feature_names": feature_names,
         "contract_sha256": "a" * 64,
         "source_dataset_sha256": "b" * 64,
+        "prepared_output_sha256": "c" * 64,
         "feature_output_sha256": sha256_file(feat_path),
         "artifact_sha256": {
             "scores_parquet": sha256_file(scores_path),
@@ -123,23 +120,6 @@ def _setup_test_champion(base_dir: Path) -> tuple[Path, Path, Path]:
 
     pkg_dir = base_dir / "champion"
     build_champion_package(run_dir, feat_path, pkg_dir)
-
-    receipt = PromotionReceiptV1(
-        schema_version="mlflow-promotion-receipt-v1",
-        mlflow_run_id="run-mlflow-001",
-        registered_model_name="industrial-reliability-anomaly-detector",
-        registered_model_version="1",
-        alias="champion",
-        model_version="champion-statistical-v1",
-        dataset_sha256="b" * 64,
-        contract_sha256="a" * 64,
-        champion_package_sha256=sha256_file(pkg_dir / "manifest.json"),
-        source_git_sha="0" * 40,
-        approver="reliability-engineer",
-        promoted_at="2026-08-25T00:00:00Z",
-        receipt_sha256="",
-    ).with_computed_hash()
-    write_promotion_receipt(pkg_dir / "promotion-receipt.json", receipt)
 
     return run_dir, feat_path, pkg_dir
 

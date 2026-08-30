@@ -85,7 +85,12 @@ def _write_phase1b_metrics(tmp_path: Path, verdict: str = "NOT FEASIBLE") -> Non
     )
 
 
-def _write_passing_phase8_report(tmp_path: Path, evidence_level: str = "INTEGRATION") -> None:
+def _write_passing_phase8_report(
+    tmp_path: Path,
+    evidence_level: str = "INTEGRATION",
+    simulated_components: list[str] | None = None,
+    dependency_receipts: list[dict[str, Any]] | None = None,
+) -> None:
     drills = [
         {
             "drill_type": "scoring-outage",
@@ -117,6 +122,16 @@ def _write_passing_phase8_report(tmp_path: Path, evidence_level: str = "INTEGRAT
         {
             "schema_version": "phase8-live-fault-drills-v1",
             "evidence_level": evidence_level,
+            "simulated_components": [] if simulated_components is None else simulated_components,
+            "dependency_receipts": (
+                [
+                    {"dependency": "kafka"},
+                    {"dependency": "postgres"},
+                    {"dependency": "scoring_api"},
+                ]
+                if dependency_receipts is None
+                else dependency_receipts
+            ),
             "git_sha": "a" * 40,
             "verdict": "PASS",
             "all_passed": True,
@@ -126,39 +141,85 @@ def _write_passing_phase8_report(tmp_path: Path, evidence_level: str = "INTEGRAT
     )
 
 
-def _write_passing_phase9_report(tmp_path: Path, evidence_level: str = "INTEGRATION") -> None:
-    checks = [
-        {
-            "name": "fallback_generator_available",
-            "passed": True,
-            "details": "Fallback generator operates without key",
-        },
-        {
-            "name": "allowlisted_evidence_projection",
-            "passed": True,
-            "details": "4 projection tools enforced",
-        },
-        {
-            "name": "citation_enforcement_and_grounding",
-            "passed": True,
-            "details": "Citations valid",
-        },
-        {
-            "name": "secret_isolation_and_scrubbing",
-            "passed": True,
-            "details": "Secrets scrubbed",
-        },
-    ]
+def _write_passing_phase9_report(
+    tmp_path: Path,
+    evidence_level: str = "LIVE",
+    provider_mode: str = "LIVE_OPENAI",
+    simulated_components: list[str] | None = None,
+    dependency_receipts: list[dict[str, Any]] | None = None,
+) -> None:
+    if provider_mode == "LIVE_OPENAI":
+        checks = [
+            {
+                "name": "openai_sdk_responses_parse_support",
+                "passed": True,
+                "details": "OpenAI SDK parse support verified",
+            },
+            {
+                "name": "allowlisted_evidence_projection",
+                "passed": True,
+                "details": "4 projection tools enforced",
+            },
+            {
+                "name": "citation_enforcement_and_grounding",
+                "passed": True,
+                "details": "Citations valid",
+            },
+            {
+                "name": "graceful_fallback_on_provider_error",
+                "passed": True,
+                "details": "Graceful fallback verified",
+            },
+            {
+                "name": "secret_isolation_and_scrubbing",
+                "passed": True,
+                "details": "Secrets scrubbed",
+            },
+        ]
+        filename = "phase-9-rca-openai.json"
+        schema = "phase-9-rca-openai-v1"
+        default_receipts = [{"dependency": "openai"}]
+    else:
+        checks = [
+            {
+                "name": "fallback_generator_available",
+                "passed": True,
+                "details": "Fallback generator operates without key",
+            },
+            {
+                "name": "allowlisted_evidence_projection",
+                "passed": True,
+                "details": "4 projection tools enforced",
+            },
+            {
+                "name": "citation_enforcement_and_grounding",
+                "passed": True,
+                "details": "Citations valid",
+            },
+            {
+                "name": "secret_isolation_and_scrubbing",
+                "passed": True,
+                "details": "Secrets scrubbed",
+            },
+        ]
+        filename = "phase-9-rca-fallback.json"
+        schema = "phase-9-rca-fallback-v1"
+        default_receipts = []
+
     _write_self_hashed_report(
-        tmp_path / "phase-9-rca-fallback.json",
+        tmp_path / filename,
         {
-            "schema_version": "phase-9-rca-fallback-v1",
+            "schema_version": schema,
             "evidence_level": evidence_level,
-            "provider_mode": "FALLBACK_ONLY",
+            "provider_mode": provider_mode,
+            "simulated_components": [] if simulated_components is None else simulated_components,
+            "dependency_receipts": (
+                default_receipts if dependency_receipts is None else dependency_receipts
+            ),
             "git_sha": "a" * 40,
             "verdict": "PASS",
-            "total_checks": 4,
-            "passed_checks": 4,
+            "total_checks": len(checks),
+            "passed_checks": len(checks),
             "checks": checks,
         },
         "report_sha256",
@@ -207,6 +268,12 @@ def test_validator_rejects_failing_phase8_evidence(tmp_path: Path) -> None:
         {
             "schema_version": "phase8-live-fault-drills-v1",
             "evidence_level": "INTEGRATION",
+            "simulated_components": [],
+            "dependency_receipts": [
+                {"dependency": "kafka"},
+                {"dependency": "postgres"},
+                {"dependency": "scoring_api"},
+            ],
             "git_sha": "a" * 40,
             "verdict": "FAIL",
             "all_passed": False,
@@ -240,6 +307,12 @@ def test_validator_rejects_empty_phase8_drills(tmp_path: Path) -> None:
         {
             "schema_version": "phase8-live-fault-drills-v1",
             "evidence_level": "INTEGRATION",
+            "simulated_components": [],
+            "dependency_receipts": [
+                {"dependency": "kafka"},
+                {"dependency": "postgres"},
+                {"dependency": "scoring_api"},
+            ],
             "git_sha": "a" * 40,
             "verdict": "PASS",
             "all_passed": True,
@@ -258,11 +331,13 @@ def test_validator_rejects_empty_phase9_checks(tmp_path: Path) -> None:
     _write_phase1b_metrics(tmp_path)
     _write_passing_phase8_report(tmp_path)
     _write_self_hashed_report(
-        tmp_path / "phase-9-rca-fallback.json",
+        tmp_path / "phase-9-rca-openai.json",
         {
-            "schema_version": "phase-9-rca-fallback-v1",
-            "evidence_level": "INTEGRATION",
-            "provider_mode": "FALLBACK_ONLY",
+            "schema_version": "phase-9-rca-openai-v1",
+            "evidence_level": "LIVE",
+            "provider_mode": "LIVE_OPENAI",
+            "simulated_components": [],
+            "dependency_receipts": [{"dependency": "openai"}],
             "git_sha": "a" * 40,
             "verdict": "PASS",
             "total_checks": 0,
@@ -302,16 +377,18 @@ def test_validator_rejects_failing_phase9_evidence(tmp_path: Path) -> None:
     _write_phase1b_metrics(tmp_path)
     _write_passing_phase8_report(tmp_path)
     _write_self_hashed_report(
-        tmp_path / "phase-9-rca-fallback.json",
+        tmp_path / "phase-9-rca-openai.json",
         {
-            "schema_version": "phase-9-rca-fallback-v1",
-            "evidence_level": "INTEGRATION",
-            "provider_mode": "FALLBACK_ONLY",
+            "schema_version": "phase-9-rca-openai-v1",
+            "evidence_level": "LIVE",
+            "provider_mode": "LIVE_OPENAI",
+            "simulated_components": [],
+            "dependency_receipts": [{"dependency": "openai"}],
             "git_sha": "a" * 40,
             "verdict": "FAIL",
             "checks": [
                 {
-                    "name": "fallback_generator_available",
+                    "name": "openai_sdk_responses_parse_support",
                     "passed": False,
                     "details": "Failed",
                 }
@@ -334,6 +411,12 @@ def test_validator_rejects_tampered_self_hash(tmp_path: Path) -> None:
         {
             "schema_version": "phase8-live-fault-drills-v1",
             "evidence_level": "INTEGRATION",
+            "simulated_components": [],
+            "dependency_receipts": [
+                {"dependency": "kafka"},
+                {"dependency": "postgres"},
+                {"dependency": "scoring_api"},
+            ],
             "git_sha": "a" * 40,
             "verdict": "PASS",
             "all_passed": True,
@@ -392,7 +475,7 @@ def test_validator_rejects_renamed_report_with_foreign_schema(tmp_path: Path) ->
     """A unit-gate report renamed to a release filename must not certify."""
     _write_phase1b_metrics(tmp_path)
     _write_self_hashed_report(
-        tmp_path / "phase-9-rca-fallback.json",
+        tmp_path / "phase-9-rca-openai.json",
         {
             "schema_version": "phase-9-rca-contract-v1",
             "evidence_level": "UNIT",
@@ -418,6 +501,12 @@ def test_validator_rejects_evidence_bound_to_different_commit(tmp_path: Path) ->
         {
             "schema_version": "phase8-live-fault-drills-v1",
             "evidence_level": "INTEGRATION",
+            "simulated_components": [],
+            "dependency_receipts": [
+                {"dependency": "kafka"},
+                {"dependency": "postgres"},
+                {"dependency": "scoring_api"},
+            ],
             "git_sha": "b" * 40,
             "verdict": "PASS",
             "all_passed": True,
@@ -465,6 +554,12 @@ def test_validator_rejects_current_schema_without_self_hash(tmp_path: Path) -> N
             {
                 "schema_version": "phase8-live-fault-drills-v1",
                 "evidence_level": "INTEGRATION",
+                "simulated_components": [],
+                "dependency_receipts": [
+                    {"dependency": "kafka"},
+                    {"dependency": "postgres"},
+                    {"dependency": "scoring_api"},
+                ],
                 "git_sha": "a" * 40,
                 "verdict": "PASS",
             }
@@ -477,6 +572,69 @@ def test_validator_rejects_current_schema_without_self_hash(tmp_path: Path) -> N
     assert any("Phase 8" in lim for lim in report.limitations)
     assert report.verdict == "INVALID"
     assert report.is_certified is False
+
+
+def test_validator_rejects_evidence_with_simulated_components(tmp_path: Path) -> None:
+    _write_phase1b_metrics(tmp_path)
+    _write_passing_phase8_report(
+        tmp_path,
+        evidence_level="INTEGRATION",
+        simulated_components=["scoring API client (in-process double)"],
+    )
+    _write_passing_phase9_report(tmp_path)
+
+    report = ReleaseCertificationValidator(artifact_dir=tmp_path).evaluate(git_sha="a" * 40)
+    assert "phase8_observability_fault_drills" not in report.phases_passed
+    assert report.verdict == "INVALID"
+    assert report.is_certified is False
+
+
+def test_validator_rejects_phase8_missing_dependency_receipts(tmp_path: Path) -> None:
+    _write_phase1b_metrics(tmp_path)
+    _write_passing_phase8_report(
+        tmp_path,
+        evidence_level="INTEGRATION",
+        dependency_receipts=[{"dependency": "kafka"}],
+    )
+    _write_passing_phase9_report(tmp_path)
+
+    report = ReleaseCertificationValidator(artifact_dir=tmp_path).evaluate(git_sha="a" * 40)
+    assert "phase8_observability_fault_drills" not in report.phases_passed
+    assert report.verdict == "INVALID"
+    assert report.is_certified is False
+
+
+def test_validator_rejects_phase9_live_missing_openai_receipt(tmp_path: Path) -> None:
+    _write_phase1b_metrics(tmp_path)
+    _write_passing_phase8_report(tmp_path)
+    _write_passing_phase9_report(
+        tmp_path,
+        evidence_level="LIVE",
+        provider_mode="LIVE_OPENAI",
+        dependency_receipts=[],
+    )
+
+    report = ReleaseCertificationValidator(artifact_dir=tmp_path).evaluate(git_sha="a" * 40)
+    assert "phase9_grounded_rca" not in report.phases_passed
+    assert report.verdict == "INVALID"
+    assert report.is_certified is False
+
+
+@pytest.mark.parametrize("receipts", [None, "openai", {}, ["openai"]])
+def test_validator_rejects_malformed_dependency_receipts(
+    tmp_path: Path,
+    receipts: object,
+) -> None:
+    _write_phase1b_metrics(tmp_path)
+    _write_passing_phase8_report(tmp_path)
+    _write_passing_phase9_report(tmp_path)
+    path = tmp_path / "phase-9-rca-openai.json"
+    report = json.loads(path.read_text(encoding="utf-8"))
+    report["dependency_receipts"] = receipts
+    report["report_sha256"] = compute_self_hash(report, "report_sha256")
+    path.write_text(json.dumps(report), encoding="utf-8")
+    result = ReleaseCertificationValidator(tmp_path).evaluate("a" * 40)
+    assert result.is_certified is False
 
 
 def test_validator_rejects_unreadable_evidence(tmp_path: Path) -> None:

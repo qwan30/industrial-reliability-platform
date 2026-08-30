@@ -1,0 +1,128 @@
+{
+  "schema_version": "phase1b-benchmark-v1",
+  "run_id": "phase1b-run-81300167b8b8",
+  "timestamp": "2026-08-30T18:59:04.471723",
+  "verdict": "NOT FEASIBLE",
+  "selected_model": null,
+  "contract_sha256": "31f8689256951067e28c9cbb48a930c1617d8eea8c7133ba1a315f632842e1ad",
+  "source_dataset_sha256": "aab991a970e58210de853bb8078ce0e63abb4d9412fdc5c79792dae3d8e1721a",
+  "prepared_output_sha256": "0c31129cc4f4be982a6aec79f448485a2674b2fe79643186737143dccfe6d42a",
+  "feature_output_sha256": "667d61d5a8fed7c426f301088a705521f1133acb06bbe7f9861890499f1c6f0c",
+  "source_git_sha": "e6c1a93fef258c850f1e7f18462ac71b454e5592",
+  "models": {
+    "statistical": {
+      "threshold": 3503.9794954828394,
+      "valid_holdout_decisions": 41991,
+      "anomalous_decisions": 1012,
+      "time_in_alert": 0.024100402467195352,
+      "pr_auc": 0.05033336022427329,
+      "detected_events": 3,
+      "total_events": 4,
+      "false_episodes": 811,
+      "false_episodes_per_day": 5.707359984361255,
+      "feasible": false,
+      "event_results": [
+        {
+          "event_id": "metropt3-1",
+          "detected": false,
+          "first_detection_time": null,
+          "lead_seconds_to_source_start": null
+        },
+        {
+          "event_id": "metropt3-2",
+          "detected": true,
+          "first_detection_time": "2020-05-29T23:20:00",
+          "lead_seconds_to_source_start": 600.0
+        },
+        {
+          "event_id": "metropt3-3",
+          "detected": true,
+          "first_detection_time": "2020-06-05T09:10:00",
+          "lead_seconds_to_source_start": 3000.0
+        },
+        {
+          "event_id": "metropt3-4",
+          "detected": true,
+          "first_detection_time": "2020-07-15T12:50:00",
+          "lead_seconds_to_source_start": 6000.0
+        }
+      ]
+    },
+    "isolation_forest": {
+      "threshold": 0.6273371035625566,
+      "valid_holdout_decisions": 41991,
+      "anomalous_decisions": 7301,
+      "time_in_alert": 0.17387059131718702,
+      "pr_auc": 0.43322278934154235,
+      "detected_events": 4,
+      "total_events": 4,
+      "false_episodes": 2385,
+      "false_episodes_per_day": 16.78428306128433,
+      "feasible": false,
+      "event_results": [
+        {
+          "event_id": "metropt3-1",
+          "detected": true,
+          "first_detection_time": "2020-04-17T09:30:00",
+          "lead_seconds_to_source_start": 52200.0
+        },
+        {
+          "event_id": "metropt3-2",
+          "detected": true,
+          "first_detection_time": "2020-05-29T21:35:00",
+          "lead_seconds_to_source_start": 6900.0
+        },
+        {
+          "event_id": "metropt3-3",
+          "detected": true,
+          "first_detection_time": "2020-06-05T09:10:00",
+          "lead_seconds_to_source_start": 3000.0
+        },
+        {
+          "event_id": "metropt3-4",
+          "detected": true,
+          "first_detection_time": "2020-07-15T14:20:00",
+          "lead_seconds_to_source_start": 600.0
+        }
+      ]
+    },
+    "autoencoder": {
+      "threshold": 0.505066946523648,
+      "valid_holdout_decisions": 41991,
+      "anomalous_decisions": 12177,
+      "time_in_alert": 0.2899907122954919,
+      "pr_auc": 0.23001910402514722,
+      "detected_events": 4,
+      "total_events": 4,
+      "false_episodes": 3717,
+      "false_episodes_per_day": 26.158146808718598,
+      "feasible": false,
+      "event_results": [
+        {
+          "event_id": "metropt3-1",
+          "detected": true,
+          "first_detection_time": "2020-04-17T09:25:00",
+          "lead_seconds_to_source_start": 52500.0
+        },
+        {
+          "event_id": "metropt3-2",
+          "detected": true,
+          "first_detection_time": "2020-05-29T22:55:00",
+          "lead_seconds_to_source_start": 2100.0
+        },
+        {
+          "event_id": "metropt3-3",
+          "detected": true,
+          "first_detection_time": "2020-06-05T09:10:00",
+          "lead_seconds_to_source_start": 3000.0
+        },
+        {
+          "event_id": "metropt3-4",
+          "detected": true,
+          "first_detection_time": "2020-07-15T00:10:00",
+          "lead_seconds_to_source_start": 51600.0
+        }
+      ]
+    }
+  }
+}

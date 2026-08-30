@@ -130,3 +130,10 @@ def test_portfolio_demo_script_structure() -> None:
     assert "http://127.0.0.1:9090" in content
     assert "http://127.0.0.1:3001" in content
     assert "http://127.0.0.1:5000" in content
+
+
+def test_research_package_builder_preserves_stale_package() -> None:
+    script = Path("scripts/build_research_candidate.ps1").read_text(encoding="utf-8")
+    assert "champion-package-v2" in script
+    assert "Move-Item -LiteralPath $packageDir -Destination $backupDir" in script
+    assert "Remove-Item" not in script

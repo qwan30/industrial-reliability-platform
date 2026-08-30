@@ -109,6 +109,7 @@ def test_load_champion_rejects_manifest_or_model_tamper(tmp_path: Path) -> None:
 def test_score_rejects_contract_model_and_feature_order(tmp_path: Path) -> None:
     mock_run = create_mock_phase1b_champion_run(tmp_path)
     scorer = load_champion(mock_run.package_dir, mock_run.manifest_sha256)
+    assert scorer.prepared_output_sha256 == "c" * 64
 
     # Reversed feature order
     reversed_names = tuple(reversed(scorer.feature_names))

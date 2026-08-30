@@ -11,7 +11,7 @@ from industrial_reliability.online_features import (
     BuilderResult,
     OnlineFeatureBuilder,
 )
-from industrial_reliability.phase1b_contracts import PHASE1B
+from industrial_reliability.phase1b_contracts import PHASE1C
 from industrial_reliability.phase1b_features import iter_phase1b_windows
 from industrial_reliability.runtime_messages import TelemetryEventV1
 from tests.helpers_replay import make_sample_telemetry_event
@@ -87,8 +87,8 @@ def test_online_features_equal_phase1b_offline_rows() -> None:
     df = _sample_dataframe_window(start_ts, n_minutes=45, samples_per_min=6)
     events = _telemetry_events_from_df(df, session_id)
 
-    analog_cols = PHASE1B.analog_columns
-    digital_cols = tuple(c for c in PHASE1B.digital_columns if c in PHASE1B.predictor_columns)
+    analog_cols = PHASE1C.analog_columns
+    digital_cols = tuple(c for c in PHASE1C.digital_columns if c in PHASE1C.predictor_columns)
     from industrial_reliability.causal_features import get_candidate_feature_names
 
     feature_names = get_candidate_feature_names(analog_cols, digital_cols)
@@ -109,7 +109,7 @@ def test_online_features_equal_phase1b_offline_rows() -> None:
     complete_res = builder.complete(df["timestamp"].iloc[-1])
     emitted_features.extend(complete_res.features)
 
-    offline_windows = list(iter_phase1b_windows(df, PHASE1B))
+    offline_windows = list(iter_phase1b_windows(df, PHASE1C))
 
     assert len(emitted_features) == len(offline_windows)
     for actual, expected in zip(emitted_features, offline_windows, strict=True):

@@ -16,9 +16,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from industrial_reliability.phase1b_contracts import (
-    PHASE1B,
+    PHASE1C,
     Phase1BContract,
-    phase1b_contract_manifest,
+    metropt3_contract_manifest,
+    validate_analog_value,
 )
 
 
@@ -105,9 +106,17 @@ def _validate_source_structure(frame: pd.DataFrame, contract: Phase1BContract) -
 
 def _validate_telemetry_values(raw_data: pd.DataFrame, contract: Phase1BContract) -> None:
     for col in contract.analog_columns:
-        values = raw_data[col].to_numpy()
+        values = raw_data[col].to_numpy(dtype=np.float64)
         if not np.all(np.isfinite(values)):
             raise MetroPT3ContractError(f"non-finite values in analog column {col}")
+        if len(values) > 0:
+            min_val = float(np.min(values))
+            max_val = float(np.max(values))
+            try:
+                validate_analog_value(col, min_val)
+                validate_analog_value(col, max_val)
+            except ValueError as exc:
+                raise MetroPT3ContractError(str(exc)) from exc
 
     for col in contract.digital_columns:
         values = raw_data[col].to_numpy()
@@ -161,7 +170,7 @@ def _write_telemetry_and_manifest(
         pq.write_table(table, parquet_path, compression="snappy")
         output_sha256 = sha256_file(parquet_path)
 
-        contract_manifest = phase1b_contract_manifest()
+        contract_manifest = metropt3_contract_manifest(contract)
         first_ts = raw_data["timestamp"].iloc[0].to_pydatetime()
         last_ts = raw_data["timestamp"].iloc[-1].to_pydatetime()
 
@@ -216,7 +225,7 @@ def _validate_and_publish(
 def prepare_metropt3(
     archive: Path,
     output_dir: Path,
-    contract: Phase1BContract = PHASE1B,
+    contract: Phase1BContract = PHASE1C,
 ) -> MetroPT3PreparationManifest:
     if output_dir.exists():
         raise FileExistsError(f"destination already exists: {output_dir}")

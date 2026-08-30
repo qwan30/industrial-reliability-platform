@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, cast
 from uuid import UUID
 
 import psycopg
 from psycopg.rows import dict_row
 
-from industrial_reliability.alert_state import AlertState, TransitionResult
+from industrial_reliability.alert_policy import LockedAlertPolicyV1
+from industrial_reliability.alert_state import AlertState, TransitionResult, transition
 from industrial_reliability.console_stream import ConsoleEventV1
 from industrial_reliability.runtime_messages import (
     RcaReportV1,
+    ReplayCommandV1,
     ReplayStatusV1,
     ScoreDecisionV1,
 )
@@ -49,6 +52,24 @@ class ReplaySessionRecord:
     updated_at: datetime
 
 
+type ReplayCheckpointState = Literal[
+    "RUNNING",
+    "PAUSED",
+    "STOPPED",
+    "COMPLETED",
+    "FAILED",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayCheckpoint:
+    replay_session_id: UUID
+    command: ReplayCommandV1
+    state: ReplayCheckpointState
+    last_sequence: int
+    source_timestamp: datetime | None
+
+
 @dataclass(frozen=True, slots=True)
 class AlertSummaryRecord:
     alert_id: UUID
@@ -69,6 +90,74 @@ class AlertDetailRecord:
     evidence: list[dict[str, Any]]
     decisions: list[dict[str, Any]]
     rca: dict[str, Any] | None = None
+
+
+def _state_payload(state: AlertState) -> dict[str, object]:
+    return {
+        "replay_session_id": str(state.replay_session_id),
+        "machine_id": state.machine_id,
+        "active_alert_id": str(state.active_alert_id)
+        if state.active_alert_id is not None
+        else None,
+        "previous_alert_id": str(state.previous_alert_id)
+        if state.previous_alert_id is not None
+        else None,
+        "first_detection": state.first_detection.isoformat()
+        if state.first_detection is not None
+        else None,
+        "last_detection": state.last_detection.isoformat()
+        if state.last_detection is not None
+        else None,
+        "resolved_at": state.resolved_at.isoformat() if state.resolved_at is not None else None,
+        "anomaly_decision_ids": [str(d_id) for d_id in state.anomaly_decision_ids],
+        "anomaly_streak": state.anomaly_streak,
+        "normal_streak": state.normal_streak,
+        "last_decision_id": str(state.last_decision_id)
+        if state.last_decision_id is not None
+        else None,
+        "last_source_timestamp": (
+            state.last_source_timestamp.isoformat()
+            if state.last_source_timestamp is not None
+            else None
+        ),
+    }
+
+
+def _state_from_payload(payload: Mapping[str, object]) -> AlertState:
+    def optional_uuid(name: str) -> UUID | None:
+        val = payload.get(name)
+        if val is None:
+            return None
+        if isinstance(val, UUID):
+            return val
+        return UUID(str(val))
+
+    def optional_datetime(name: str) -> datetime | None:
+        val = payload.get(name)
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            return val
+        return datetime.fromisoformat(str(val))
+
+    raw_ids = payload.get("anomaly_decision_ids", [])
+    ids = cast(list[object], raw_ids) if isinstance(raw_ids, (list, tuple)) else []
+    return AlertState(
+        replay_session_id=UUID(str(payload["replay_session_id"])),
+        machine_id=str(payload["machine_id"]),
+        active_alert_id=optional_uuid("active_alert_id"),
+        previous_alert_id=optional_uuid("previous_alert_id"),
+        first_detection=optional_datetime("first_detection"),
+        last_detection=optional_datetime("last_detection"),
+        resolved_at=optional_datetime("resolved_at"),
+        anomaly_decision_ids=tuple(
+            item if isinstance(item, UUID) else UUID(str(item)) for item in ids
+        ),
+        anomaly_streak=int(cast(int, payload.get("anomaly_streak", 0))),
+        normal_streak=int(cast(int, payload.get("normal_streak", 0))),
+        last_decision_id=optional_uuid("last_decision_id"),
+        last_source_timestamp=optional_datetime("last_source_timestamp"),
+    )
 
 
 class RuntimeStore:
@@ -109,6 +198,8 @@ class RuntimeStore:
             "alert_outbox",
             "console_events",
             "rca_reports",
+            "alert_runtime_states",
+            "replay_checkpoints",
         }
         if table_name not in allowed_tables:
             raise ValueError(f"Invalid table name: {table_name}")
@@ -122,6 +213,7 @@ class RuntimeStore:
                     "message_id",
                     "window_id",
                     "report_id",
+                    "machine_id",
                 }
                 if column not in allowed_columns:
                     raise ValueError(f"Invalid column name: {column}")
@@ -133,6 +225,112 @@ class RuntimeStore:
                 cur.execute(f"SELECT COUNT(*) FROM {table_name}")
             row = cur.fetchone()
             return int(row[0]) if row else 0
+
+    def record_replay_checkpoint(
+        self,
+        command: ReplayCommandV1,
+        state: ReplayCheckpointState,
+        last_sequence: int,
+        source_timestamp: datetime | None,
+    ) -> None:
+        payload_json = json.dumps(command.model_dump(mode="json"))
+        with psycopg.connect(self.db_url) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO replay_checkpoints (
+                    replay_session_id, command_payload, state,
+                    last_sequence, source_timestamp, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, now())
+                ON CONFLICT (replay_session_id) DO UPDATE SET
+                    command_payload = EXCLUDED.command_payload,
+                    state = EXCLUDED.state,
+                    last_sequence = EXCLUDED.last_sequence,
+                    source_timestamp = EXCLUDED.source_timestamp,
+                    updated_at = now();
+                """,
+                (
+                    str(command.replay_session_id),
+                    payload_json,
+                    state,
+                    last_sequence,
+                    source_timestamp,
+                ),
+            )
+            conn.commit()
+
+    def update_replay_checkpoint_state(
+        self,
+        replay_session_id: UUID,
+        state: ReplayCheckpointState,
+    ) -> None:
+        with psycopg.connect(self.db_url) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE replay_checkpoints
+                SET state = %s, updated_at = now()
+                WHERE replay_session_id = %s;
+                """,
+                (state, str(replay_session_id)),
+            )
+            if cur.rowcount != 1:
+                raise LookupError(f"Replay checkpoint not found: {replay_session_id}")
+            conn.commit()
+
+    def load_replay_checkpoint(self, replay_session_id: UUID) -> ReplayCheckpoint | None:
+        with psycopg.connect(self.db_url, row_factory=dict_row) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT replay_session_id, command_payload, state, last_sequence, source_timestamp
+                FROM replay_checkpoints
+                WHERE replay_session_id = %s;
+                """,
+                (str(replay_session_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            payload = (
+                row["command_payload"]
+                if isinstance(row["command_payload"], dict)
+                else json.loads(row["command_payload"])
+            )
+            command = ReplayCommandV1.model_validate(payload)
+            return ReplayCheckpoint(
+                replay_session_id=UUID(row["replay_session_id"]),
+                command=command,
+                state=row["state"],
+                last_sequence=int(row["last_sequence"]),
+                source_timestamp=row["source_timestamp"],
+            )
+
+    def load_incomplete_replays(self) -> tuple[ReplayCheckpoint, ...]:
+        with psycopg.connect(self.db_url, row_factory=dict_row) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT replay_session_id, command_payload, state, last_sequence, source_timestamp
+                FROM replay_checkpoints
+                WHERE state IN ('RUNNING', 'PAUSED')
+                ORDER BY updated_at ASC;
+                """
+            )
+            results: list[ReplayCheckpoint] = []
+            for row in cur.fetchall():
+                payload = (
+                    row["command_payload"]
+                    if isinstance(row["command_payload"], dict)
+                    else json.loads(row["command_payload"])
+                )
+                command = ReplayCommandV1.model_validate(payload)
+                results.append(
+                    ReplayCheckpoint(
+                        replay_session_id=UUID(row["replay_session_id"]),
+                        command=command,
+                        state=row["state"],
+                        last_sequence=int(row["last_sequence"]),
+                        source_timestamp=row["source_timestamp"],
+                    )
+                )
+            return tuple(results)
 
     def record_replay_status(self, status: ReplayStatusV1) -> None:
         with psycopg.connect(self.db_url) as conn:
@@ -187,55 +385,83 @@ class RuntimeStore:
             ),
         )
 
-    def load_alert_state(self, replay_session_id: UUID, machine_id: str) -> AlertState:
+    def _reconstruct_alert_state(
+        self,
+        cur: psycopg.Cursor[Any],
+        replay_session_id: UUID,
+        machine_id: str,
+        policy: LockedAlertPolicyV1,
+    ) -> AlertState:
+        cur.execute(
+            """
+            SELECT payload
+            FROM score_decisions
+            WHERE replay_session_id = %s
+            ORDER BY source_timestamp ASC, decision_id ASC
+            """,
+            (str(replay_session_id),),
+        )
+        state = AlertState.empty(replay_session_id, machine_id)
+        for row in cur.fetchall():
+            raw = row["payload"]
+            payload = raw if isinstance(raw, dict) else json.loads(raw)
+            decision = ScoreDecisionV1.model_validate(payload)
+            state = transition(state, decision, policy).state
+        return state
+
+    def load_alert_state(
+        self,
+        replay_session_id: UUID,
+        machine_id: str,
+        policy: LockedAlertPolicyV1 | None = None,
+    ) -> AlertState:
         with psycopg.connect(self.db_url, row_factory=dict_row) as conn, conn.cursor() as cur:
-            # Find current open alert if any
             cur.execute(
                 """
-                SELECT alert_id, state, first_detection, last_detection, resolved_at, latest_decision_id
-                FROM alerts
-                WHERE replay_session_id = %s AND machine_id = %s
-                ORDER BY last_detection DESC
-                LIMIT 1;
+                SELECT payload
+                FROM alert_runtime_states
+                WHERE replay_session_id = %s AND machine_id = %s;
                 """,
                 (str(replay_session_id), machine_id),
             )
-            alert_row = cur.fetchone()
-            if not alert_row:
-                return AlertState.empty(replay_session_id, machine_id)
+            row = cur.fetchone()
+            if row:
+                payload = (
+                    row["payload"]
+                    if isinstance(row["payload"], dict)
+                    else json.loads(row["payload"])
+                )
+                return _state_from_payload(payload)
 
-            active_id = UUID(alert_row["alert_id"]) if alert_row["state"] == "OPEN" else None
-            prev_id = UUID(alert_row["alert_id"]) if alert_row["state"] == "RESOLVED" else None
-
-            # Find latest decision timestamp
             cur.execute(
                 """
-                SELECT decision_id, source_timestamp
+                SELECT COUNT(*) AS count
                 FROM score_decisions
-                WHERE replay_session_id = %s
-                ORDER BY source_timestamp DESC
-                LIMIT 1;
+                WHERE replay_session_id = %s;
                 """,
                 (str(replay_session_id),),
             )
-            last_dec_row = cur.fetchone()
-            last_dec_id = UUID(last_dec_row["decision_id"]) if last_dec_row else None
-            last_ts = last_dec_row["source_timestamp"] if last_dec_row else None
-
-            return AlertState(
-                replay_session_id=replay_session_id,
-                machine_id=machine_id,
-                active_alert_id=active_id,
-                previous_alert_id=prev_id,
-                first_detection=alert_row["first_detection"],
-                last_detection=alert_row["last_detection"],
-                resolved_at=alert_row["resolved_at"],
-                anomaly_decision_ids=(),
-                anomaly_streak=1 if active_id else 0,
-                normal_streak=0,
-                last_decision_id=last_dec_id,
-                last_source_timestamp=last_ts,
+            count_row = cur.fetchone()
+            decision_count = int(count_row["count"]) if count_row else 0
+            if decision_count == 0:
+                return AlertState.empty(replay_session_id, machine_id)
+            if policy is None:
+                raise RuntimeError("alert policy is required to reconstruct legacy runtime state")
+            state = self._reconstruct_alert_state(cur, replay_session_id, machine_id, policy)
+            cur.execute(
+                """
+                INSERT INTO alert_runtime_states (replay_session_id, machine_id, payload)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (replay_session_id, machine_id) DO NOTHING;
+                """,
+                (
+                    str(replay_session_id),
+                    machine_id,
+                    json.dumps(_state_payload(state)),
+                ),
             )
+            conn.commit()
+            return state
 
     def record_decision_transition(
         self,
@@ -351,6 +577,22 @@ class RuntimeStore:
                         json.dumps(event.model_dump(mode="json")),
                     ),
                 )
+
+            # 4. Upsert alert runtime state
+            cur.execute(
+                """
+                INSERT INTO alert_runtime_states (replay_session_id, machine_id, payload)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (replay_session_id, machine_id) DO UPDATE SET
+                  payload = EXCLUDED.payload,
+                  updated_at = now()
+                """,
+                (
+                    str(result.state.replay_session_id),
+                    result.state.machine_id,
+                    json.dumps(_state_payload(result.state)),
+                ),
+            )
 
             conn.commit()
 

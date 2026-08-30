@@ -14,6 +14,7 @@ from industrial_reliability.phase8_live_gate import (
     execute_live_drills,
     main,
     publish_live_drill_report,
+    run_phase8_live_gate,
 )
 
 
@@ -108,3 +109,8 @@ def test_phase8_live_gate_cli(tmp_path: Path) -> None:
     assert code == 0
     assert (out_dir / "phase-8-live-fault-drills.json").exists()
     assert (out_dir / "phase-8-live-fault-drills.md").exists()
+
+
+def test_phase8_in_process_gate_cannot_claim_integration(tmp_path: Path) -> None:
+    report = run_phase8_live_gate(output_dir=tmp_path, git_sha="a" * 40)
+    assert report.evidence_level == "IN_PROCESS"

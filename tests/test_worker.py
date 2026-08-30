@@ -9,6 +9,10 @@ from uuid import uuid4
 
 import pytest
 
+from industrial_reliability.artifact_integrity import (
+    ArtifactIntegrityError,
+    verify_file_sha256,
+)
 from industrial_reliability.kafka_io import encode_message
 from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.runtime_messages import (
@@ -368,3 +372,126 @@ def test_worker_settings_from_env_research_candidate(
     monkeypatch.setenv("ALLOW_RESEARCH_CANDIDATE", "true")
     settings = WorkerSettings.from_env()
     assert settings.model_version == "research-candidate-statistical-v1"
+
+
+@pytest.mark.asyncio
+async def test_worker_quarantines_event_identity_mismatch(
+    worker_settings: WorkerSettings,
+) -> None:
+    from prometheus_client import CollectorRegistry
+
+    from industrial_reliability.metrics import build_runtime_metrics
+
+    scoring_client = AsyncMock()
+    metrics = build_runtime_metrics(CollectorRegistry())
+    worker = StreamingWorker(
+        worker_settings,
+        scoring_client=scoring_client,
+        metrics=metrics,
+    )
+    worker.producer = AsyncMock()
+    event = make_sample_telemetry_event().model_copy(update={"source_dataset_sha256": "f" * 64})
+    await worker.handle_record(MockKafkaRecord(TELEMETRY_TOPIC, encode_message(event)))
+    scoring_client.score.assert_not_awaited()
+    assert metrics.telemetry_events.labels(outcome="quarantined")._value.get() == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_updates_consumer_lag(worker_settings: WorkerSettings) -> None:
+    from prometheus_client import CollectorRegistry
+
+    from industrial_reliability.metrics import build_runtime_metrics
+
+    metrics = build_runtime_metrics(CollectorRegistry())
+    worker = StreamingWorker(
+        worker_settings,
+        metrics=metrics,
+    )
+    mock_consumer = AsyncMock()
+    mock_consumer.highwater = lambda tp: 100
+    mock_consumer.position = AsyncMock(return_value=80)
+    worker.consumer = mock_consumer
+    worker.producer = AsyncMock()
+    mock_scoring = AsyncMock()
+    mock_scoring.score = AsyncMock(side_effect=_make_mock_decision)
+    worker.scoring_client = mock_scoring
+
+    start_ts = datetime(2020, 3, 1, 4, 0, 0)
+    ev = make_sample_telemetry_event(
+        sequence=1,
+        source_timestamp=start_ts,
+    )
+    record = MockKafkaRecord(
+        topic=TELEMETRY_TOPIC,
+        value=encode_message(ev),
+        partition=0,
+        offset=80,
+    )
+    await worker.handle_record(record)
+    assert metrics.kafka_consumer_lag._value.get() == 20.0
+
+
+def test_worker_settings_bind_drift_reference_to_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from industrial_reliability.drift import _compute_drift_hash
+    from tests.helpers_champion import build_research_candidate_from_mock_run
+
+    mock = build_research_candidate_from_mock_run(tmp_path)
+    drift_path = mock.package_dir / "drift-reference.json"
+    data = json.loads(drift_path.read_text(encoding="utf-8"))
+    data["source_dataset_sha256"] = "f" * 64
+    data["self_sha256"] = ""
+    data["self_sha256"] = _compute_drift_hash(data)
+    drift_path.write_text(json.dumps(data), encoding="utf-8")
+
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    monkeypatch.setenv("SCORING_API_URL", "http://localhost:8000")
+    monkeypatch.setenv("SCORING_PACKAGE_DIR", str(mock.package_dir))
+    monkeypatch.setenv("SCORING_MANIFEST_SHA256", mock.manifest_sha256)
+    monkeypatch.setenv("ALLOW_RESEARCH_CANDIDATE", "true")
+    settings = WorkerSettings.from_env()
+    assert settings.package_manifest is not None
+
+    with pytest.raises(ArtifactIntegrityError, match=r"drift-reference\.json SHA-256 mismatch"):
+        verify_file_sha256(
+            drift_path,
+            settings.package_manifest["artifact_sha256"]["drift-reference.json"],
+            "drift-reference.json",
+        )
+
+
+def test_worker_main_drift_reference_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from industrial_reliability.worker import main
+    from tests.helpers_champion import build_research_candidate_from_mock_run
+
+    mock = build_research_candidate_from_mock_run(tmp_path)
+    drift_path = mock.package_dir / "drift-reference.json"
+
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    monkeypatch.setenv("SCORING_API_URL", "http://localhost:8000")
+    monkeypatch.setenv("SCORING_PACKAGE_DIR", str(mock.package_dir))
+    monkeypatch.setenv("SCORING_MANIFEST_SHA256", mock.manifest_sha256)
+    monkeypatch.setenv("ALLOW_RESEARCH_CANDIDATE", "true")
+    monkeypatch.setenv("DRIFT_REFERENCE_PATH", str(drift_path))
+
+    def fake_asyncio_run(coro: Any) -> None:
+        coro.close()
+
+    with patch(
+        "industrial_reliability.worker.asyncio.run", side_effect=fake_asyncio_run
+    ) as mock_asyncio_run:
+        main()
+        assert mock_asyncio_run.called
+
+    # Tamper drift reference file -> should fail with ArtifactIntegrityError
+    drift_path.write_text("tampered", encoding="utf-8")
+    with (
+        patch("industrial_reliability.worker.asyncio.run", side_effect=fake_asyncio_run),
+        pytest.raises(ArtifactIntegrityError, match=r"drift-reference\.json SHA-256 mismatch"),
+    ):
+        main()

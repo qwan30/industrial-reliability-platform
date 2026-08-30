@@ -11,6 +11,10 @@ from uuid import UUID
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from industrial_reliability.artifact_integrity import (
+    PreparedArtifactIdentity,
+    verify_prepared_parquet,
+)
 from industrial_reliability.runtime_ids import runtime_id
 from industrial_reliability.runtime_messages import (
     ReplayCommandV1,
@@ -179,11 +183,21 @@ class ReplaySource:
     def __init__(
         self,
         parquet_path: Path,
+        *,
+        expected_contract_sha256: str,
+        expected_source_dataset_sha256: str,
+        expected_output_sha256: str,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.path = parquet_path.resolve()
         if not self.path.is_file():
             raise FileNotFoundError(f"Parquet source not found: {self.path}")
+        self.identity: PreparedArtifactIdentity = verify_prepared_parquet(
+            self.path,
+            expected_contract_sha256=expected_contract_sha256,
+            expected_source_dataset_sha256=expected_source_dataset_sha256,
+            expected_output_sha256=expected_output_sha256,
+        )
         self.clock = clock if clock is not None else (lambda: datetime.now(UTC))
 
     def iter_events(
@@ -205,8 +219,9 @@ class ReplaySource:
         )
         lower_scalar = pa.scalar(lower_bound, type=ts_col.type)
         upper_scalar = pa.scalar(command.range_end, type=ts_col.type)
+        lower_op = pc.greater if resume_from_timestamp is not None else pc.greater_equal
         mask = pc.and_(
-            pc.greater_equal(ts_col, lower_scalar),
+            lower_op(ts_col, lower_scalar),
             pc.less(ts_col, upper_scalar),
         )
         filtered = table.filter(mask)
@@ -234,8 +249,8 @@ class ReplaySource:
             yield TelemetryEventV1(
                 message_id=msg_id,
                 replay_session_id=command.replay_session_id,
-                source_dataset_sha256=command.source_dataset_sha256,
-                contract_sha256=command.contract_sha256,
+                source_dataset_sha256=self.identity.source_dataset_sha256,
+                contract_sha256=self.identity.contract_sha256,
                 source_timestamp=ts,
                 emitted_at=self.clock(),
                 machine_id="metropt-compressor-01",

@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import mlflow
 import pytest
-
-pytest.importorskip("mlflow")
-
 from tests.helpers_champion import create_mock_phase1b_champion_run
 
 from industrial_reliability.ml_lifecycle import (
@@ -15,6 +13,8 @@ from industrial_reliability.ml_lifecycle import (
     import_candidate,
     reproduce_candidate,
 )
+
+pytest.importorskip("mlflow")
 
 
 def _setup_test_run(base_dir: Path) -> tuple[Path, Path, Path]:
@@ -47,3 +47,15 @@ def test_import_and_reproduce_candidate_sqlite_tracking(tmp_path: Path) -> None:
     repro_res = reproduce_candidate(repro_req)
     assert repro_res.provenance.lifecycle_state == "reproduction"
     assert isinstance(repro_res.threshold, float)
+
+
+@pytest.mark.integration
+def test_candidate_run_contains_downloadable_pyfunc(tmp_path: Path) -> None:
+    run_dir, _features, package = _setup_test_run(tmp_path)
+    tracking_uri = f"sqlite:///{(tmp_path / 'mlflow.db').as_posix()}"
+    result = import_candidate(ImportCandidateRequest(package, run_dir, tracking_uri=tracking_uri))
+    mlflow.set_tracking_uri(tracking_uri)
+    downloaded = mlflow.artifacts.download_artifacts(
+        artifact_uri=f"runs:/{result.run_id}/champion-model"
+    )
+    assert Path(downloaded, "MLmodel").is_file()

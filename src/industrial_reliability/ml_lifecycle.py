@@ -6,8 +6,10 @@ import platform
 import subprocess
 import sys
 import tempfile
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -16,20 +18,24 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
+from industrial_reliability.artifact_integrity import verify_file_sha256
 from industrial_reliability.champion import load_champion
 from industrial_reliability.evaluation import calibrate_threshold
 from industrial_reliability.ml_provenance import (
     PromotionReceiptV1,
     RunProvenanceV1,
+    canonical_dumps,
     canonical_sha256,
     validate_git_sha,
-    write_promotion_receipt,
     write_run_provenance,
 )
 from industrial_reliability.package_champion import ChampionManifest
-from industrial_reliability.phase1b_benchmark import detector_for
-from industrial_reliability.phase1b_contracts import PHASE1B
+from industrial_reliability.phase1b_contracts import PHASE1C
 from industrial_reliability.phase1b_data import sha256_file
+from industrial_reliability.phase7_gate import (
+    Phase7GateResult,
+    load_phase7_attestation,
+)
 
 EXPERIMENT_NAME = "industrial-reliability-offline"
 REGISTERED_MODEL_NAME: Literal["industrial-reliability-anomaly-detector"] = (
@@ -72,19 +78,25 @@ if TYPE_CHECKING:
     import mlflow
     import mlflow.pyfunc
     from mlflow import MlflowClient
+    from mlflow.pyfunc.model import PythonModel
 else:
     try:
         import mlflow
         import mlflow.pyfunc
         from mlflow import MlflowClient
+        from mlflow.pyfunc.model import PythonModel
     except ImportError:
         mlflow = None
         MlflowClient = None
 
+        class PythonModel:  # type: ignore[no-redef]
+            pass
+
+
 __all__ = ["MlflowClient", "import_candidate", "promote_candidate", "reproduce_candidate"]
 
 
-class PackagedChampionPyFunc:
+class PackagedChampionPyFunc(PythonModel):
     def __init__(self, expected_manifest_sha256: str | None = None) -> None:
         self.expected_manifest_sha256 = expected_manifest_sha256
         self._champion: Any = None
@@ -151,7 +163,8 @@ class PromotionRequest:
     approver: str
     expected_source_git_sha: str
     output: Path
-    champion_package: Path | None = None
+    champion_package: Path
+    phase7_gate: Path
     tracking_uri: str | None = None
 
 
@@ -261,24 +274,24 @@ def import_candidate(
         provenance_sha256="",
     ).with_computed_hash()
 
+    # Log artifacts: champion package files and run provenance
+    client.log_artifact(run_id, str(request.champion_package), artifact_path="champion_package")
     with tempfile.TemporaryDirectory() as tmp_dir:
         prov_path = Path(tmp_dir) / "run-provenance.json"
         write_run_provenance(prov_path, provenance)
         client.log_artifact(run_id, str(prov_path))
 
-    # If real MLflow is active, log the pyfunc model
-    if mlflow is not None and hasattr(mlflow, "pyfunc") and hasattr(mlflow.pyfunc, "log_model"):
-        try:
-            with mlflow.start_run(run_id=run_id):
-                mlflow.pyfunc.log_model(
-                    artifact_path="champion-model",
-                    python_model=PackagedChampionPyFunc(expected_manifest_sha256=pkg_manifest_sha),
-                    artifacts={"champion_package": str(request.champion_package.resolve())},
-                )
-        except Exception:
-            pass
-
+    # Log PyFunc model wrapping packaged champion
     model_uri = f"runs:/{run_id}/champion-model"
+    if mlflow_client is None:
+        assert mlflow is not None
+        with mlflow.start_run(run_id=run_id):
+            mlflow.pyfunc.log_model(
+                artifact_path="champion-model",
+                python_model=PackagedChampionPyFunc(expected_manifest_sha256=pkg_manifest_sha),
+                artifacts={"champion_package": str(request.champion_package.resolve())},
+            )
+
     return CandidateResult(
         run_id=run_id,
         model_uri=model_uri,
@@ -296,10 +309,10 @@ def reproduce_candidate(
     if not pkg_manifest_path.is_file():
         raise FileNotFoundError(f"Champion package manifest not found at {pkg_manifest_path}")
 
-    pkg_manifest_sha = sha256_file(pkg_manifest_path)
     pkg_manifest = ChampionManifest.model_validate_json(
         pkg_manifest_path.read_text(encoding="utf-8")
     )
+    pkg_manifest_sha = sha256_file(pkg_manifest_path)
 
     git_sha = get_current_git_sha()
     if request.expected_source_git_sha and request.expected_source_git_sha != git_sha:
@@ -307,38 +320,47 @@ def reproduce_candidate(
             f"Source Git SHA mismatch: expected {request.expected_source_git_sha}, got {git_sha}"
         )
 
-    # Read features table filtered strictly to train and calibration
-    table = pq.read_table(
+    # Verify features.parquet integrity against manifest
+    verify_file_sha256(
         request.features_path,
-        filters=[("split", "in", ["train", "calibration"])],
+        pkg_manifest.feature_output_sha256,
+        label="features.parquet",
     )
-    frame = table.to_pandas()
 
-    train_frame = frame[frame["split"] == "train"]
-    calib_frame = frame[frame["split"] == "calibration"]
+    # Load calibration split and compute scores using loaded detector
+    features_df = pq.read_table(request.features_path).to_pandas()
+    calib_mask = features_df["split"] == "calibration"
+    calib_df = features_df[calib_mask]
 
     feature_cols = list(pkg_manifest.feature_names)
-    train_features = train_frame[feature_cols].to_numpy(dtype=np.float64, copy=False)
-    calib_features = calib_frame[feature_cols].to_numpy(dtype=np.float64, copy=False)
+    matrix = calib_df[feature_cols].to_numpy(dtype=np.float64, copy=False)
 
-    # Fit detector on train only
-    model_id = pkg_manifest.model_id
-    detector = detector_for(model_id, PHASE1B).fit(train_features)
-    calib_scores = detector.score(calib_features)
-    threshold = calibrate_threshold(calib_scores, PHASE1B)
+    scorer = load_champion(
+        request.champion_package,
+        expected_manifest_sha256=pkg_manifest_sha,
+        allow_research_candidate=True,
+    )
+    detector = scorer.detector
+    calib_scores = detector.score(matrix)
 
-    # Load and score golden cases
-    golden_path = request.champion_package / "golden-cases.json"
+    threshold = calibrate_threshold(calib_scores, PHASE1C)
+
+    # Golden score verification
+    golden_cases_path = request.champion_package / "golden-cases.json"
     golden_scores: list[float] = []
-    if golden_path.is_file():
-        golden_data = json.loads(golden_path.read_text(encoding="utf-8"))
-        for case in golden_data.get("cases", []):
+    if golden_cases_path.is_file():
+        golden_cases = json.loads(golden_cases_path.read_text(encoding="utf-8"))
+        for case in golden_cases.get("cases", []):
             if "feature_values" in case:
-                case_names = case.get("feature_names", feature_cols)
-                name_to_val = dict(zip(case_names, case["feature_values"], strict=False))
-                feat_vals = [name_to_val[name] for name in feature_cols]
-            elif "feature_vector" in case:
-                feat_vals = [case["feature_vector"][name] for name in feature_cols]
+                feat_vals = [float(x) for x in case["feature_values"]]
+            elif "features" in case:
+                feats = case["features"]
+                if isinstance(feats, (list, tuple)):
+                    feat_vals = [float(x) for x in feats]
+                elif isinstance(feats, dict):
+                    feat_vals = [float(feats.get(name, 0.0)) for name in feature_cols]
+                else:
+                    feat_vals = [0.0] * len(feature_cols)
             else:
                 feat_vals = [0.0] * len(feature_cols)
             sc = float(detector.score(np.array([feat_vals], dtype=np.float64))[0])
@@ -423,6 +445,27 @@ def reproduce_candidate(
     )
 
 
+def _validate_promotion_identity(
+    tags: Mapping[str, str],
+    gate: Phase7GateResult,
+    manifest: ChampionManifest,
+    manifest_sha: str,
+) -> None:
+    expected = {
+        "dataset_sha256": manifest.source_dataset_sha256,
+        "contract_sha256": manifest.contract_sha256,
+        "feature_schema_sha256": canonical_sha256({"features": list(manifest.feature_names)}),
+        "source_git_sha": gate.source_git_sha,
+        "champion_package_sha256": manifest_sha,
+        "alert_policy_sha256": gate.alert_policy_sha256,
+    }
+    for name, value in expected.items():
+        if tags.get(name) != value:
+            raise ValueError(f"{name} run tag does not match attested identity")
+        if gate.verified_hashes.get(name) != value:
+            raise ValueError(f"{name} Phase 7 hash does not match attested identity")
+
+
 def promote_candidate(
     request: PromotionRequest,
     *,
@@ -450,12 +493,59 @@ def promote_candidate(
             f"Cannot promote run with lifecycle_state={lifecycle_state!r}; must be 'candidate'"
         )
 
-    source_git_sha = tags.get("source_git_sha", request.expected_source_git_sha)
-    dataset_sha256 = tags.get("dataset_sha256", "0" * 64)
-    contract_sha256 = tags.get("contract_sha256", "0" * 64)
-    champion_package_sha256 = tags.get("champion_package_sha256", "0" * 64)
+    source_git_sha = tags.get("source_git_sha", "")
 
-    # Register model
+    # Preconditions checked BEFORE mutating registry or creating model version
+    # 1. gate = load_phase7_attestation(request.phase7_gate)
+    gate = load_phase7_attestation(request.phase7_gate)
+
+    # 2. manifest_path = request.champion_package / "manifest.json"
+    manifest_path = request.champion_package / "manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Champion package manifest not found at {manifest_path}")
+
+    # 3. manifest = ChampionManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    manifest = ChampionManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+
+    # 4. manifest_sha = sha256_file(manifest_path)
+    manifest_sha = sha256_file(manifest_path)
+
+    # 5. if gate.verdict != "PASS": raise ValueError("Phase 7 gate must PASS before promotion")
+    if gate.verdict != "PASS":
+        raise ValueError("Phase 7 gate must PASS before promotion")
+
+    # 6. if gate.candidate_run_id != request.run_id: raise ValueError("Phase 7 candidate run does not match promotion run")
+    if gate.candidate_run_id != request.run_id:
+        raise ValueError("Phase 7 candidate run does not match promotion run")
+
+    # 7. if gate.package_manifest_sha256 != manifest_sha: raise ValueError("Phase 7 package SHA does not match promotion package")
+    if gate.package_manifest_sha256 != manifest_sha:
+        raise ValueError("Phase 7 package SHA does not match promotion package")
+
+    # 8. if source_git_sha != request.expected_source_git_sha or gate.source_git_sha != source_git_sha: raise ValueError("Source Git SHA mismatch")
+    if source_git_sha != request.expected_source_git_sha or gate.source_git_sha != source_git_sha:
+        raise ValueError("Source Git SHA mismatch")
+
+    # Validate identity hashes against tags and gate attestation before registry mutation
+    _validate_promotion_identity(tags, gate, manifest, manifest_sha)
+
+    # 9. if manifest.package_role != "CHAMPION": raise ValueError("package_role must be CHAMPION")
+    if manifest.package_role != "CHAMPION":
+        raise ValueError("package_role must be CHAMPION")
+
+    # 10. if manifest.evaluation_verdict != "FEASIBLE": raise ValueError("evaluation_verdict must be FEASIBLE")
+    if manifest.evaluation_verdict != "FEASIBLE":
+        raise ValueError("evaluation_verdict must be FEASIBLE")
+
+    # 11. if manifest.operational_status != "PRODUCTION_CANDIDATE": raise ValueError("operational_status must be PRODUCTION_CANDIDATE")
+    if manifest.operational_status != "PRODUCTION_CANDIDATE":
+        raise ValueError("operational_status must be PRODUCTION_CANDIDATE")
+
+    # 12. if request.output.exists(): raise FileExistsError(f"Refusing to overwrite promotion receipt: {request.output}")
+    if request.output.exists():
+        raise FileExistsError(f"Refusing to overwrite promotion receipt: {request.output}")
+
+    # Register model (ALL checks passed)
     model_uri = f"runs:/{request.run_id}/champion-model"
     client.create_registered_model(REGISTERED_MODEL_NAME)
     mv = client.create_model_version(
@@ -464,32 +554,31 @@ def promote_candidate(
         run_id=request.run_id,
     )
     reg_version = str(mv.version)
-    client.set_registered_model_alias(REGISTERED_MODEL_NAME, "champion", reg_version)
 
-    model_version = "champion-statistical-v1"
-    if request.champion_package and (request.champion_package / "manifest.json").is_file():
-        pkg_manifest = ChampionManifest.model_validate_json(
-            (request.champion_package / "manifest.json").read_text(encoding="utf-8")
-        )
-        model_version = pkg_manifest.model_version
-
+    promoted_at = datetime.now(UTC).isoformat()
     receipt = PromotionReceiptV1(
         schema_version="mlflow-promotion-receipt-v1",
         mlflow_run_id=request.run_id,
         registered_model_name=REGISTERED_MODEL_NAME,
         registered_model_version=reg_version,
         alias="champion",
-        model_version=model_version,
-        dataset_sha256=dataset_sha256,
-        contract_sha256=contract_sha256,
-        champion_package_sha256=champion_package_sha256,
-        source_git_sha=source_git_sha,
+        model_version=manifest.model_version,
+        dataset_sha256=manifest.source_dataset_sha256,
+        contract_sha256=manifest.contract_sha256,
+        champion_package_sha256=manifest_sha,
+        source_git_sha=gate.source_git_sha,
         approver=request.approver.strip(),
-        promoted_at="2026-08-25T00:00:00Z",
+        promoted_at=promoted_at,
         receipt_sha256="",
     ).with_computed_hash()
 
-    write_promotion_receipt(request.output, receipt)
+    temp_receipt = request.output.with_name(f"{request.output.name}.tmp.{uuid.uuid4().hex[:8]}")
+    temp_receipt.parent.mkdir(parents=True, exist_ok=True)
+    temp_receipt.write_text(canonical_dumps(receipt.to_dict()), encoding="utf-8")
+
+    client.set_registered_model_alias(REGISTERED_MODEL_NAME, "champion", reg_version)
+    temp_receipt.replace(request.output)
+
     return receipt
 
 
@@ -520,7 +609,8 @@ def main(argv: list[str] | None = None) -> int:
     promote_parser.add_argument("--approver", type=str, required=True)
     promote_parser.add_argument("--expected-source-git-sha", type=str, required=True)
     promote_parser.add_argument("--output", type=Path, required=True)
-    promote_parser.add_argument("--champion-package", type=Path, default=None)
+    promote_parser.add_argument("--champion-package", type=Path, required=True)
+    promote_parser.add_argument("--phase7-gate", type=Path, required=True)
     promote_parser.add_argument("--tracking-uri", type=str, default=None)
 
     args = parser.parse_args(argv)
@@ -562,6 +652,7 @@ def main(argv: list[str] | None = None) -> int:
                 expected_source_git_sha=args.expected_source_git_sha,
                 output=args.output,
                 champion_package=args.champion_package,
+                phase7_gate=args.phase7_gate,
                 tracking_uri=args.tracking_uri,
             )
         )

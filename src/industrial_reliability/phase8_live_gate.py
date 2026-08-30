@@ -111,14 +111,7 @@ def _render_markdown(report: FaultReportV1) -> str:
 def run_phase8_live_gate(
     output_dir: Path | None = None,
     git_sha: str | None = None,
-    evidence_level: str = "IN_PROCESS",
 ) -> FaultReportV1:
-    if evidence_level == "LIVE":
-        raise ValueError(
-            "In-process simulated drills cannot claim LIVE evidence level. "
-            "Use IN_PROCESS or run against verified container infrastructure."
-        )
-
     target_dir = output_dir or Path("artifacts/certification/live")
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -132,7 +125,7 @@ def run_phase8_live_gate(
         json_path=json_path,
         md_path=md_path,
         git_sha=sha,
-        evidence_level=evidence_level,
+        evidence_level="IN_PROCESS",
     )
 
 
@@ -150,17 +143,10 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Committed git SHA",
     )
-    parser.add_argument(
-        "--evidence-level",
-        type=str,
-        default="IN_PROCESS",
-        help="Evidence level (IN_PROCESS or INTEGRATION)",
-    )
     args = parser.parse_args(argv)
     report = run_phase8_live_gate(
         output_dir=args.output_dir,
         git_sha=args.git_sha,
-        evidence_level=args.evidence_level,
     )
     print(
         f"Phase 8 Fault Gate: {'PASS' if report.all_passed else 'FAIL'} "

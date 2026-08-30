@@ -29,6 +29,7 @@ from industrial_reliability.evaluation import (
     calibrate_threshold,
     evaluate,
 )
+from industrial_reliability.ml_provenance import validate_git_sha
 from industrial_reliability.models import (
     IsolationForestDetector,
     RobustStatisticalDetector,
@@ -183,6 +184,7 @@ def run_phase1b_benchmark(
     feature_path: Path,
     artifact_dir: Path,
     expected_prepared_output_sha256: str,
+    source_git_sha: str,
     contract: Phase1BContract = PHASE1C,
 ) -> Phase1BBenchmarkResult:
     resolved_prep = prepared_dir.resolve()
@@ -290,7 +292,8 @@ def run_phase1b_benchmark(
         "contract_sha256": feat_manifest["contract_sha256"],
         "source_dataset_sha256": verified_data.source_dataset_sha256,
         "prepared_output_sha256": verified_data.parquet_sha256,
-        "feature_output_sha256": feat_manifest["output_sha256"],
+        "feature_output_sha256": str(feat_manifest["output_sha256"]),
+        "source_git_sha": validate_git_sha(source_git_sha),
         "models": {
             cr.model_id: _serialize_candidate_evaluation(cr.evaluation) for cr in candidate_results
         },
@@ -358,6 +361,9 @@ def publish_phase1b_results(
         "selected_model": run_manifest["selected_model"],
         "contract_sha256": run_manifest["contract_sha256"],
         "source_dataset_sha256": run_manifest["source_dataset_sha256"],
+        "prepared_output_sha256": run_manifest["prepared_output_sha256"],
+        "feature_output_sha256": run_manifest["feature_output_sha256"],
+        "source_git_sha": run_manifest["source_git_sha"],
         "models": run_manifest["models"],
     }
     metrics_file.write_text(json.dumps(published_metrics, indent=2), encoding="utf-8")
@@ -423,6 +429,12 @@ def main() -> None:
     parser.add_argument(
         "--publish-dir", type=Path, required=True, help="Directory for published metrics/report"
     )
+    parser.add_argument(
+        "--source-git-sha",
+        type=str,
+        required=True,
+        help="Git commit SHA-256 (40-character hex) corresponding to this run",
+    )
     args = parser.parse_args()
 
     result = run_phase1b_benchmark(
@@ -430,6 +442,7 @@ def main() -> None:
         feature_path=args.features,
         artifact_dir=args.artifact_dir,
         expected_prepared_output_sha256=args.prepared_output_sha256,
+        source_git_sha=args.source_git_sha,
     )
     publish_phase1b_results(result.run_dir, args.publish_dir)
     print(

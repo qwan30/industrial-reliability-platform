@@ -59,4 +59,3 @@ def test_candidate_run_contains_downloadable_pyfunc(tmp_path: Path) -> None:
         artifact_uri=f"runs:/{result.run_id}/champion-model"
     )
     assert Path(downloaded, "MLmodel").is_file()
-

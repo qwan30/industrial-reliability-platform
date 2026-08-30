@@ -40,4 +40,3 @@
   3. **Durable Control State:** `RuntimeStore.update_replay_checkpoint_state` atomically updates `state` (`PAUSED`, `RUNNING`, `STOPPED`) without mutating START `command_payload` or sequence/timestamp cursor.
   4. **Startup Invariant:** `start()` properly handles PAUSED sessions, blocking until RESUME command.
   5. **Review Verdicts:** Unanimously `APPROVED` by Code & Logic Reviewer, Security & Data Integrity Reviewer, Verification & Testing Reviewer, and Supervisor.
-

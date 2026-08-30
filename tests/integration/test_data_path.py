@@ -32,6 +32,7 @@ from industrial_reliability.kafka_io import (
     encode_message,
 )
 from industrial_reliability.persistence import RuntimeStore
+from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.replay import ReplaySource
 from industrial_reliability.replay_service import ReplayService
 from industrial_reliability.runtime_messages import (

@@ -1,11 +1,14 @@
 {
   "schema_version": "phase1b-benchmark-v1",
-  "run_id": "phase1b-run-ab07f66279cf",
-  "timestamp": "2026-08-30T16:37:35.627136",
+  "run_id": "phase1b-run-81300167b8b8",
+  "timestamp": "2026-08-30T18:59:04.471723",
   "verdict": "NOT FEASIBLE",
   "selected_model": null,
   "contract_sha256": "31f8689256951067e28c9cbb48a930c1617d8eea8c7133ba1a315f632842e1ad",
   "source_dataset_sha256": "aab991a970e58210de853bb8078ce0e63abb4d9412fdc5c79792dae3d8e1721a",
+  "prepared_output_sha256": "0c31129cc4f4be982a6aec79f448485a2674b2fe79643186737143dccfe6d42a",
+  "feature_output_sha256": "667d61d5a8fed7c426f301088a705521f1133acb06bbe7f9861890499f1c6f0c",
+  "source_git_sha": "e6c1a93fef258c850f1e7f18462ac71b454e5592",
   "models": {
     "statistical": {
       "threshold": 3503.9794954828394,

@@ -200,7 +200,6 @@ class ReplaySource:
         )
         self.clock = clock if clock is not None else (lambda: datetime.now(UTC))
 
-
     def iter_events(
         self,
         command: ReplayCommandV1,

@@ -520,7 +520,6 @@ def test_main_default_uses_package_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import json
-    from industrial_reliability.package_champion import ChampionManifest
 
     source_sha = "a" * 64
     contract_sha = "b" * 64
@@ -571,6 +570,8 @@ def test_main_default_uses_package_manifest(
         if hasattr(coro, "close"):
             coro.close()
 
-    with patch("industrial_reliability.replay_service.asyncio.run", side_effect=_fake_run) as mock_run:
+    with patch(
+        "industrial_reliability.replay_service.asyncio.run", side_effect=_fake_run
+    ) as mock_run:
         main()
         assert mock_run.called

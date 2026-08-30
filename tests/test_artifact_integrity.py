@@ -181,7 +181,6 @@ def test_verified_prepared_parquet_rejects_byte_tamper(tmp_path: Path) -> None:
         )
 
 
-
 def test_coordinated_parquet_and_manifest_replacement_fails_external_anchor(
     tmp_path: Path,
 ) -> None:
@@ -217,4 +216,3 @@ def test_coordinated_parquet_and_manifest_replacement_fails_external_anchor(
             expected_source_dataset_sha256=source_sha,
             expected_output_sha256=approved_sha,
         )
-

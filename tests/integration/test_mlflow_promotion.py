@@ -136,9 +136,6 @@ def test_promote_candidate_sqlite_rejects_tampered_tag(tmp_path: Path) -> None:
         phase7_gate=gate_path,
         tracking_uri=tracking_uri,
     )
-    with pytest.raises(
-        ValueError, match="dataset_sha256 run tag does not match attested identity"
-    ):
+    with pytest.raises(ValueError, match="dataset_sha256 run tag does not match attested identity"):
         promote_candidate(promote_req)
     assert not receipt_out.exists()
-

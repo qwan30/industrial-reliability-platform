@@ -90,11 +90,14 @@ python -m industrial_reliability.drift build-reference \
   --output data/processed/phase1c/features.parquet
 
 # 3. Execute offline benchmark and publish versioned metrics:
-.\.venv\Scripts\python.exe -m industrial_reliability.phase1b_benchmark \
-  --prepared-dir data/processed/phase1c/metropt3 \
-  --features data/processed/phase1c/features.parquet \
-  --artifact-dir artifacts/phase1c \
-  --publish-dir docs/results/phase1c
+$sha = git rev-parse HEAD
+.\.venv\Scripts\python.exe -m industrial_reliability.phase1b_benchmark `
+  --prepared-dir data/processed/phase1c/metropt3 `
+  --prepared-output-sha256 0c31129cc4f4be982a6aec79f448485a2674b2fe79643186737143dccfe6d42a `
+  --features data/processed/phase1c/features.parquet `
+  --artifact-dir artifacts/phase1c `
+  --publish-dir docs/results/phase1c `
+  --source-git-sha $sha
 
 # 4. Copy published Phase 1C evidence to root docs/results:
 Copy-Item docs/results/phase1c/phase-1b-metrics.json docs/results/phase-1c-metrics.json

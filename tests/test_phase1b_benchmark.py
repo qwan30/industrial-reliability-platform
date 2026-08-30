@@ -204,6 +204,7 @@ def test_run_phase1b_benchmark_end_to_end_synthetic(tmp_path: Path) -> None:
         feature_path=feat_path,
         artifact_dir=artifact_dir,
         expected_prepared_output_sha256=prep_sha,
+        source_git_sha="a" * 40,
         contract=PHASE1C,
     )
 
@@ -233,5 +234,56 @@ def test_benchmark_rejects_tampered_features(tmp_path: Path) -> None:
             feature_path=feat_path,
             artifact_dir=artifact_dir,
             expected_prepared_output_sha256=prep_sha,
+            source_git_sha="a" * 40,
             contract=PHASE1C,
         )
+
+
+def create_phase1c_run_fixture(tmp_path: Path) -> Path:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "schema_version": "phase1b-run-v1",
+        "run_id": "phase1b-run-test",
+        "timestamp": "2026-08-30T00:00:00",
+        "verdict": "NOT FEASIBLE",
+        "selected_model": None,
+        "contract_sha256": "1" * 64,
+        "source_dataset_sha256": "2" * 64,
+        "prepared_output_sha256": "a" * 64,
+        "feature_output_sha256": "b" * 64,
+        "source_git_sha": "c" * 40,
+        "models": {
+            "statistical": {
+                "threshold": 1.0,
+                "valid_holdout_decisions": 10,
+                "anomalous_decisions": 1,
+                "time_in_alert": 0.1,
+                "pr_auc": 0.5,
+                "detected_events": 1,
+                "total_events": 4,
+                "false_episodes": 2,
+                "false_episodes_per_day": 1.0,
+                "feasible": False,
+                "event_results": [
+                    {
+                        "event_id": "metropt3-1",
+                        "detected": True,
+                        "first_detection_time": "2020-04-18T00:00:00",
+                        "lead_seconds_to_source_start": 100.0,
+                    }
+                ],
+            }
+        },
+    }
+    (run_dir / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return run_dir
+
+
+def test_published_phase1c_metrics_include_byte_and_code_identity(tmp_path: Path) -> None:
+    run_dir = create_phase1c_run_fixture(tmp_path)
+    metrics_path, _ = publish_phase1b_results(run_dir, tmp_path / "published")
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert metrics["prepared_output_sha256"] == "a" * 64
+    assert metrics["feature_output_sha256"] == "b" * 64
+    assert metrics["source_git_sha"] == "c" * 40

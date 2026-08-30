@@ -23,4 +23,3 @@ if (-not $valid) {
     --output-dir $packageDir
 }
 (Get-FileHash -Algorithm SHA256 -LiteralPath $manifest).Hash.ToLowerInvariant()
-

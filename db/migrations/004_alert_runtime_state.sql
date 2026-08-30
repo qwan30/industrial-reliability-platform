@@ -14,4 +14,3 @@ CREATE TABLE IF NOT EXISTS replay_checkpoints (
   source_timestamp timestamp,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-

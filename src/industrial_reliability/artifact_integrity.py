@@ -78,4 +78,3 @@ def verify_prepared_parquet(
         parquet_sha256=parquet_sha,
         manifest_sha256=str(manifest["manifest_sha256"]),
     )
-

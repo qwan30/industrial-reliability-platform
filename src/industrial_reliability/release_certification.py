@@ -189,11 +189,12 @@ def _verify_release_evidence(
         return False
 
     required = _REQUIRED_DEPENDENCIES.get(expected_schema, set())
-    receipts = {
-        item["dependency"]
-        for item in data.get("dependency_receipts", [])
-        if isinstance(item, dict) and "dependency" in item
-    }
+    raw_receipts = data.get("dependency_receipts")
+    if not isinstance(raw_receipts, list) or not all(
+        isinstance(item, dict) and isinstance(item.get("dependency"), str) for item in raw_receipts
+    ):
+        return False
+    receipts = {str(item["dependency"]) for item in raw_receipts}
     if not required <= receipts:
         return False
 

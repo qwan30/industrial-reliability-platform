@@ -22,12 +22,12 @@ from industrial_reliability.kafka_io import (
     encode_message,
 )
 from industrial_reliability.metrics import RuntimeMetrics, start_process_metrics
+from industrial_reliability.package_champion import ChampionManifest
 from industrial_reliability.persistence import (
     ReplayCheckpoint,
     ReplayCheckpointState,
     RuntimeStore,
 )
-from industrial_reliability.package_champion import ChampionManifest
 from industrial_reliability.phase1b_contracts import metropt3_contract_manifest
 from industrial_reliability.replay import (
     ReplayController,

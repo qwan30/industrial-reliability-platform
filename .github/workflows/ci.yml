@@ -84,7 +84,8 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,mlops]"
+      - run: python -c "import mlflow; print(mlflow.__version__)"
       - name: Run Integration Tests
         env:
           DATABASE_URL: postgresql://irp:irp_password@localhost:5432/irp

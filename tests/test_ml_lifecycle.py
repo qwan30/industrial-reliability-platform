@@ -171,9 +171,7 @@ def _create_mock_gate_attestation_file(
     if alert_policy_sha256 is None:
         alert_policy_sha256 = canonical_sha256({"policy": "default-locked-policy"})
     if feature_schema_sha256 is None:
-        feature_schema_sha256 = canonical_sha256(
-            {"features": ["tp2_mean", "dv_pressure_mean"]}
-        )
+        feature_schema_sha256 = canonical_sha256({"features": ["tp2_mean", "dv_pressure_mean"]})
     gate = Phase7GateResult(
         schema_version="phase7-gate-v1",
         source_git_sha=source_git_sha,
@@ -683,5 +681,3 @@ def test_promotion_rejects_run_tag_changed_after_attestation(
         )
     assert client.model_versions == {}
     assert client.aliases == {}
-
-

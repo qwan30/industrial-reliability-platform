@@ -147,4 +147,3 @@ def test_load_alert_state_replays_legacy_decisions_exactly(
     assert recovered.normal_streak == state.normal_streak
     assert recovered.last_decision_id == decisions[-1].decision_id
     assert store.count("alert_runtime_states", "replay_session_id", str(session_id)) == 1
-

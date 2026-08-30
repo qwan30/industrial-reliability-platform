@@ -1,9 +1,9 @@
 # Phase 0 Research & Security Scout Report: Industrial Reliability Platform
 
-**Framework:** SDLC Mario E2E v4.0 (SLP Governed Edition)  
-**Target Repository:** `industrial-reliability-platform` (FastAPI, Python 3.12, PyArrow, Kafka, PostgreSQL, Vite/React, Playwright)  
-**Audited Baseline SHA:** `2d054c65db8ce63ff6aebbf48d472c5c0586b0fc`  
-**Date:** 2026-08-30  
+**Framework:** SDLC Mario E2E v4.0 (SLP Governed Edition)
+**Target Repository:** `industrial-reliability-platform` (FastAPI, Python 3.12, PyArrow, Kafka, PostgreSQL, Vite/React, Playwright)
+**Audited Baseline SHA:** `2d054c65db8ce63ff6aebbf48d472c5c0586b0fc`
+**Date:** 2026-08-30
 
 ---
 

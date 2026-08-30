@@ -585,4 +585,3 @@ def test_missing_runtime_state_reconstructs_with_policy() -> None:
         assert state.active_alert_id is not None
         assert cursor.execute.call_count >= 3
         assert connection.commit.called
-

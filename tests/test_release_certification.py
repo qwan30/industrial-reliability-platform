@@ -620,6 +620,23 @@ def test_validator_rejects_phase9_live_missing_openai_receipt(tmp_path: Path) ->
     assert report.is_certified is False
 
 
+@pytest.mark.parametrize("receipts", [None, "openai", {}, ["openai"]])
+def test_validator_rejects_malformed_dependency_receipts(
+    tmp_path: Path,
+    receipts: object,
+) -> None:
+    _write_phase1b_metrics(tmp_path)
+    _write_passing_phase8_report(tmp_path)
+    _write_passing_phase9_report(tmp_path)
+    path = tmp_path / "phase-9-rca-openai.json"
+    report = json.loads(path.read_text(encoding="utf-8"))
+    report["dependency_receipts"] = receipts
+    report["report_sha256"] = compute_self_hash(report, "report_sha256")
+    path.write_text(json.dumps(report), encoding="utf-8")
+    result = ReleaseCertificationValidator(tmp_path).evaluate("a" * 40)
+    assert result.is_certified is False
+
+
 def test_validator_rejects_unreadable_evidence(tmp_path: Path) -> None:
     _write_phase1b_metrics(tmp_path)
     (tmp_path / "phase-8-live-fault-drills.json").write_text("not-json{{", encoding="utf-8")

@@ -99,6 +99,7 @@ def build_research_candidate_package(
             model_version="research-candidate-statistical-v1",
             contract_sha256=run["contract_sha256"],
             source_dataset_sha256=run["source_dataset_sha256"],
+            feature_output_sha256=run["feature_output_sha256"],
             feature_names=tuple(features["active_feature_names"]),
             threshold=float(run["models"]["statistical"]["threshold"]),
             threshold_provenance=ThresholdProvenance(),

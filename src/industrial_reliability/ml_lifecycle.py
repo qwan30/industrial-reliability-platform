@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
+from industrial_reliability.artifact_integrity import verify_file_sha256
 from industrial_reliability.champion import load_champion
 from industrial_reliability.evaluation import calibrate_threshold
 from industrial_reliability.ml_provenance import (
@@ -307,9 +308,16 @@ def reproduce_candidate(
             f"Source Git SHA mismatch: expected {request.expected_source_git_sha}, got {git_sha}"
         )
 
+    # Verify features file matches package manifest feature_output_sha256
+    verify_file_sha256(
+        request.features_path.resolve(),
+        pkg_manifest.feature_output_sha256,
+        "features.parquet",
+    )
+
     # Read features table filtered strictly to train and calibration
     table = pq.read_table(
-        request.features_path,
+        request.features_path.resolve(),
         filters=[("split", "in", ["train", "calibration"])],
     )
     frame = table.to_pandas()

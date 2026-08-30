@@ -44,9 +44,7 @@ def verify_file_sha256(path: Path, expected: str, label: str) -> str:
     """Verify that a file on disk matches the expected SHA-256 digest."""
     actual = sha256_file(path)
     if actual != expected:
-        raise ArtifactIntegrityError(
-            f"{label} SHA-256 mismatch: expected {expected}, got {actual}"
-        )
+        raise ArtifactIntegrityError(f"{label} SHA-256 mismatch: expected {expected}, got {actual}")
     return actual
 
 

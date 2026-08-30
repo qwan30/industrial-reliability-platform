@@ -57,6 +57,7 @@ class ChampionManifest(BaseModel):
     model_version: str
     contract_sha256: str = Field(pattern=HEX_64_PATTERN)
     source_dataset_sha256: str = Field(pattern=HEX_64_PATTERN)
+    feature_output_sha256: str = Field(pattern=HEX_64_PATTERN)
     feature_names: tuple[str, ...] = Field(min_length=1)
     threshold: float
     threshold_provenance: ThresholdProvenance
@@ -356,6 +357,7 @@ def build_champion_package(
             model_version=champion["model_version"],
             contract_sha256=champion["contract_sha256"],
             source_dataset_sha256=champion["source_dataset_sha256"],
+            feature_output_sha256=champion["feature_output_sha256"],
             feature_names=tuple(champion["active_feature_names"]),
             threshold=float(champion["threshold"]),
             threshold_provenance=ThresholdProvenance(

@@ -199,6 +199,7 @@ def test_store_load_alert_state_found() -> None:
 
         # Also test if row["payload"] is a serialized json string
         import json
+
         mock_cur.fetchone.return_value = {"payload": json.dumps(payload)}
         loaded_from_json_str = store.load_alert_state(session_id, "metropt3")
         assert loaded_from_json_str == state
@@ -210,6 +211,7 @@ def test_store_record_decision_transition_upserts_runtime_state_when_no_event() 
     policy = _make_policy()
     # persistence_decisions is 2, so 1st anomaly emits no event
     from dataclasses import replace
+
     policy = replace(policy, persistence_decisions=2)
     decision = _make_decision(session_id, is_anomaly=True)
     state = AlertState.empty(session_id, "metropt3")

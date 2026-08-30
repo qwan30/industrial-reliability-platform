@@ -16,6 +16,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from numpy.typing import NDArray
 
+from industrial_reliability.artifact_integrity import (
+    ArtifactIntegrityError,
+    load_self_hashed_manifest,
+    verify_file_sha256,
+    verify_prepared_parquet,
+)
 from industrial_reliability.autoencoder import DenseAutoencoderDetector
 from industrial_reliability.evaluation import (
     EvaluationResult,
@@ -30,6 +36,7 @@ from industrial_reliability.models import (
 from industrial_reliability.phase1b_contracts import (
     PHASE1B,
     Phase1BContract,
+    phase1b_contract_manifest,
     phase1b_evaluation_events,
 )
 from industrial_reliability.phase1b_data import sha256_file
@@ -180,13 +187,34 @@ def run_phase1b_benchmark(
 ) -> Phase1BBenchmarkResult:
     resolved_prep = prepared_dir.resolve()
     resolved_feat = feature_path.resolve()
+    prep_parquet_file = (resolved_prep / "telemetry.parquet").resolve()
     prep_manifest_file = (resolved_prep / "manifest.json").resolve()
     feat_manifest_file = (resolved_feat.parent / "feature_manifest.json").resolve()
-    if not prep_manifest_file.is_file() or not feat_manifest_file.is_file():
+    if (
+        not prep_parquet_file.is_file()
+        or not prep_manifest_file.is_file()
+        or not feat_manifest_file.is_file()
+        or not resolved_feat.is_file()
+    ):
         raise FileNotFoundError("Prerequisite manifest files missing")
 
-    data_manifest = json.loads(prep_manifest_file.read_text(encoding="utf-8"))
-    feat_manifest = json.loads(feat_manifest_file.read_text(encoding="utf-8"))
+    contract_manifest = phase1b_contract_manifest()
+    expected_contract_sha = str(contract_manifest["contract_sha256"])
+
+    verified_data = verify_prepared_parquet(prep_parquet_file, expected_contract_sha)
+    feat_manifest = load_self_hashed_manifest(feat_manifest_file)
+    verify_file_sha256(
+        resolved_feat, str(feat_manifest.get("output_sha256", "")), "features.parquet"
+    )
+
+    if feat_manifest.get("contract_sha256") != expected_contract_sha:
+        raise ArtifactIntegrityError(
+            f"features contract SHA-256 mismatch: expected {expected_contract_sha}, got {feat_manifest.get('contract_sha256')}"
+        )
+    if feat_manifest.get("data_manifest_sha256") != verified_data.manifest_sha256:
+        raise ArtifactIntegrityError(
+            f"features data manifest mismatch: expected {verified_data.manifest_sha256}, got {feat_manifest.get('data_manifest_sha256')}"
+        )
 
     active_features = tuple(feat_manifest["active_feature_names"])
     features_df = pq.read_table(resolved_feat).to_pandas()
@@ -255,8 +283,8 @@ def run_phase1b_benchmark(
         "verdict": verdict,
         "selected_model": selected_model,
         "contract_sha256": feat_manifest["contract_sha256"],
-        "source_dataset_sha256": data_manifest["archive_sha256"],
-        "prepared_output_sha256": data_manifest["output_sha256"],
+        "source_dataset_sha256": verified_data.source_dataset_sha256,
+        "prepared_output_sha256": verified_data.parquet_sha256,
         "feature_output_sha256": feat_manifest["output_sha256"],
         "models": {
             cr.model_id: _serialize_candidate_evaluation(cr.evaluation) for cr in candidate_results
@@ -278,7 +306,7 @@ def run_phase1b_benchmark(
             "threshold_provenance": asdict(selected.fitted.threshold_provenance),
             "active_feature_names": list(active_features),
             "contract_sha256": feat_manifest["contract_sha256"],
-            "source_dataset_sha256": data_manifest["archive_sha256"],
+            "source_dataset_sha256": verified_data.source_dataset_sha256,
             "feature_output_sha256": feat_manifest["output_sha256"],
             "artifact_sha256": {
                 "scores_parquet": sha256_file(scores_path),
@@ -295,7 +323,7 @@ def run_phase1b_benchmark(
         verdict=verdict,
         selected_model=selected_model,
         contract_sha256=feat_manifest["contract_sha256"],
-        source_dataset_sha256=data_manifest["archive_sha256"],
+        source_dataset_sha256=verified_data.source_dataset_sha256,
         run_id=run_id,
     )
 

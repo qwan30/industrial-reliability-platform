@@ -1,6 +1,6 @@
+import os
 from dataclasses import replace
 from datetime import timedelta
-import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -24,9 +24,13 @@ def store() -> RuntimeStore:
     try:
         store = RuntimeStore(TEST_DB_URL)
         store.check_connection()
-        migration_sql_001 = Path("db/migrations/001_alert_lifecycle.sql").read_text(encoding="utf-8")
+        migration_sql_001 = Path("db/migrations/001_alert_lifecycle.sql").read_text(
+            encoding="utf-8"
+        )
         store.execute_script(migration_sql_001)
-        migration_sql_004 = Path("db/migrations/004_alert_runtime_state.sql").read_text(encoding="utf-8")
+        migration_sql_004 = Path("db/migrations/004_alert_runtime_state.sql").read_text(
+            encoding="utf-8"
+        )
         store.execute_script(migration_sql_004)
         return store
     except Exception as exc:

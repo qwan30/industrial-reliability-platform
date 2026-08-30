@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -7,9 +8,12 @@ from pathlib import Path
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
+from industrial_reliability.artifact_integrity import ArtifactIntegrityError
 from industrial_reliability.causal_features import TelemetrySample
-from industrial_reliability.phase1b_contracts import PHASE1B
+from industrial_reliability.phase1b_contracts import PHASE1B, phase1b_contract_manifest
+from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.phase1b_features import (
     build_phase1b_features,
     fit_active_feature_names,
@@ -35,6 +39,54 @@ def _generate_samples_for_bins(
             digital = (1, 0, 1, 0, 1, 0, 1)  # 7 digital predictor columns
             samples.append(TelemetrySample(ts, analog, digital))
     return samples
+
+
+def _create_prepared_dir(tmp_path: Path, samples: list[TelemetrySample]) -> Path:
+    prep_dir = tmp_path / "prepared"
+    prep_dir.mkdir(parents=True, exist_ok=True)
+    records = []
+    for s in samples:
+        row = {
+            "timestamp": s.timestamp,
+            "tp2": s.analog[0],
+            "tp3": s.analog[1],
+            "h1": s.analog[2],
+            "dv_pressure": s.analog[3],
+            "reservoirs": s.analog[4],
+            "oil_temperature": s.analog[5],
+            "motor_current": s.analog[6],
+            "comp": s.digital[0],
+            "dv_electric": s.digital[1],
+            "towers": s.digital[2],
+            "mpg": s.digital[3],
+            "pressure_switch": s.digital[4],
+            "oil_level": s.digital[5],
+            "caudal_impulses": s.digital[6],
+            "lps": 0,
+        }
+        records.append(row)
+    df = pd.DataFrame(records)
+    parquet_path = prep_dir / "telemetry.parquet"
+    table = pa.Table.from_pandas(df, preserve_index=False)
+    pq.write_table(table, parquet_path, compression="snappy")
+    output_sha256 = sha256_file(parquet_path)
+
+    contract_manifest = phase1b_contract_manifest()
+    manifest_data = {
+        "archive_sha256": "1" * 64,
+        "contract_sha256": contract_manifest["contract_sha256"],
+        "output_sha256": output_sha256,
+        "normalized_rows": len(records),
+        "canonical_columns": list(PHASE1B.canonical_columns),
+        "identical_duplicates_removed": 0,
+        "first_timestamp": records[0]["timestamp"].isoformat(),
+        "last_timestamp": records[-1]["timestamp"].isoformat(),
+    }
+    canonical = json.dumps(manifest_data, sort_keys=True, separators=(",", ":"))
+    manifest_sha256 = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    manifest_data["manifest_sha256"] = manifest_sha256
+    (prep_dir / "manifest.json").write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
+    return prep_dir
 
 
 def test_six_valid_right_closed_bins_make_one_causal_window() -> None:
@@ -72,42 +124,9 @@ def test_fit_active_feature_names_removes_constant_columns() -> None:
 
 
 def test_build_phase1b_features_e2e(tmp_path: Path) -> None:
-    # Setup mock prepared dir
-    prepared_dir = tmp_path / "prepared"
-    prepared_dir.mkdir()
-
-    # Create telemetry dataframe with 8 valid bins in train split
     start_time = datetime(2020, 2, 1, 0, 0, 0)
     samples = _generate_samples_for_bins((25, 25, 25, 25, 25, 25, 25, 25), start_time)
-
-    records = []
-    for s in samples:
-        row = {
-            "timestamp": s.timestamp,
-            "tp2": s.analog[0],
-            "tp3": s.analog[1],
-            "h1": s.analog[2],
-            "dv_pressure": s.analog[3],
-            "reservoirs": s.analog[4],
-            "oil_temperature": s.analog[5],
-            "motor_current": s.analog[6],
-            "comp": s.digital[0],
-            "dv_electric": s.digital[1],
-            "towers": s.digital[2],
-            "mpg": s.digital[3],
-            "pressure_switch": s.digital[4],
-            "oil_level": s.digital[5],
-            "caudal_impulses": s.digital[6],
-            "lps": 0,
-        }
-        records.append(row)
-
-    df = pd.DataFrame(records)
-    table = pa.Table.from_pandas(df, preserve_index=False)
-    pq.write_table(table, prepared_dir / "telemetry.parquet", compression="snappy")
-
-    manifest = {"manifest_sha256": "mock_data_hash"}
-    (prepared_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    prepared_dir = _create_prepared_dir(tmp_path, samples)
 
     out_parquet = tmp_path / "features" / "features.parquet"
     feat_manifest = build_phase1b_features(prepared_dir, out_parquet, PHASE1B)
@@ -115,3 +134,19 @@ def test_build_phase1b_features_e2e(tmp_path: Path) -> None:
     assert out_parquet.exists()
     assert (tmp_path / "features" / "feature_manifest.json").exists()
     assert len(feat_manifest.active_feature_names) > 0
+
+
+def test_build_features_rejects_tampered_prepared_parquet(tmp_path: Path) -> None:
+    start_time = datetime(2020, 2, 1, 0, 0, 0)
+    samples = _generate_samples_for_bins((25, 25, 25, 25, 25, 25, 25, 25), start_time)
+    prepared_dir = _create_prepared_dir(tmp_path, samples)
+
+    parquet_file = prepared_dir / "telemetry.parquet"
+    # Tamper telemetry parquet by appending a byte
+    with parquet_file.open("ab") as f:
+        f.write(b"X")
+
+    out_parquet = tmp_path / "features" / "features.parquet"
+    with pytest.raises(ArtifactIntegrityError, match=r"telemetry\.parquet SHA-256 mismatch"):
+        build_phase1b_features(prepared_dir, out_parquet, PHASE1B)
+

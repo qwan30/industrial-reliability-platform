@@ -15,6 +15,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from industrial_reliability.artifact_integrity import verify_prepared_parquet
 from industrial_reliability.causal_features import (
     CoverageEvidence,
     TelemetrySample,
@@ -232,7 +233,10 @@ def build_phase1b_features(
     if not parquet_file.is_file() or not manifest_file.is_file():
         raise FileNotFoundError(f"prepared telemetry missing in {resolved_prep}")
 
-    data_manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    contract_manifest = phase1b_contract_manifest()
+    contract_sha256_str = str(contract_manifest["contract_sha256"])
+    prep_identity = verify_prepared_parquet(parquet_file, contract_sha256_str)
+
     df = pq.read_table(parquet_file).to_pandas()
 
     windows = list(iter_phase1b_windows(df, contract))
@@ -267,9 +271,7 @@ def build_phase1b_features(
         ("invalid_bins_skipped", 0),
     )
 
-    contract_manifest = phase1b_contract_manifest()
-    contract_sha256_str = str(contract_manifest["contract_sha256"])
-    data_manifest_sha256_str = str(data_manifest["manifest_sha256"])
+    data_manifest_sha256_str = prep_identity.manifest_sha256
     manifest_dict = {
         "contract_sha256": contract_sha256_str,
         "data_manifest_sha256": data_manifest_sha256_str,

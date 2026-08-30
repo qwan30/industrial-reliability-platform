@@ -76,17 +76,29 @@ def _state_payload(state: AlertState) -> dict[str, object]:
     return {
         "replay_session_id": str(state.replay_session_id),
         "machine_id": state.machine_id,
-        "active_alert_id": str(state.active_alert_id) if state.active_alert_id is not None else None,
-        "previous_alert_id": str(state.previous_alert_id) if state.previous_alert_id is not None else None,
-        "first_detection": state.first_detection.isoformat() if state.first_detection is not None else None,
-        "last_detection": state.last_detection.isoformat() if state.last_detection is not None else None,
+        "active_alert_id": str(state.active_alert_id)
+        if state.active_alert_id is not None
+        else None,
+        "previous_alert_id": str(state.previous_alert_id)
+        if state.previous_alert_id is not None
+        else None,
+        "first_detection": state.first_detection.isoformat()
+        if state.first_detection is not None
+        else None,
+        "last_detection": state.last_detection.isoformat()
+        if state.last_detection is not None
+        else None,
         "resolved_at": state.resolved_at.isoformat() if state.resolved_at is not None else None,
         "anomaly_decision_ids": [str(d_id) for d_id in state.anomaly_decision_ids],
         "anomaly_streak": state.anomaly_streak,
         "normal_streak": state.normal_streak,
-        "last_decision_id": str(state.last_decision_id) if state.last_decision_id is not None else None,
+        "last_decision_id": str(state.last_decision_id)
+        if state.last_decision_id is not None
+        else None,
         "last_source_timestamp": (
-            state.last_source_timestamp.isoformat() if state.last_source_timestamp is not None else None
+            state.last_source_timestamp.isoformat()
+            if state.last_source_timestamp is not None
+            else None
         ),
     }
 
@@ -261,9 +273,7 @@ class RuntimeStore:
                 return AlertState.empty(replay_session_id, machine_id)
 
             payload = (
-                row["payload"]
-                if isinstance(row["payload"], dict)
-                else json.loads(row["payload"])
+                row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"])
             )
             return _state_from_payload(payload)
 

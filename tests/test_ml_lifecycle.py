@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from industrial_reliability import phase1b_benchmark
+from industrial_reliability.artifact_integrity import ArtifactIntegrityError
 from industrial_reliability.ml_lifecycle import (
     CandidateResult,
     ImportCandidateRequest,
@@ -252,6 +253,24 @@ def test_reproduce_candidate_git_sha_mismatch(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="Source Git SHA mismatch"):
         reproduce_candidate(req, mlflow_client=fake_client)
+
+
+def test_reproduction_rejects_tampered_features(tmp_path: Path) -> None:
+    run_dir, feat_path, pkg_dir = _create_mock_feasible_phase1b_run(tmp_path)
+    fake_client = FakeMlflowClient()
+
+    # Tamper features.parquet
+    with feat_path.open("ab") as f:
+        f.write(b"CORRUPTED_BYTES")
+
+    req = ReproductionRequest(
+        features_path=feat_path,
+        phase1b_run_dir=run_dir,
+        champion_package=pkg_dir,
+    )
+    with pytest.raises(ArtifactIntegrityError, match=r"features\.parquet SHA-256 mismatch"):
+        reproduce_candidate(req, mlflow_client=fake_client)
+
 
 
 def test_promote_candidate_invalid_lifecycle_state(tmp_path: Path) -> None:

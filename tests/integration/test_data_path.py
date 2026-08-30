@@ -179,7 +179,12 @@ async def test_verified_telemetry_reaches_one_durable_alert(
     async with running_scoring_api(scorer) as scoring_url:
         replay = ReplayService(
             kafka,
-            ReplaySource(parquet, expected_contract_sha256=scorer.contract_sha256),
+            ReplaySource(
+                parquet,
+                expected_contract_sha256=scorer.contract_sha256,
+                expected_source_dataset_sha256=scorer.source_dataset_sha256,
+                expected_output_sha256=sha256_file(parquet),
+            ),
             enable_pacing=False,
         )
         worker = StreamingWorker(

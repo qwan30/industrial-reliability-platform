@@ -79,7 +79,7 @@ def _create_synthetic_benchmark_fixtures(tmp_path: Path) -> tuple[Path, Path, Pa
     contract_sha = str(contract_manifest["contract_sha256"])
 
     prep_data = {
-        "archive_sha256": "1" * 64,
+        "archive_sha256": PHASE1C.archive_sha256,
         "contract_sha256": contract_sha,
         "output_sha256": tel_sha,
         "normalized_rows": 1,
@@ -198,10 +198,12 @@ def _create_synthetic_benchmark_fixtures(tmp_path: Path) -> tuple[Path, Path, Pa
 
 def test_run_phase1b_benchmark_end_to_end_synthetic(tmp_path: Path) -> None:
     prepared_dir, feat_path, artifact_dir = _create_synthetic_benchmark_fixtures(tmp_path)
+    prep_sha = sha256_file(prepared_dir / "telemetry.parquet")
     res = run_phase1b_benchmark(
         prepared_dir=prepared_dir,
         feature_path=feat_path,
         artifact_dir=artifact_dir,
+        expected_prepared_output_sha256=prep_sha,
         contract=PHASE1C,
     )
 
@@ -219,6 +221,7 @@ def test_run_phase1b_benchmark_end_to_end_synthetic(tmp_path: Path) -> None:
 
 def test_benchmark_rejects_tampered_features(tmp_path: Path) -> None:
     prepared_dir, feat_path, artifact_dir = _create_synthetic_benchmark_fixtures(tmp_path)
+    prep_sha = sha256_file(prepared_dir / "telemetry.parquet")
 
     # Tamper features.parquet
     with feat_path.open("ab") as f:
@@ -229,5 +232,6 @@ def test_benchmark_rejects_tampered_features(tmp_path: Path) -> None:
             prepared_dir=prepared_dir,
             feature_path=feat_path,
             artifact_dir=artifact_dir,
+            expected_prepared_output_sha256=prep_sha,
             contract=PHASE1C,
         )

@@ -73,7 +73,7 @@ def _create_prepared_dir(tmp_path: Path, samples: list[TelemetrySample]) -> Path
 
     contract_manifest = metropt3_contract_manifest(PHASE1C)
     manifest_data = {
-        "archive_sha256": "1" * 64,
+        "archive_sha256": PHASE1C.archive_sha256,
         "contract_sha256": contract_manifest["contract_sha256"],
         "output_sha256": output_sha256,
         "normalized_rows": len(records),
@@ -127,9 +127,15 @@ def test_build_phase1b_features_e2e(tmp_path: Path) -> None:
     start_time = datetime(2020, 2, 1, 0, 0, 0)
     samples = _generate_samples_for_bins((25, 25, 25, 25, 25, 25, 25, 25), start_time)
     prepared_dir = _create_prepared_dir(tmp_path, samples)
+    prep_sha = sha256_file(prepared_dir / "telemetry.parquet")
 
     out_parquet = tmp_path / "features" / "features.parquet"
-    feat_manifest = build_phase1b_features(prepared_dir, out_parquet, PHASE1C)
+    feat_manifest = build_phase1b_features(
+        prepared_dir,
+        out_parquet,
+        expected_prepared_output_sha256=prep_sha,
+        contract=PHASE1C,
+    )
 
     assert out_parquet.exists()
     assert (tmp_path / "features" / "feature_manifest.json").exists()
@@ -140,6 +146,7 @@ def test_build_features_rejects_tampered_prepared_parquet(tmp_path: Path) -> Non
     start_time = datetime(2020, 2, 1, 0, 0, 0)
     samples = _generate_samples_for_bins((25, 25, 25, 25, 25, 25, 25, 25), start_time)
     prepared_dir = _create_prepared_dir(tmp_path, samples)
+    prep_sha = sha256_file(prepared_dir / "telemetry.parquet")
 
     parquet_file = prepared_dir / "telemetry.parquet"
     # Tamper telemetry parquet by appending a byte
@@ -148,7 +155,12 @@ def test_build_features_rejects_tampered_prepared_parquet(tmp_path: Path) -> Non
 
     out_parquet = tmp_path / "features" / "features.parquet"
     with pytest.raises(ArtifactIntegrityError, match=r"telemetry\.parquet SHA-256 mismatch"):
-        build_phase1b_features(prepared_dir, out_parquet, PHASE1C)
+        build_phase1b_features(
+            prepared_dir,
+            out_parquet,
+            expected_prepared_output_sha256=prep_sha,
+            contract=PHASE1C,
+        )
 
 
 def test_window_never_crosses_train_calibration_boundary() -> None:
@@ -182,9 +194,15 @@ def test_build_phase1b_features_manifest_records_actual_rejection_counts(tmp_pat
     counts = (24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 10, 24, 24, 24, 24, 24, 24)
     samples = _generate_samples_for_bins(counts, start_time)
     prepared_dir = _create_prepared_dir(tmp_path, samples)
+    prep_sha = sha256_file(prepared_dir / "telemetry.parquet")
 
     out_parquet = tmp_path / "features" / "features.parquet"
-    feat_manifest = build_phase1b_features(prepared_dir, out_parquet, PHASE1C)
+    feat_manifest = build_phase1b_features(
+        prepared_dir,
+        out_parquet,
+        expected_prepared_output_sha256=prep_sha,
+        contract=PHASE1C,
+    )
 
     rejection_dict = dict(feat_manifest.rejection_counts)
     assert rejection_dict["invalid_bins_skipped"] == 1

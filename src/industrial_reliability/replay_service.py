@@ -27,6 +27,7 @@ from industrial_reliability.persistence import (
     ReplayCheckpointState,
     RuntimeStore,
 )
+from industrial_reliability.package_champion import ChampionManifest
 from industrial_reliability.phase1b_contracts import metropt3_contract_manifest
 from industrial_reliability.replay import (
     ReplayController,
@@ -498,16 +499,35 @@ def run_certification(
     speeds: list[int],
     output_dir: Path,
     expected_contract_sha256: str | None = None,
+    expected_source_dataset_sha256: str | None = None,
+    expected_output_sha256: str | None = None,
+    package_manifest: ChampionManifest | None = None,
 ) -> dict[str, object]:
     safe_out = output_dir.resolve()
     safe_out.mkdir(parents=True, exist_ok=True)
     safe_pq = parquet_path.resolve()
-    contract_sha = (
-        expected_contract_sha256
-        if expected_contract_sha256 is not None
-        else str(metropt3_contract_manifest()["contract_sha256"])
+    if package_manifest is not None:
+        contract_sha = expected_contract_sha256 or package_manifest.contract_sha256
+        source_sha = expected_source_dataset_sha256 or package_manifest.source_dataset_sha256
+        output_sha = expected_output_sha256 or package_manifest.prepared_output_sha256
+    else:
+        manifest_path = safe_pq.with_name("manifest.json")
+        contract_meta = metropt3_contract_manifest()
+        contract_sha = expected_contract_sha256 or str(contract_meta["contract_sha256"])
+        source_sha = expected_source_dataset_sha256 or str(contract_meta.get("archive_sha256", ""))
+        if expected_output_sha256 is not None:
+            output_sha = expected_output_sha256
+        elif manifest_path.is_file():
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            output_sha = str(data.get("output_sha256", ""))
+        else:
+            output_sha = ""
+    source = ReplaySource(
+        safe_pq,
+        expected_contract_sha256=contract_sha,
+        expected_source_dataset_sha256=source_sha,
+        expected_output_sha256=output_sha,
     )
-    source = ReplaySource(safe_pq, expected_contract_sha256=contract_sha)
     results: dict[str, object] = {"speeds": speeds, "streams": {}}
 
     logical_hashes: set[str] = set()
@@ -599,12 +619,20 @@ def main() -> None:
             start_process_metrics(int(metrics_port), registry)
             logger.info("Metrics server started on port %s", metrics_port)
 
-        expected_contract_sha = os.environ.get("REPLAY_EXPECTED_CONTRACT_SHA256", "").strip()
-        if not expected_contract_sha:
-            raise ValueError("REPLAY_EXPECTED_CONTRACT_SHA256 must be set")
+        package_manifest_path = Path(
+            os.environ.get(
+                "REPLAY_PACKAGE_MANIFEST",
+                "/runtime/scoring-package/manifest.json",
+            )
+        )
+        package_manifest = ChampionManifest.model_validate_json(
+            package_manifest_path.read_text(encoding="utf-8")
+        )
         source = ReplaySource(
             args.parquet.resolve(),
-            expected_contract_sha256=expected_contract_sha,
+            expected_contract_sha256=package_manifest.contract_sha256,
+            expected_source_dataset_sha256=package_manifest.source_dataset_sha256,
+            expected_output_sha256=package_manifest.prepared_output_sha256,
         )
         settings = KafkaSettings.from_env()
         db_url = os.environ.get("DATABASE_URL")

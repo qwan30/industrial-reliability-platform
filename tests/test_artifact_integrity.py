@@ -83,9 +83,10 @@ def test_contract_sha256_mismatch_fails(tmp_path: Path) -> None:
 
     actual_contract_sha = "aaaa" * 16
     expected_contract_sha = "bbbb" * 16
+    source_sha = "1111" * 16
 
     payload = {
-        "archive_sha256": "1111" * 16,
+        "archive_sha256": source_sha,
         "contract_sha256": actual_contract_sha,
         "output_sha256": parquet_sha,
     }
@@ -95,7 +96,42 @@ def test_contract_sha256_mismatch_fails(tmp_path: Path) -> None:
         ArtifactIntegrityError,
         match=f"prepared contract SHA-256 mismatch: expected {expected_contract_sha}, got {actual_contract_sha}",
     ):
-        verify_prepared_parquet(parquet_path, expected_contract_sha)
+        verify_prepared_parquet(
+            parquet_path,
+            expected_contract_sha256=expected_contract_sha,
+            expected_source_dataset_sha256=source_sha,
+            expected_output_sha256=parquet_sha,
+        )
+
+
+def test_source_dataset_sha256_mismatch_fails(tmp_path: Path) -> None:
+    output_dir = tmp_path / "prepared"
+    output_dir.mkdir()
+    parquet_path = output_dir / "telemetry.parquet"
+    parquet_path.write_bytes(b"dummy parquet bytes")
+    parquet_sha = hashlib.sha256(b"dummy parquet bytes").hexdigest()
+
+    contract_sha = "aaaa" * 16
+    actual_source_sha = "1111" * 16
+    expected_source_sha = "2222" * 16
+
+    payload = {
+        "archive_sha256": actual_source_sha,
+        "contract_sha256": contract_sha,
+        "output_sha256": parquet_sha,
+    }
+    _create_self_hashed_manifest_file(output_dir / "manifest.json", payload)
+
+    with pytest.raises(
+        ArtifactIntegrityError,
+        match=f"prepared source SHA-256 mismatch: expected {expected_source_sha}, got {actual_source_sha}",
+    ):
+        verify_prepared_parquet(
+            parquet_path,
+            expected_contract_sha256=contract_sha,
+            expected_source_dataset_sha256=expected_source_sha,
+            expected_output_sha256=parquet_sha,
+        )
 
 
 def test_verified_prepared_parquet_rejects_byte_tamper(tmp_path: Path) -> None:
@@ -116,7 +152,12 @@ def test_verified_prepared_parquet_rejects_byte_tamper(tmp_path: Path) -> None:
     manifest_data = _create_self_hashed_manifest_file(output_dir / "manifest.json", payload)
 
     # Verify initial valid state
-    identity = verify_prepared_parquet(parquet_path, contract_sha)
+    identity = verify_prepared_parquet(
+        parquet_path,
+        expected_contract_sha256=contract_sha,
+        expected_source_dataset_sha256=archive_sha,
+        expected_output_sha256=parquet_sha,
+    )
     assert isinstance(identity, PreparedArtifactIdentity)
     assert identity.source_dataset_sha256 == archive_sha
     assert identity.contract_sha256 == contract_sha
@@ -132,4 +173,48 @@ def test_verified_prepared_parquet_rejects_byte_tamper(tmp_path: Path) -> None:
         ArtifactIntegrityError,
         match=f"telemetry.parquet SHA-256 mismatch: expected {parquet_sha}, got {tampered_sha}",
     ):
-        verify_prepared_parquet(parquet_path, contract_sha)
+        verify_prepared_parquet(
+            parquet_path,
+            expected_contract_sha256=contract_sha,
+            expected_source_dataset_sha256=archive_sha,
+            expected_output_sha256=parquet_sha,
+        )
+
+
+
+def test_coordinated_parquet_and_manifest_replacement_fails_external_anchor(
+    tmp_path: Path,
+) -> None:
+    parquet = tmp_path / "telemetry.parquet"
+    parquet.write_bytes(b"approved")
+    source_sha = "a" * 64
+    contract_sha = "b" * 64
+    approved_sha = hashlib.sha256(b"approved").hexdigest()
+    _create_self_hashed_manifest_file(
+        tmp_path / "manifest.json",
+        {
+            "archive_sha256": source_sha,
+            "contract_sha256": contract_sha,
+            "output_sha256": approved_sha,
+        },
+    )
+
+    parquet.write_bytes(b"replacement")
+    replacement_sha = hashlib.sha256(b"replacement").hexdigest()
+    _create_self_hashed_manifest_file(
+        tmp_path / "manifest.json",
+        {
+            "archive_sha256": source_sha,
+            "contract_sha256": contract_sha,
+            "output_sha256": replacement_sha,
+        },
+    )
+
+    with pytest.raises(ArtifactIntegrityError, match="expected prepared output"):
+        verify_prepared_parquet(
+            parquet,
+            expected_contract_sha256=contract_sha,
+            expected_source_dataset_sha256=source_sha,
+            expected_output_sha256=approved_sha,
+        )
+

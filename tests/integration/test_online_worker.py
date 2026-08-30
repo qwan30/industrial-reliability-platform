@@ -18,6 +18,7 @@ from industrial_reliability.kafka_io import (
     decode_message,
     encode_message,
 )
+from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.replay import ReplaySource
 from industrial_reliability.replay_service import ReplayService
 from industrial_reliability.runtime_messages import (
@@ -33,6 +34,7 @@ from industrial_reliability.worker import StreamingWorker, WorkerSettings
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_online_worker_stream_features_and_scores(tmp_path: Path) -> None:
+    require_live = os.environ.get("REQUIRE_INTEGRATION_SERVICES", "").lower() in ("true", "1")
     try:
         from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
@@ -40,7 +42,6 @@ async def test_online_worker_stream_features_and_scores(tmp_path: Path) -> None:
         await asyncio.wait_for(producer.start(), timeout=1.5)
         await producer.stop()
     except Exception as exc:
-        require_live = os.environ.get("REQUIRE_INTEGRATION_SERVICES", "").lower() in ("true", "1")
         if require_live:
             raise RuntimeError(
                 f"Required integration Kafka broker unavailable at localhost:29092: {exc}"
@@ -55,7 +56,12 @@ async def test_online_worker_stream_features_and_scores(tmp_path: Path) -> None:
 
     # 2. Start replay service and streaming worker
     kafka_settings = KafkaSettings(bootstrap_servers="localhost:29092")
-    source = ReplaySource(pq_path)
+    source = ReplaySource(
+        pq_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
+    )
     replay_service = ReplayService(kafka_settings, source, enable_pacing=False)
 
     worker_settings = WorkerSettings(

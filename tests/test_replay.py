@@ -9,7 +9,11 @@ from uuid import UUID, uuid4
 import pandas as pd
 import pytest
 
-from industrial_reliability.phase1b_contracts import PHASE1B_CONTRACT_SHA256
+from industrial_reliability.phase1b_contracts import (
+    PHASE1B_CONTRACT_SHA256,
+    PHASE1B_PREPARED_OUTPUT_SHA256,
+    PHASE1B_SOURCE_DATASET_SHA256,
+)
 from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.replay import (
     ReplayContractError,
@@ -113,7 +117,12 @@ def test_pacing_changes_only_wall_clock_delay() -> None:
 
 def test_same_range_has_same_stream_at_every_speed(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=15)
-    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
+    source = ReplaySource(
+        pq_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
+    )
     session_id = uuid4()
     range_start = datetime(2020, 3, 1, 0, 0, 0)
     range_end = datetime(2020, 3, 1, 0, 2, 0)  # 12 rows (0 to 110s)
@@ -201,7 +210,12 @@ def test_replay_source_uses_verified_identity(tmp_path: Path) -> None:
         source_dataset_sha256="a" * 64,
         contract_sha256="b" * 64,
     )
-    source = ReplaySource(parquet, expected_contract_sha256="b" * 64)
+    source = ReplaySource(
+        parquet,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(parquet),
+    )
     command = _start_command(
         uuid4(),
         datetime(2020, 3, 1),
@@ -214,7 +228,12 @@ def test_replay_source_uses_verified_identity(tmp_path: Path) -> None:
 
 def test_replay_iter_events_resumes_from_timestamp(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=10)
-    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
+    source = ReplaySource(
+        pq_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
+    )
     session_id = uuid4()
     range_start = datetime(2020, 3, 1, 0, 0, 0)
     range_end = datetime(2020, 3, 1, 0, 2, 0)
@@ -241,5 +260,7 @@ def test_repository_phase1b_parquet_requires_explicit_legacy_contract() -> None:
     source = ReplaySource(
         Path("data/processed/phase1b/metropt3/telemetry.parquet"),
         expected_contract_sha256=PHASE1B_CONTRACT_SHA256,
+        expected_source_dataset_sha256=PHASE1B_SOURCE_DATASET_SHA256,
+        expected_output_sha256=PHASE1B_PREPARED_OUTPUT_SHA256,
     )
     assert source.identity.contract_sha256 == PHASE1B_CONTRACT_SHA256

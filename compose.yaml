@@ -93,7 +93,7 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: industrial-reliability
       REPLAY_PARQUET_PATH: /runtime/data/metropt3/telemetry.parquet
-      REPLAY_EXPECTED_CONTRACT_SHA256: ${REPLAY_EXPECTED_CONTRACT_SHA256:-149e164748522fe6dfa844a8de70b29ee1259122962e036ff6a563c1120047d8}
+      REPLAY_PACKAGE_MANIFEST: /runtime/scoring-package/manifest.json
       METRICS_PORT: "9101"
       DATABASE_URL: postgresql://irp:irp_password@postgres:5432/irp
     depends_on:

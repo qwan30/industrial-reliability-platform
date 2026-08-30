@@ -19,6 +19,7 @@ from industrial_reliability.kafka_io import (
     encode_message,
 )
 from industrial_reliability.persistence import RuntimeStore
+from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.replay import ReplaySource
 from industrial_reliability.replay_service import ReplayService
 from industrial_reliability.runtime_messages import (
@@ -49,7 +50,12 @@ async def test_kafka_replay_end_to_end(tmp_path: Path) -> None:
 
     pq_path = _create_mock_parquet(tmp_path, n_rows=6)
     settings = KafkaSettings(bootstrap_servers="localhost:29092")
-    source = ReplaySource(pq_path)
+    source = ReplaySource(
+        pq_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
+    )
     service = ReplayService(settings, source, enable_pacing=False)
 
     service_task = asyncio.create_task(service.run())
@@ -125,7 +131,12 @@ async def test_replay_resumes_from_durable_checkpoint(
     tmp_path: Path,
 ) -> None:
     parquet_path = _create_mock_parquet(tmp_path, n_rows=50)
-    source = ReplaySource(parquet_path, expected_contract_sha256="b" * 64)
+    source = ReplaySource(
+        parquet_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(parquet_path),
+    )
     command = make_sample_replay_command(
         action="START",
         session_id=uuid4(),
@@ -177,9 +188,12 @@ async def test_replay_resume_from_zero_is_lossless_and_terminal(
     store: RuntimeStore,
     tmp_path: Path,
 ) -> None:
+    parquet_path = _create_mock_parquet(tmp_path, n_rows=6)
     source = ReplaySource(
-        _create_mock_parquet(tmp_path, n_rows=6),
+        parquet_path,
         expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(parquet_path),
     )
     command = make_sample_replay_command(
         action="START",

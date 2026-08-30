@@ -252,6 +252,7 @@ def _windows_to_dataframe(windows: list[Phase1BWindow]) -> pd.DataFrame:
 def build_phase1b_features(
     prepared_dir: Path,
     output_path: Path,
+    expected_prepared_output_sha256: str,
     contract: Phase1BContract = PHASE1C,
 ) -> Phase1BFeatureManifest:
     resolved_prep = prepared_dir.resolve()
@@ -262,7 +263,12 @@ def build_phase1b_features(
 
     contract_manifest = metropt3_contract_manifest(contract)
     contract_sha256_str = str(contract_manifest["contract_sha256"])
-    prep_identity = verify_prepared_parquet(parquet_file, contract_sha256_str)
+    prep_identity = verify_prepared_parquet(
+        parquet_file,
+        expected_contract_sha256=contract_sha256_str,
+        expected_source_dataset_sha256=contract.archive_sha256,
+        expected_output_sha256=expected_prepared_output_sha256,
+    )
 
     df = pq.read_table(parquet_file).to_pandas()
 
@@ -344,11 +350,21 @@ def main() -> None:
         help="Directory with prepared telemetry.parquet",
     )
     parser.add_argument(
+        "--prepared-output-sha256",
+        type=str,
+        required=True,
+        help="Expected SHA-256 digest of prepared telemetry.parquet",
+    )
+    parser.add_argument(
         "--output", type=Path, required=True, help="Path for output features.parquet"
     )
     args = parser.parse_args()
 
-    manifest = build_phase1b_features(args.prepared_dir, args.output)
+    manifest = build_phase1b_features(
+        args.prepared_dir,
+        args.output,
+        expected_prepared_output_sha256=args.prepared_output_sha256,
+    )
     print(
         f"Successfully generated Phase 1B features: {len(manifest.active_feature_names)} active features -> {args.output}"
     )

@@ -179,10 +179,10 @@ def _serialize_candidate_evaluation(res: EvaluationResult) -> dict[str, Any]:
 
 
 def run_phase1b_benchmark(
-    *,
     prepared_dir: Path,
     feature_path: Path,
     artifact_dir: Path,
+    expected_prepared_output_sha256: str,
     contract: Phase1BContract = PHASE1C,
 ) -> Phase1BBenchmarkResult:
     resolved_prep = prepared_dir.resolve()
@@ -201,7 +201,12 @@ def run_phase1b_benchmark(
     contract_manifest = metropt3_contract_manifest(contract)
     expected_contract_sha = str(contract_manifest["contract_sha256"])
 
-    verified_data = verify_prepared_parquet(prep_parquet_file, expected_contract_sha)
+    verified_data = verify_prepared_parquet(
+        prep_parquet_file,
+        expected_contract_sha256=expected_contract_sha,
+        expected_source_dataset_sha256=contract.archive_sha256,
+        expected_output_sha256=expected_prepared_output_sha256,
+    )
     feat_manifest = load_self_hashed_manifest(feat_manifest_file)
     verify_file_sha256(
         resolved_feat, str(feat_manifest.get("output_sha256", "")), "features.parquet"
@@ -405,6 +410,12 @@ def main() -> None:
     parser.add_argument(
         "--prepared-dir", type=Path, required=True, help="Directory with prepared telemetry"
     )
+    parser.add_argument(
+        "--prepared-output-sha256",
+        type=str,
+        required=True,
+        help="Expected SHA-256 digest of prepared telemetry.parquet",
+    )
     parser.add_argument("--features", type=Path, required=True, help="Path to features.parquet")
     parser.add_argument(
         "--artifact-dir", type=Path, required=True, help="Directory for private artifacts"
@@ -418,6 +429,7 @@ def main() -> None:
         prepared_dir=args.prepared_dir,
         feature_path=args.features,
         artifact_dir=args.artifact_dir,
+        expected_prepared_output_sha256=args.prepared_output_sha256,
     )
     publish_phase1b_results(result.run_dir, args.publish_dir)
     print(

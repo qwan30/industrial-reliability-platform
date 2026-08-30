@@ -183,7 +183,10 @@ class ReplaySource:
     def __init__(
         self,
         parquet_path: Path,
+        *,
         expected_contract_sha256: str,
+        expected_source_dataset_sha256: str,
+        expected_output_sha256: str,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.path = parquet_path.resolve()
@@ -192,8 +195,11 @@ class ReplaySource:
         self.identity: PreparedArtifactIdentity = verify_prepared_parquet(
             self.path,
             expected_contract_sha256=expected_contract_sha256,
+            expected_source_dataset_sha256=expected_source_dataset_sha256,
+            expected_output_sha256=expected_output_sha256,
         )
         self.clock = clock if clock is not None else (lambda: datetime.now(UTC))
+
 
     def iter_events(
         self,

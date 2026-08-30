@@ -48,22 +48,34 @@ def verify_file_sha256(path: Path, expected: str, label: str) -> str:
     return actual
 
 
-def verify_prepared_parquet(path: Path, expected_contract_sha256: str) -> PreparedArtifactIdentity:
-    """Verify prepared telemetry parquet file and its self-hashed companion manifest."""
+def verify_prepared_parquet(
+    path: Path,
+    *,
+    expected_contract_sha256: str,
+    expected_source_dataset_sha256: str,
+    expected_output_sha256: str,
+) -> PreparedArtifactIdentity:
     manifest = load_self_hashed_manifest(path.with_name("manifest.json"))
     contract = str(manifest.get("contract_sha256", ""))
+    source = str(manifest.get("archive_sha256", ""))
+    declared_output = str(manifest.get("output_sha256", ""))
     if contract != expected_contract_sha256:
         raise ArtifactIntegrityError(
             f"prepared contract SHA-256 mismatch: expected {expected_contract_sha256}, got {contract}"
         )
-
-    parquet_sha = verify_file_sha256(
-        path, str(manifest.get("output_sha256", "")), "telemetry.parquet"
-    )
-
+    if source != expected_source_dataset_sha256:
+        raise ArtifactIntegrityError(
+            f"prepared source SHA-256 mismatch: expected {expected_source_dataset_sha256}, got {source}"
+        )
+    if declared_output != expected_output_sha256:
+        raise ArtifactIntegrityError(
+            f"expected prepared output SHA-256 {expected_output_sha256}, got {declared_output}"
+        )
+    parquet_sha = verify_file_sha256(path, expected_output_sha256, "telemetry.parquet")
     return PreparedArtifactIdentity(
-        source_dataset_sha256=str(manifest.get("archive_sha256", "")),
+        source_dataset_sha256=source,
         contract_sha256=contract,
         parquet_sha256=parquet_sha,
-        manifest_sha256=str(manifest.get("manifest_sha256", "")),
+        manifest_sha256=str(manifest["manifest_sha256"]),
     )
+

@@ -12,6 +12,7 @@ import pytest
 from industrial_reliability.kafka_io import KafkaSettings, encode_message
 from industrial_reliability.persistence import ReplayCheckpoint, RuntimeStore
 from industrial_reliability.phase1b_contracts import metropt3_contract_manifest
+from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.replay import ReplaySource
 from industrial_reliability.replay_service import (
     ReplayService,
@@ -38,7 +39,12 @@ class MockRecord:
 async def test_replay_service_handles_valid_start_and_completion(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=5)
     settings = KafkaSettings(bootstrap_servers="localhost:9092")
-    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
+    source = ReplaySource(
+        pq_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
+    )
     service = ReplayService(settings, source, enable_pacing=False)
 
     published_telemetry = []
@@ -65,7 +71,12 @@ async def test_replay_service_handles_valid_start_and_completion(tmp_path: Path)
 async def test_replay_service_pause_resume_stop_lifecycle(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=20)
     settings = KafkaSettings(bootstrap_servers="localhost:9092")
-    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
+    source = ReplaySource(
+        pq_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
+    )
     store = MagicMock(spec=RuntimeStore)
     service = ReplayService(settings, source, store=store, enable_pacing=True)
 
@@ -103,9 +114,12 @@ async def test_replay_service_pause_resume_stop_lifecycle(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_paused_checkpoint_waits_until_resume(tmp_path: Path) -> None:
+    pq_path = _create_mock_parquet(tmp_path, n_rows=10)
     source = ReplaySource(
-        _create_mock_parquet(tmp_path, n_rows=10),
+        pq_path,
         expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
     )
     command = make_sample_replay_command(
         action="START",
@@ -161,7 +175,12 @@ async def test_paused_checkpoint_waits_until_resume(tmp_path: Path) -> None:
 async def test_publish_methods_with_mock_producer(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=2)
     settings = KafkaSettings(bootstrap_servers="localhost:9092")
-    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
+    source = ReplaySource(
+        pq_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
+    )
     service = ReplayService(settings, source)
 
     mock_producer = AsyncMock()
@@ -182,8 +201,15 @@ async def test_publish_methods_with_mock_producer(tmp_path: Path) -> None:
 
 
 def test_main_cli_certification(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    contract_sha = str(metropt3_contract_manifest()["contract_sha256"])
-    pq_path = _create_mock_parquet(tmp_path, n_rows=5, contract_sha256=contract_sha)
+    contract_manifest = metropt3_contract_manifest()
+    contract_sha = str(contract_manifest["contract_sha256"])
+    source_sha = str(contract_manifest["archive_sha256"])
+    pq_path = _create_mock_parquet(
+        tmp_path,
+        n_rows=5,
+        source_dataset_sha256=source_sha,
+        contract_sha256=contract_sha,
+    )
     out_dir = tmp_path / "cli_cert"
 
     test_args = [
@@ -213,7 +239,12 @@ async def test_replay_service_rejects_source_identity_mismatch(tmp_path: Path) -
         contract_sha256="b" * 64,
     )
     settings = KafkaSettings(bootstrap_servers="localhost:9092")
-    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
+    source = ReplaySource(
+        pq_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
+    )
     service = ReplayService(settings, source, enable_pacing=False)
 
     published_telemetry = []
@@ -242,7 +273,12 @@ async def test_replay_service_rejects_source_identity_mismatch(tmp_path: Path) -
 async def test_replay_service_records_checkpoints_during_streaming(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=5)
     settings = KafkaSettings(bootstrap_servers="localhost:9092")
-    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
+    source = ReplaySource(
+        pq_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
+    )
     mock_store = MagicMock(spec=RuntimeStore)
     service = ReplayService(settings, source, store=mock_store, enable_pacing=False)
 
@@ -273,9 +309,12 @@ async def test_replay_service_records_checkpoints_during_streaming(tmp_path: Pat
 
 @pytest.mark.asyncio
 async def test_start_checkpoint_has_no_cursor_before_first_publish(tmp_path: Path) -> None:
+    pq_path = _create_mock_parquet(tmp_path, n_rows=5)
     source = ReplaySource(
-        _create_mock_parquet(tmp_path, n_rows=5),
+        pq_path,
         expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
     )
     store = MagicMock(spec=RuntimeStore)
     service = ReplayService(
@@ -304,9 +343,12 @@ async def test_start_checkpoint_has_no_cursor_before_first_publish(tmp_path: Pat
 async def test_resume_from_zero_replays_range_start_and_publishes_completed(
     tmp_path: Path,
 ) -> None:
+    pq_path = _create_mock_parquet(tmp_path, n_rows=6)
     source = ReplaySource(
-        _create_mock_parquet(tmp_path, n_rows=6),
+        pq_path,
         expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
     )
     store = MagicMock(spec=RuntimeStore)
     service = ReplayService(
@@ -344,9 +386,12 @@ async def test_resume_from_zero_replays_range_start_and_publishes_completed(
 
 @pytest.mark.asyncio
 async def test_resume_failure_records_and_publishes_failed(tmp_path: Path) -> None:
+    pq_path = _create_mock_parquet(tmp_path, n_rows=3)
     source = ReplaySource(
-        _create_mock_parquet(tmp_path, n_rows=3),
+        pq_path,
         expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
     )
     store = MagicMock(spec=RuntimeStore)
     service = ReplayService(
@@ -383,7 +428,12 @@ async def test_resume_failure_records_and_publishes_failed(tmp_path: Path) -> No
 async def test_replay_service_start_raises_on_multiple_incomplete_replays(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=5)
     settings = KafkaSettings(bootstrap_servers="localhost:9092")
-    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
+    source = ReplaySource(
+        pq_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
+    )
     cmd1 = make_sample_replay_command(action="START", session_id=uuid4(), speed=1000)
     cmd2 = make_sample_replay_command(action="START", session_id=uuid4(), speed=1000)
     cp1 = ReplayCheckpoint(
@@ -424,7 +474,12 @@ async def test_replay_service_start_raises_on_multiple_incomplete_replays(tmp_pa
 async def test_replay_service_resume_checkpoint(tmp_path: Path) -> None:
     pq_path = _create_mock_parquet(tmp_path, n_rows=10)
     settings = KafkaSettings(bootstrap_servers="localhost:9092")
-    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
+    source = ReplaySource(
+        pq_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
+    )
     mock_store = MagicMock(spec=RuntimeStore)
     service = ReplayService(settings, source, store=mock_store, enable_pacing=False)
 
@@ -459,3 +514,63 @@ async def test_replay_service_resume_checkpoint(tmp_path: Path) -> None:
     assert last_call.kwargs.get("last_sequence") == 10 or (
         len(last_call.args) > 2 and last_call.args[2] == 10
     )
+
+
+def test_main_default_uses_package_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+    from industrial_reliability.package_champion import ChampionManifest
+
+    source_sha = "a" * 64
+    contract_sha = "b" * 64
+    pq_path = _create_mock_parquet(
+        tmp_path,
+        n_rows=5,
+        source_dataset_sha256=source_sha,
+        contract_sha256=contract_sha,
+    )
+    output_sha = sha256_file(pq_path)
+
+    pkg_manifest_data = {
+        "schema_version": "champion-package-v2",
+        "package_role": "CHAMPION",
+        "evaluation_verdict": "FEASIBLE",
+        "operational_status": "PRODUCTION_CANDIDATE",
+        "source_champion_schema": "phase1b-champion-v1",
+        "source_run_id": "run-123",
+        "model_id": "statistical",
+        "model_version": "champion-statistical-v1",
+        "contract_sha256": contract_sha,
+        "source_dataset_sha256": source_sha,
+        "prepared_output_sha256": output_sha,
+        "feature_output_sha256": "f" * 64,
+        "feature_names": ["tp2"],
+        "threshold": 1.5,
+        "threshold_provenance": {
+            "split": "calibration",
+            "quantile": 0.995,
+            "method": "higher",
+        },
+        "golden_case_count": 3,
+        "artifact_sha256": {
+            "detector.joblib": "d" * 64,
+            "evidence-baseline.npz": "e" * 64,
+            "golden-cases.json": "g" * 64,
+            "drift-reference.json": "r" * 64,
+        },
+    }
+    manifest_file = tmp_path / "pkg_manifest.json"
+    manifest_file.write_text(json.dumps(pkg_manifest_data), encoding="utf-8")
+
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    monkeypatch.setenv("REPLAY_PACKAGE_MANIFEST", str(manifest_file))
+    monkeypatch.setattr(sys, "argv", ["replay_service", "--parquet", str(pq_path)])
+
+    def _fake_run(coro: object) -> None:
+        if hasattr(coro, "close"):
+            coro.close()
+
+    with patch("industrial_reliability.replay_service.asyncio.run", side_effect=_fake_run) as mock_run:
+        main()
+        assert mock_run.called

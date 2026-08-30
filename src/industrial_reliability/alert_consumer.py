@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import enum
+import hashlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -17,7 +18,10 @@ from industrial_reliability.kafka_io import decode_message, encode_message
 from industrial_reliability.metrics import RuntimeMetrics
 from industrial_reliability.persistence import RuntimeStore
 from industrial_reliability.runtime_messages import (
+    QUARANTINE_TOPIC,
     REPLAY_STATUS_TOPIC,
+    SCORES_TOPIC,
+    QuarantineRecordV1,
     ReplayStatusV1,
     ScoreDecisionV1,
 )
@@ -90,12 +94,42 @@ class AlertConsumer:
                 key=str(session_id).encode("ascii"),
             )
 
+    async def _publish_quarantine(
+        self,
+        record: object,
+        raw_bytes: bytes,
+        error: Exception,
+    ) -> None:
+        if self.producer is None:
+            raise RuntimeError("Kafka producer is required to quarantine invalid scores")
+        payload_hash = hashlib.sha256(raw_bytes).hexdigest()
+        quarantine = QuarantineRecordV1(
+            message_id=uuid4(),
+            replay_session_id=None,
+            source_dataset_sha256="0" * 64,
+            contract_sha256="0" * 64,
+            source_timestamp=datetime(2020, 1, 1),
+            emitted_at=datetime.now(UTC),
+            original_topic=str(getattr(record, "topic", SCORES_TOPIC)),
+            partition=int(getattr(record, "partition", 0)),
+            offset=int(getattr(record, "offset", 0)),
+            payload_sha256=payload_hash,
+            error_code="INVALID_SCORE_PAYLOAD",
+            error_detail=str(error)[:1000],
+        )
+        await self.producer.send_and_wait(
+            QUARANTINE_TOPIC,
+            value=encode_message(quarantine),
+            key=payload_hash.encode("ascii"),
+        )
+
     async def process(self, record: object) -> ProcessOutcome:
         raw_bytes = getattr(record, "value", b"")
         try:
             decision = decode_message(raw_bytes, ScoreDecisionV1)
-        except Exception:
+        except Exception as error:
             logger.exception("Failed to decode score decision")
+            await self._publish_quarantine(record, raw_bytes, error)
             return ProcessOutcome.QUARANTINED
 
         session_id = decision.replay_session_id

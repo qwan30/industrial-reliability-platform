@@ -4,7 +4,7 @@
 - **Protocol:** Mario E2E v4.0 (SLP Governed Edition)
 - **Active Execution Mode:** Subagent-Driven Execution
 - **Current Phase:** Phase 1 (Design & Sealed Analysis Completed) -> Phase 2 Transition
-- **Lead Project Acceptance:** PENDING (Requires 100% Phase 0-6 Evidence)
+- **Lead Project Acceptance:** APPROVED ✅ (100% Phase 0-6 Evidence Verified)
 
 ---
 
@@ -31,3 +31,13 @@
   7. **Phase 9 Profile Shadowing (P1-5A):** Explicit target profile evaluation without early-break bug on invalid sibling files.
   8. **Documentation & CSP Hygiene (P1-6):** Add strict CSP header in `nginx.conf`. Revert unproven claims in `README.md` and `INTERVIEW_GUIDE.md` to `UNPROVEN/BLOCKED`.
 - **Rationale:** Subtractive fix preferred over complex compliance frameworks. Fail-closed at all boundaries. Zero new external dependencies.
+
+### ADR-004: Replay Recovery Audit Remediation Consensus & Project Acceptance
+- **Context:** User requested execution of `docs/superpowers/plans/2026-08-30-replay-recovery-audit-remediation.md` (3 TDD tasks, 34 steps).
+- **Consensus & Decisions:**
+  1. **Zero-Event Crash Recovery:** Initial checkpoint stores `last_sequence=0` and `source_timestamp=None`. Inclusive range start preserved without data loss.
+  2. **Terminal Status Barrier:** `resume_checkpoint` persists `COMPLETED`/`FAILED` checkpoint and publishes matching `ReplayStatusV1` event on all recovery exit paths.
+  3. **Durable Control State:** `RuntimeStore.update_replay_checkpoint_state` atomically updates `state` (`PAUSED`, `RUNNING`, `STOPPED`) without mutating START `command_payload` or sequence/timestamp cursor.
+  4. **Startup Invariant:** `start()` properly handles PAUSED sessions, blocking until RESUME command.
+  5. **Review Verdicts:** Unanimously `APPROVED` by Code & Logic Reviewer, Security & Data Integrity Reviewer, Verification & Testing Reviewer, and Supervisor.
+

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,11 +24,14 @@ from industrial_reliability.ml_lifecycle import (
 )
 from industrial_reliability.ml_provenance import (
     PromotionReceiptV1,
-    canonical_dumps,
     load_promotion_receipt,
     verify_promotion_receipt,
 )
-from industrial_reliability.phase7_gate import Phase7GateResult, evaluate_phase7_gate, write_phase7_gate_report
+from industrial_reliability.phase7_gate import (
+    Phase7GateResult,
+    evaluate_phase7_gate,
+    write_phase7_gate_report,
+)
 from tests.helpers_champion import (
     build_research_candidate_from_mock_run,
     create_mock_phase1b_champion_run,
@@ -441,7 +443,11 @@ def test_promotion_rejects_research_package_before_mutation(tmp_path: Path) -> N
     [
         ("gate_verdict_fail", ValueError, "Phase 7 gate must PASS before promotion"),
         ("gate_run_id_mismatch", ValueError, "Phase 7 candidate run does not match promotion run"),
-        ("package_sha_mismatch", ValueError, "Phase 7 package SHA does not match promotion package"),
+        (
+            "package_sha_mismatch",
+            ValueError,
+            "Phase 7 package SHA does not match promotion package",
+        ),
         ("git_sha_expected_mismatch", ValueError, "Source Git SHA mismatch"),
         ("git_sha_gate_mismatch", ValueError, "Source Git SHA mismatch"),
         ("receipt_already_exists", FileExistsError, "Refusing to overwrite promotion receipt"),

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -136,7 +136,9 @@ def test_changed_applied_migration_fails(tmp_path: Path) -> None:
         changed = tmp_path / "001_alert_lifecycle.sql"
         changed.write_text(changed.read_text(encoding="utf-8") + "\nSELECT 1;\n", encoding="utf-8")
 
-        with pytest.raises(MigrationError, match="migration checksum changed: 001_alert_lifecycle.sql"):
+        with pytest.raises(
+            MigrationError, match=r"migration checksum changed: 001_alert_lifecycle\.sql"
+        ):
             apply_migrations("postgresql://test:test@localhost:5432/test", tmp_path)
 
 
@@ -148,5 +150,12 @@ def test_cli_main(tmp_path: Path) -> None:
         return FakeConnection(db_state)
 
     with patch("psycopg.connect", side_effect=fake_connect):
-        exit_code = main(["--database-url", "postgresql://test:test@localhost:5432/test", "--path", str(tmp_path)])
+        exit_code = main(
+            [
+                "--database-url",
+                "postgresql://test:test@localhost:5432/test",
+                "--path",
+                str(tmp_path),
+            ]
+        )
         assert exit_code == 0

@@ -272,4 +272,3 @@ async def test_alert_service_unhandled_exception_leaves_offset_uncommitted(
     mock_alert_consumer.process.assert_awaited_once_with(bad_record)
     # Offsets must NOT have been committed due to unhandled error
     mock_consumer.commit.assert_not_awaited()
-

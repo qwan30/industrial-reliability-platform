@@ -234,5 +234,3 @@ def test_replay_iter_events_resumes_from_timestamp(tmp_path: Path) -> None:
     assert [e.source_timestamp for e in resumed_events] == [
         e.source_timestamp for e in all_events[3:]
     ]
-
-

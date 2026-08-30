@@ -110,7 +110,9 @@ def build_reference(features_parquet_path: Path, manifest: dict[str, Any]) -> Dr
         filters=[("split", "==", "train")],
     )
 
-    feature_names = tuple(manifest.get("feature_names") or manifest.get("active_feature_names") or ())
+    feature_names = tuple(
+        manifest.get("feature_names") or manifest.get("active_feature_names") or ()
+    )
     num_samples = tbl.num_rows
     if num_samples == 0:
         raise ValueError("No training samples found in features parquet for split='train'")

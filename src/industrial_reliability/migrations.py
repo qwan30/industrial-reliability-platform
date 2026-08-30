@@ -67,9 +67,7 @@ def apply_migrations(db_url: str, path: Path) -> tuple[str, ...]:
 
 def main(argv: list[str] | Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Apply ordered IRP database migrations")
-    default_url = os.environ.get(
-        "DATABASE_URL", "postgresql://irp:irp_password@localhost:5432/irp"
-    )
+    default_url = os.environ.get("DATABASE_URL", "postgresql://irp:irp_password@localhost:5432/irp")
     parser.add_argument(
         "--database-url",
         default=default_url,

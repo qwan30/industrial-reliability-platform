@@ -202,8 +202,12 @@ def test_evaluate_phase7_gate_fails_on_hash_mismatch(mismatch_kwarg: dict[str, s
 
 
 def test_evaluate_phase7_gate_fails_on_candidate_package_manifest_mismatch() -> None:
-    candidate_prov = _create_mock_provenance("run-001", "candidate", champion_package_sha256="d" * 64)
-    repro_prov = _create_mock_provenance("run-002", "reproduction", champion_package_sha256="d" * 64)
+    candidate_prov = _create_mock_provenance(
+        "run-001", "candidate", champion_package_sha256="d" * 64
+    )
+    repro_prov = _create_mock_provenance(
+        "run-002", "reproduction", champion_package_sha256="d" * 64
+    )
 
     candidate_res = CandidateResult(
         run_id="run-001",

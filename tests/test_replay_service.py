@@ -242,7 +242,9 @@ async def test_replay_service_start_raises_on_multiple_incomplete_replays(tmp_pa
         mock_prod_cls.return_value = mock_prod
         mock_cons_cls.return_value = mock_cons
 
-        with pytest.raises(RuntimeError, match="multiple incomplete replay sessions require operator resolution"):
+        with pytest.raises(
+            RuntimeError, match="multiple incomplete replay sessions require operator resolution"
+        ):
             await service.start()
 
 
@@ -281,9 +283,6 @@ async def test_replay_service_resume_checkpoint(tmp_path: Path) -> None:
     # Check that checkpoints were recorded and final state is COMPLETED
     last_call = mock_store.record_replay_checkpoint.call_args_list[-1]
     assert last_call.kwargs.get("state") == "COMPLETED" or last_call.args[1] == "COMPLETED"
-    assert (
-        last_call.kwargs.get("last_sequence") == 10
-        or (len(last_call.args) > 2 and last_call.args[2] == 10)
+    assert last_call.kwargs.get("last_sequence") == 10 or (
+        len(last_call.args) > 2 and last_call.args[2] == 10
     )
-
-

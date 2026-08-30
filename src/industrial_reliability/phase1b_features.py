@@ -58,7 +58,6 @@ class Phase1BFeatureManifest:
     manifest_sha256: str
 
 
-
 def _compute_bin_end(ts: datetime) -> datetime:
     minute_rem = ts.minute % 5
     if minute_rem == 0 and ts.second == 0 and ts.microsecond == 0:

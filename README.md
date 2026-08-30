@@ -38,6 +38,17 @@ references/                   # local-only reference repositories (git-ignored)
 data/                         # local-only datasets (git-ignored)
 ```
 
+## Data-pipeline evidence status
+
+- Phase 1B remains immutable historical evidence with verdict `NOT FEASIBLE`.
+- Phase 1C is the contract-v2/split-containment rerun. Verdict, run ID, dataset SHA,
+  feature SHA, contract SHA, and exact code SHA are recorded in
+  `docs/results/phase-1c-metrics.json`.
+- `UNIT` proves isolated code behavior; `IN_PROCESS` permits doubles;
+  `INTEGRATION` requires Kafka/PostgreSQL/HTTP receipts; `LIVE` requires an actual
+  provider/deployment response; `RELEASE` requires passing exact-SHA evidence.
+- The project must not claim production readiness while any remediation gate is open.
+
 ## Reproducible ML Lifecycle (Phase 7)
 
 Phase 7 brings MLflow 3.x-backed offline tracking, immutable run provenance, and fail-closed promotion gates to ensure full numerical and artifact reproducibility.

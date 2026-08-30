@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import platform
 import subprocess
@@ -27,11 +28,9 @@ from industrial_reliability.ml_provenance import (
     canonical_dumps,
     canonical_sha256,
     validate_git_sha,
-    write_promotion_receipt,
     write_run_provenance,
 )
 from industrial_reliability.package_champion import ChampionManifest
-from industrial_reliability.phase1b_benchmark import detector_for
 from industrial_reliability.phase1b_contracts import PHASE1B
 from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.phase7_gate import load_phase7_attestation
@@ -277,14 +276,12 @@ def import_candidate(
     # Log PyFunc model wrapping packaged champion
     model_uri = f"runs:/{run_id}/champion-model"
     if mlflow is not None and hasattr(mlflow, "pyfunc") and hasattr(mlflow.pyfunc, "log_model"):
-        try:
+        with contextlib.suppress(Exception):
             mlflow.pyfunc.log_model(
                 artifact_path="champion-model",
                 python_model=PackagedChampionPyFunc(expected_manifest_sha256=pkg_manifest_sha),
                 artifacts={"champion_package": str(request.champion_package)},
             )
-        except Exception:
-            pass
 
     return CandidateResult(
         run_id=run_id,

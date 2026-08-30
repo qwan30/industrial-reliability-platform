@@ -19,8 +19,6 @@ from industrial_reliability.package_champion import ChampionManifest
 if TYPE_CHECKING:
     from industrial_reliability.ml_lifecycle import (
         CandidateResult,
-        ImportCandidateRequest,
-        ReproductionRequest,
         ReproductionResult,
     )
 

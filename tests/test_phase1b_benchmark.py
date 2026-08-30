@@ -231,4 +231,3 @@ def test_benchmark_rejects_tampered_features(tmp_path: Path) -> None:
             artifact_dir=artifact_dir,
             contract=PHASE1B,
         )
-

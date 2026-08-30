@@ -196,4 +196,3 @@ def test_build_phase1b_features_manifest_records_actual_rejection_counts(tmp_pat
     json_rejection_dict = dict(manifest_data["rejection_counts"])
     assert json_rejection_dict["invalid_bins_skipped"] == 1
     assert json_rejection_dict["cross_split_windows_skipped"] == 5
-

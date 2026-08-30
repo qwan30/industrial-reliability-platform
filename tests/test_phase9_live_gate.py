@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
-
-from unittest.mock import Mock
 
 from industrial_reliability.phase9_live_gate import (
     Phase9LiveGate,
@@ -102,9 +101,7 @@ def test_dummy_key_does_not_create_live_receipt(
     assert report["dependency_receipts"] == []
 
 
-def test_live_key_creates_live_receipt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_live_key_creates_live_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "industrial_reliability.phase9_live_gate.check_live_openai_generation",
         Mock(
@@ -146,7 +143,9 @@ def test_check_live_openai_generation_success(monkeypatch: pytest.MonkeyPatch) -
     mock_generator_instance.generate.return_value = mock_report
     mock_generator_cls.return_value = mock_generator_instance
 
-    monkeypatch.setattr("industrial_reliability.phase9_live_gate.OpenAiRcaGenerator", mock_generator_cls)
+    monkeypatch.setattr(
+        "industrial_reliability.phase9_live_gate.OpenAiRcaGenerator", mock_generator_cls
+    )
     monkeypatch.setattr("industrial_reliability.phase9_live_gate.OpenAI", Mock())
 
     receipt = check_live_openai_generation("sk-test", "gpt-4o-mini")
@@ -170,7 +169,9 @@ def test_check_live_openai_generation_failure(monkeypatch: pytest.MonkeyPatch) -
     mock_generator_instance.generate.return_value = mock_report
     mock_generator_cls.return_value = mock_generator_instance
 
-    monkeypatch.setattr("industrial_reliability.phase9_live_gate.OpenAiRcaGenerator", mock_generator_cls)
+    monkeypatch.setattr(
+        "industrial_reliability.phase9_live_gate.OpenAiRcaGenerator", mock_generator_cls
+    )
     monkeypatch.setattr("industrial_reliability.phase9_live_gate.OpenAI", Mock())
 
     with pytest.raises(RuntimeError, match="provider did not return a complete grounded report"):

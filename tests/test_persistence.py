@@ -511,4 +511,3 @@ def test_store_replay_checkpoints() -> None:
     with patch("psycopg.connect", return_value=mock_conn):
         cnt = store.count("replay_checkpoints")
         assert cnt == 3
-

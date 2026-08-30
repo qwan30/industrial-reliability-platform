@@ -160,7 +160,9 @@ async def test_invalid_score_is_durably_quarantined_before_commit() -> None:
 
     # Verify error is raised if producer is None
     consumer_no_producer = AlertConsumer(store=mock_store, policy=policy, producer=None)
-    with pytest.raises(RuntimeError, match="Kafka producer is required to quarantine invalid scores"):
+    with pytest.raises(
+        RuntimeError, match="Kafka producer is required to quarantine invalid scores"
+    ):
         await consumer_no_producer.process(bad_record)
 
     # Verify error during send_and_wait is not swallowed

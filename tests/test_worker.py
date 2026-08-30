@@ -375,6 +375,7 @@ async def test_worker_quarantines_event_identity_mismatch(
     worker_settings: WorkerSettings,
 ) -> None:
     from prometheus_client import CollectorRegistry
+
     from industrial_reliability.metrics import build_runtime_metrics
 
     scoring_client = AsyncMock()
@@ -394,6 +395,7 @@ async def test_worker_quarantines_event_identity_mismatch(
 @pytest.mark.asyncio
 async def test_worker_updates_consumer_lag(worker_settings: WorkerSettings) -> None:
     from prometheus_client import CollectorRegistry
+
     from industrial_reliability.metrics import build_runtime_metrics
 
     metrics = build_runtime_metrics(CollectorRegistry())
@@ -423,5 +425,3 @@ async def test_worker_updates_consumer_lag(worker_settings: WorkerSettings) -> N
     )
     await worker.handle_record(record)
     assert metrics.kafka_consumer_lag._value.get() == 20.0
-
-

@@ -207,5 +207,7 @@ def test_drift_requires_feature_overlap() -> None:
         self_sha256="placeholder",
     )
     current = {"other_feature": [1.0, 2.0]}
-    with pytest.raises(ValueError, match="drift reference and current features have no feature overlap"):
+    with pytest.raises(
+        ValueError, match="drift reference and current features have no feature overlap"
+    ):
         max_population_stability_index(current, ref)

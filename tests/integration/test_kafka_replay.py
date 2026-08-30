@@ -95,9 +95,7 @@ async def test_kafka_replay_end_to_end(tmp_path: Path) -> None:
 @pytest.fixture
 def store() -> RuntimeStore:
     require_live = os.environ.get("REQUIRE_INTEGRATION_SERVICES", "").lower() in ("true", "1")
-    test_db_url = os.environ.get(
-        "DATABASE_URL", "postgresql://irp:irp_password@localhost:5432/irp"
-    )
+    test_db_url = os.environ.get("DATABASE_URL", "postgresql://irp:irp_password@localhost:5432/irp")
     try:
         st = RuntimeStore(test_db_url)
         st.check_connection()
@@ -143,7 +141,9 @@ async def test_replay_resumes_from_durable_checkpoint(
         source_timestamp=first_batch[-1].source_timestamp,
     )
     incomplete_replays = [
-        r for r in store.load_incomplete_replays() if r.replay_session_id == command.replay_session_id
+        r
+        for r in store.load_incomplete_replays()
+        if r.replay_session_id == command.replay_session_id
     ]
     assert len(incomplete_replays) == 1
     checkpoint = incomplete_replays[0]
@@ -165,4 +165,3 @@ async def test_replay_resumes_from_durable_checkpoint(
     assert payloads[0].source_timestamp > first_batch[-1].source_timestamp
     assert [event.sequence for event in payloads] == list(range(26, payloads[-1].sequence + 1))
     assert store.load_replay_checkpoint(command.replay_session_id).state == "COMPLETED"
-

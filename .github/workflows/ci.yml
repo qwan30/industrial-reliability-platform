@@ -25,7 +25,7 @@ jobs:
           cache: npm
           cache-dependency-path: apps/operator-console/package-lock.json
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,mlops]"
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy src
@@ -33,7 +33,6 @@ jobs:
       - run: pip check
       - run: python -m build
       - name: Test and Build Operator Console
-
         working-directory: apps/operator-console
         run: |
           npm ci
@@ -44,6 +43,7 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     services:
       postgres:
         image: postgres:17-alpine
@@ -83,9 +83,11 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,mlops]"
+      - run: python -c "import mlflow; print(mlflow.__version__)"
       - name: Run Integration Tests
         env:
           DATABASE_URL: postgresql://irp:irp_password@localhost:5432/irp
+          KAFKA_BOOTSTRAP_SERVERS: localhost:29092
           REQUIRE_INTEGRATION_SERVICES: "true"
         run: pytest -m "integration"

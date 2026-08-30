@@ -12,6 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
@@ -66,6 +67,7 @@ class WorkerSettings:
     feature_names: tuple[str, ...]
     client_id: str = "irp-streaming-worker-v1"
     group_id: str = "irp-streaming-worker-v1"
+    package_manifest: dict[str, Any] | None = None
 
     @classmethod
     def from_env(cls) -> WorkerSettings:
@@ -119,6 +121,7 @@ class WorkerSettings:
             source_dataset_sha256=source_dataset_sha256,
             contract_sha256=contract_sha256,
             feature_names=feature_names,
+            package_manifest=manifest_data,
         )
 
 
@@ -360,6 +363,26 @@ class StreamingWorker:
         if session_id in self._failed_sessions:
             return
 
+        if (
+            event.source_dataset_sha256 != self.settings.source_dataset_sha256
+            or event.contract_sha256 != self.settings.contract_sha256
+        ):
+            await self.publish_quarantine(
+                raw_bytes,
+                topic,
+                partition,
+                offset,
+                "TELEMETRY_IDENTITY_MISMATCH",
+                "telemetry identity does not match scoring package",
+            )
+            await self._fail_session(
+                session_id,
+                "TELEMETRY_IDENTITY_MISMATCH",
+                self.last_sequence.get(session_id, 0),
+                event.source_timestamp,
+            )
+            return
+
         # Track offset for session
         self.session_offsets[session_id][tp] = OffsetAndMetadata(offset + 1, "")
 
@@ -430,12 +453,23 @@ class StreamingWorker:
             if status.last_sequence is not None and current_seq >= status.last_sequence:
                 await self._complete_session(status)
 
+    async def _update_consumer_lag(self, partition: TopicPartition) -> None:
+        if self.consumer is None or self.metrics is None:
+            return
+        highwater = self.consumer.highwater(partition)
+        if highwater is not None:
+            position = await self.consumer.position(partition)
+            self.metrics.set_consumer_lag(highwater - position)
+
     async def handle_record(self, record: object) -> None:
         topic = getattr(record, "topic", "")
         if topic == TELEMETRY_TOPIC:
             await self._handle_telemetry_record(record)
         elif topic == REPLAY_STATUS_TOPIC:
             await self._handle_status_record(record)
+        partition = getattr(record, "partition", 0)
+        if topic:
+            await self._update_consumer_lag(TopicPartition(topic, partition))
 
     async def run(self) -> None:
         await self.start()
@@ -465,15 +499,30 @@ def main() -> None:
         start_process_metrics(int(metrics_port), registry)
         logger.info("Metrics server started on port %s", metrics_port)
 
+    settings = WorkerSettings.from_env()
     drift_ref = None
     drift_ref_path = os.environ.get("DRIFT_REFERENCE_PATH", "").strip()
     if drift_ref_path:
+        from industrial_reliability.artifact_integrity import verify_file_sha256
         from industrial_reliability.drift import load_reference
 
-        drift_ref = load_reference(Path(drift_ref_path))
+        if settings.package_manifest is None:
+            raise ValueError("package manifest is required for drift reference verification")
+        artifact_hashes = settings.package_manifest.get("artifact_sha256", {})
+        expected_drift_sha = artifact_hashes.get("drift-reference.json")
+        if not isinstance(expected_drift_sha, str):
+            raise ValueError("scoring package does not bind drift-reference.json")
+        verify_file_sha256(
+            Path(drift_ref_path),
+            expected_drift_sha,
+            "drift-reference.json",
+        )
+        drift_ref = load_reference(
+            Path(drift_ref_path),
+            expected_manifest=settings.package_manifest,
+        )
         logger.info("Loaded drift reference from %s", drift_ref_path)
 
-    settings = WorkerSettings.from_env()
     worker = StreamingWorker(settings, metrics=metrics, drift_reference=drift_ref)
     asyncio.run(worker.run())
 

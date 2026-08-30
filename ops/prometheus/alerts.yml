@@ -1,0 +1,15 @@
+groups:
+  - name: industrial-reliability-data
+    rules:
+      - alert: IRPQuarantineDetected
+        expr: increase(irp_telemetry_events_total{outcome="quarantined"}[5m]) > 0
+        for: 1m
+      - alert: IRPKafkaConsumerLag
+        expr: irp_kafka_consumer_lag > 1000
+        for: 5m
+      - alert: IRPWindowCoverageLow
+        expr: irp_window_coverage_ratio < 0.8
+        for: 10m
+      - alert: IRPFeatureDriftHigh
+        expr: irp_feature_psi_max >= 0.2
+        for: 15m

@@ -16,10 +16,14 @@ from industrial_reliability.alert_state import (
 )
 from industrial_reliability.console_stream import ConsoleEventV1
 from industrial_reliability.persistence import (
+    ReplayCheckpoint,
     RuntimeStore,
+    _state_from_payload,
+    _state_payload,
 )
 from industrial_reliability.runtime_messages import (
     EvidenceValueV1,
+    ReplayCommandV1,
     ReplayStatusV1,
     ScoreDecisionV1,
 )
@@ -119,6 +123,117 @@ def test_store_record_decision_transition() -> None:
         assert mock_conn.commit.called
 
 
+def test_state_payload_and_from_payload_roundtrip() -> None:
+    session_id = uuid4()
+    alert_id = uuid4()
+    prev_alert_id = uuid4()
+    d1 = uuid4()
+    d2 = uuid4()
+    now = datetime(2026, 8, 30, 10, 0, 0)
+    state = AlertState(
+        replay_session_id=session_id,
+        machine_id="metropt3",
+        active_alert_id=alert_id,
+        previous_alert_id=prev_alert_id,
+        first_detection=now,
+        last_detection=now,
+        resolved_at=None,
+        anomaly_decision_ids=(d1, d2),
+        anomaly_streak=2,
+        normal_streak=0,
+        last_decision_id=d2,
+        last_source_timestamp=now,
+    )
+    payload = _state_payload(state)
+    assert payload["replay_session_id"] == str(session_id)
+    assert payload["active_alert_id"] == str(alert_id)
+    assert payload["previous_alert_id"] == str(prev_alert_id)
+    assert payload["first_detection"] == now.isoformat()
+    assert payload["last_detection"] == now.isoformat()
+    assert payload["resolved_at"] is None
+    assert payload["anomaly_decision_ids"] == [str(d1), str(d2)]
+    assert payload["anomaly_streak"] == 2
+    assert payload["normal_streak"] == 0
+    assert payload["last_decision_id"] == str(d2)
+    assert payload["last_source_timestamp"] == now.isoformat()
+
+    recovered = _state_from_payload(payload)
+    assert recovered == state
+
+    # Test empty / None fields round-trip
+    empty_state = AlertState.empty(session_id, "metropt3")
+    empty_payload = _state_payload(empty_state)
+    recovered_empty = _state_from_payload(empty_payload)
+    assert recovered_empty == empty_state
+
+
+def test_store_load_alert_state_found() -> None:
+    store = RuntimeStore("postgresql://test:test@localhost:5432/test")
+    session_id = uuid4()
+    state = AlertState(
+        replay_session_id=session_id,
+        machine_id="metropt3",
+        active_alert_id=None,
+        previous_alert_id=None,
+        first_detection=None,
+        last_detection=None,
+        resolved_at=None,
+        anomaly_decision_ids=(uuid4(),),
+        anomaly_streak=1,
+        normal_streak=0,
+        last_decision_id=uuid4(),
+        last_source_timestamp=datetime(2026, 8, 30, 10, 0, 0),
+    )
+    payload = _state_payload(state)
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_cur.fetchone.return_value = {"payload": payload}
+
+    with patch("psycopg.connect", return_value=mock_conn):
+        loaded = store.load_alert_state(session_id, "metropt3")
+        assert loaded == state
+        # Verify SQL queries alert_runtime_states
+        query = mock_cur.execute.call_args[0][0]
+        assert "alert_runtime_states" in query
+
+        # Also test if row["payload"] is a serialized json string
+        import json
+
+        mock_cur.fetchone.return_value = {"payload": json.dumps(payload)}
+        loaded_from_json_str = store.load_alert_state(session_id, "metropt3")
+        assert loaded_from_json_str == state
+
+
+def test_store_record_decision_transition_upserts_runtime_state_when_no_event() -> None:
+    store = RuntimeStore("postgresql://test:test@localhost:5432/test")
+    session_id = uuid4()
+    policy = _make_policy()
+    # persistence_decisions is 2, so 1st anomaly emits no event
+    from dataclasses import replace
+
+    policy = replace(policy, persistence_decisions=2)
+    decision = _make_decision(session_id, is_anomaly=True)
+    state = AlertState.empty(session_id, "metropt3")
+    res = transition(state, decision, policy)
+    assert res.event is None
+    assert res.state.anomaly_streak == 1
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+    with patch("psycopg.connect", return_value=mock_conn):
+        store.record_decision_transition(decision, res)
+        # Check all SQL executed
+        queries = [call[0][0] for call in mock_cur.execute.call_args_list]
+        assert any("INSERT INTO alert_runtime_states" in q for q in queries)
+        assert mock_conn.commit.called
+
+
 def test_store_load_alert_state_empty() -> None:
     store = RuntimeStore("postgresql://test:test@localhost:5432/test")
     session_id = uuid4()
@@ -133,6 +248,10 @@ def test_store_load_alert_state_empty() -> None:
         state = store.load_alert_state(session_id, "metropt3")
         assert state.active_alert_id is None
         assert state.replay_session_id == session_id
+        assert state.anomaly_streak == 0
+        # Verify SQL queries alert_runtime_states
+        queries = [call[0][0] for call in mock_cur.execute.call_args_list]
+        assert any("alert_runtime_states" in q for q in queries)
 
 
 def test_store_outbox_operations() -> None:
@@ -314,3 +433,155 @@ def test_store_append_and_query_console_events() -> None:
         mock_cur.fetchone.return_value = None
         events_unknown = store.events_after(str(session_id), after_event_id="ev-unknown")
         assert events_unknown == ()
+
+
+def test_store_replay_checkpoints() -> None:
+    store = RuntimeStore("postgresql://test:5432/test")
+    session_id = uuid4()
+    cmd = ReplayCommandV1(
+        message_id=uuid4(),
+        replay_session_id=session_id,
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+        source_timestamp=datetime(2020, 3, 1, 0, 0, 0),
+        emitted_at=datetime.now(UTC),
+        command_id=uuid4(),
+        action="START",
+        speed=1000,
+        range_start=datetime(2020, 3, 1, 0, 0, 0),
+        range_end=datetime(2020, 3, 1, 1, 0, 0),
+    )
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+    # 1. record_replay_checkpoint
+    with patch("psycopg.connect", return_value=mock_conn):
+        store.record_replay_checkpoint(cmd, "RUNNING", 10, datetime(2020, 3, 1, 0, 1, 40))
+        assert mock_cur.execute.called
+        assert mock_conn.commit.called
+        query = mock_cur.execute.call_args[0][0]
+        assert "replay_checkpoints" in query
+        assert "ON CONFLICT" in query
+
+    # 2. load_replay_checkpoint - found
+    mock_cur.fetchone.return_value = {
+        "replay_session_id": str(session_id),
+        "command_payload": cmd.model_dump(mode="json"),
+        "state": "RUNNING",
+        "last_sequence": 10,
+        "source_timestamp": datetime(2020, 3, 1, 0, 1, 40),
+    }
+    with patch("psycopg.connect", return_value=mock_conn):
+        cp = store.load_replay_checkpoint(session_id)
+        assert cp is not None
+        assert isinstance(cp, ReplayCheckpoint)
+        assert cp.replay_session_id == session_id
+        assert cp.command == cmd
+        assert cp.state == "RUNNING"
+        assert cp.last_sequence == 10
+        assert cp.source_timestamp == datetime(2020, 3, 1, 0, 1, 40)
+
+    # 3. load_replay_checkpoint - not found
+    mock_cur.fetchone.return_value = None
+    with patch("psycopg.connect", return_value=mock_conn):
+        assert store.load_replay_checkpoint(uuid4()) is None
+
+    # 4. load_incomplete_replays
+    mock_cur.fetchall.return_value = [
+        {
+            "replay_session_id": str(session_id),
+            "command_payload": cmd.model_dump(mode="json"),
+            "state": "RUNNING",
+            "last_sequence": 10,
+            "source_timestamp": datetime(2020, 3, 1, 0, 1, 40),
+        }
+    ]
+    with patch("psycopg.connect", return_value=mock_conn):
+        incompletes = store.load_incomplete_replays()
+        assert len(incompletes) == 1
+        assert incompletes[0].replay_session_id == session_id
+        query = mock_cur.execute.call_args[0][0]
+        assert "WHERE state IN ('RUNNING', 'PAUSED')" in query
+
+    # 5. count allowed tables includes replay_checkpoints
+    mock_cur.fetchone.return_value = (3,)
+    with patch("psycopg.connect", return_value=mock_conn):
+        cnt = store.count("replay_checkpoints")
+        assert cnt == 3
+
+
+def test_update_replay_checkpoint_state_preserves_cursor_and_command() -> None:
+    store = RuntimeStore("postgresql://test:5432/test")
+    session_id = uuid4()
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_cur.rowcount = 1
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+    with patch("psycopg.connect", return_value=mock_conn):
+        store.update_replay_checkpoint_state(session_id, "PAUSED")
+
+    query, params = mock_cur.execute.call_args.args
+    assert "UPDATE replay_checkpoints" in query
+    assert "SET state = %s" in query
+    assert "command_payload" not in query
+    assert "last_sequence" not in query
+    assert "source_timestamp" not in query
+    assert params == ("PAUSED", str(session_id))
+    assert mock_conn.commit.called
+
+
+def test_update_replay_checkpoint_state_rejects_missing_session() -> None:
+    store = RuntimeStore("postgresql://test:5432/test")
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_cur.rowcount = 0
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+    with (
+        patch("psycopg.connect", return_value=mock_conn),
+        pytest.raises(LookupError, match="Replay checkpoint not found"),
+    ):
+        store.update_replay_checkpoint_state(uuid4(), "STOPPED")
+
+
+def test_missing_runtime_state_with_legacy_decisions_requires_policy() -> None:
+    store = RuntimeStore("postgresql://test:5432/test")
+    session_id = uuid4()
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.__enter__.return_value = connection
+    connection.cursor.return_value.__enter__.return_value = cursor
+    cursor.fetchone.side_effect = [None, {"count": 1}]
+    with (
+        patch("psycopg.connect", return_value=connection),
+        pytest.raises(RuntimeError, match="policy is required"),
+    ):
+        store.load_alert_state(session_id, "metropt3")
+
+
+def test_missing_runtime_state_reconstructs_with_policy() -> None:
+    store = RuntimeStore("postgresql://test:5432/test")
+    session_id = uuid4()
+    policy = _make_policy()
+    decision = _make_decision(session_id, is_anomaly=True)
+    decision_payload = decision.model_dump(mode="json")
+
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.__enter__.return_value = connection
+    connection.cursor.return_value.__enter__.return_value = cursor
+    cursor.fetchone.side_effect = [None, {"count": 1}]
+    cursor.fetchall.return_value = [{"payload": decision_payload}]
+
+    with patch("psycopg.connect", return_value=connection):
+        state = store.load_alert_state(session_id, "metropt3", policy)
+        assert state.anomaly_streak == 1
+        assert state.active_alert_id is not None
+        assert cursor.execute.call_count >= 3
+        assert connection.commit.called

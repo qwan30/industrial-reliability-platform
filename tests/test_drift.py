@@ -193,3 +193,72 @@ def test_drift_cli(
     captured = capsys.readouterr()
     assert "Successfully built drift reference" in captured.out
     assert out_path.is_file()
+
+
+def test_drift_requires_feature_overlap() -> None:
+    ref = DriftReferenceV1(
+        model_version="v1",
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+        active_feature_names=("f1", "f2"),
+        num_train_samples=100,
+        bin_edges={"f1": [-np.inf, 1.0, np.inf], "f2": [-np.inf, 2.0, np.inf]},
+        reference_proportions={"f1": [0.5, 0.5], "f2": [0.5, 0.5]},
+        self_sha256="placeholder",
+    )
+    current = {"other_feature": [1.0, 2.0]}
+    with pytest.raises(
+        ValueError, match="drift reference and current features have no feature overlap"
+    ):
+        max_population_stability_index(current, ref)
+
+
+@pytest.fixture
+def reference() -> DriftReferenceV1:
+    bin_edges = {
+        "f1": [-np.inf, 1.0, 2.0, 3.0, np.inf],
+        "f2": [-np.inf, 10.0, 20.0, 30.0, np.inf],
+    }
+    ref_props = {
+        "f1": [0.25, 0.25, 0.25, 0.25],
+        "f2": [0.25, 0.25, 0.25, 0.25],
+    }
+    from industrial_reliability.drift import _compute_drift_hash
+
+    data = {
+        "schema_version": "drift-reference-v1",
+        "model_version": "v1",
+        "source_dataset_sha256": "a" * 64,
+        "contract_sha256": "b" * 64,
+        "active_feature_names": ("f1", "f2"),
+        "num_train_samples": 100,
+        "bin_edges": bin_edges,
+        "reference_proportions": ref_props,
+        "self_sha256": "",
+    }
+    self_sha = _compute_drift_hash(data)
+    return DriftReferenceV1(
+        model_version=data["model_version"],
+        source_dataset_sha256=data["source_dataset_sha256"],
+        contract_sha256=data["contract_sha256"],
+        active_feature_names=data["active_feature_names"],
+        num_train_samples=data["num_train_samples"],
+        bin_edges=data["bin_edges"],
+        reference_proportions=data["reference_proportions"],
+        self_sha256=self_sha,
+    )
+
+
+def test_load_reference_rejects_feature_order_mismatch(
+    tmp_path: Path,
+    reference: DriftReferenceV1,
+) -> None:
+    path = save_reference(reference, tmp_path / "drift-reference.json")
+    expected = {
+        "model_version": reference.model_version,
+        "source_dataset_sha256": reference.source_dataset_sha256,
+        "contract_sha256": reference.contract_sha256,
+        "feature_names": tuple(reversed(reference.active_feature_names)),
+    }
+    with pytest.raises(ValueError, match="feature order"):
+        load_reference(path, expected_manifest=expected)

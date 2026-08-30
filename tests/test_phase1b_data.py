@@ -55,7 +55,7 @@ def _create_synthetic_csv(
         # duplicate first row timestamp with different values
         dup_row = list(data[0])
         dup_row[0] = rows
-        dup_row[2] = 999.0
+        dup_row[2] = 2.0
         data.append(dup_row)
 
     cols = list(PHASE1B.source_columns)
@@ -153,3 +153,27 @@ def test_prepare_metropt3_destination_exists_error(tmp_path: Path) -> None:
     out_dir.mkdir()
     with pytest.raises(FileExistsError, match="already exists"):
         prepare_metropt3(zip_path, out_dir, contract)
+
+
+@pytest.mark.parametrize(
+    "source_column,value",
+    [
+        ("TP2", 21.0),
+        ("TP3", -2.0),
+        ("Oil_temperature", 151.0),
+        ("Motor_current", 51.0),
+    ],
+)
+def test_preparation_rejects_hard_physical_envelope(
+    tmp_path: Path,
+    source_column: str,
+    value: float,
+) -> None:
+    frame = pd.read_csv(io.BytesIO(_create_synthetic_csv()))
+    frame.loc[0, source_column] = value
+    archive = tmp_path / "invalid.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+        bundle.writestr("MetroPT3(AirCompressor).csv", frame.to_csv(index=False))
+    contract = replace(PHASE1B, archive_sha256=sha256_file(archive), expected_rows=10)
+    with pytest.raises(MetroPT3ContractError, match=source_column.lower().split("_")[0]):
+        prepare_metropt3(archive, tmp_path / "out", contract)

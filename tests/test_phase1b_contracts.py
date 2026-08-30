@@ -1,9 +1,13 @@
-from __future__ import annotations
+import pytest
 
 from industrial_reliability.phase1b_contracts import (
+    ANALOG_SIGNAL_BY_NAME,
+    ANALOG_SIGNAL_CONTRACTS,
     PHASE1B,
+    AnalogSignalContract,
     phase1b_contract_manifest,
     phase1b_evaluation_events,
+    validate_analog_value,
 )
 
 
@@ -27,3 +31,75 @@ def test_phase1b_events_normalize_minute_precision_half_open() -> None:
     assert events[0].source_start.isoformat(timespec="minutes") == "2020-04-18T00:00"
     assert events[0].source_end.isoformat(timespec="minutes") == "2020-04-19T00:00"
     assert phase1b_contract_manifest()["contract_sha256"]
+
+
+def test_phase1b_contracts_version_units_and_time_semantics() -> None:
+    assert PHASE1B.contract_version == "phase1b-contract-v2"
+    assert PHASE1B.timestamp_semantics == "timezone-naive source clock"
+    assert PHASE1B.nominal_cadence_seconds == 10
+    manifest = phase1b_contract_manifest()
+    assert manifest["contract_version"] == "phase1b-contract-v2"
+    assert manifest["timestamp_semantics"] == "timezone-naive source clock"
+    assert manifest["nominal_cadence_seconds"] == 10
+
+
+def test_analog_signal_contracts_definition() -> None:
+    assert len(ANALOG_SIGNAL_CONTRACTS) == 7
+    expected = {
+        "tp2": ("bar", -1.0, 20.0),
+        "tp3": ("bar", -1.0, 20.0),
+        "h1": ("bar", -1.0, 20.0),
+        "dv_pressure": ("bar", -1.0, 20.0),
+        "reservoirs": ("bar", -1.0, 20.0),
+        "oil_temperature": ("degC", -40.0, 150.0),
+        "motor_current": ("A", 0.0, 50.0),
+    }
+    for c in ANALOG_SIGNAL_CONTRACTS:
+        assert isinstance(c, AnalogSignalContract)
+        unit, hard_min, hard_max = expected[c.name]
+        assert c.unit == unit
+        assert c.hard_min == hard_min
+        assert c.hard_max == hard_max
+        assert ANALOG_SIGNAL_BY_NAME[c.name] is c
+
+
+def test_official_observed_extrema_are_inside_hard_envelopes() -> None:
+    observed = {
+        "tp2": (-0.032, 10.676),
+        "tp3": (0.7300000000000004, 10.302),
+        "h1": (-0.0360000000000013, 10.288),
+        "dv_pressure": (-0.032, 9.844),
+        "reservoirs": (0.7119999999999997, 10.3),
+        "oil_temperature": (15.400000000000006, 89.05000000000001),
+        "motor_current": (0.0199999999999995, 9.295),
+    }
+    for name, (minimum, maximum) in observed.items():
+        assert validate_analog_value(name, minimum) == minimum
+        assert validate_analog_value(name, maximum) == maximum
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("tp2", 20.1),
+        ("tp2", -1.1),
+        ("tp3", 20.1),
+        ("tp3", -1.1),
+        ("h1", 20.1),
+        ("h1", -1.1),
+        ("dv_pressure", 20.1),
+        ("dv_pressure", -1.1),
+        ("reservoirs", 20.1),
+        ("reservoirs", -1.1),
+        ("oil_temperature", 150.1),
+        ("oil_temperature", -40.1),
+        ("motor_current", 50.1),
+        ("motor_current", -0.1),
+        ("tp2", float("nan")),
+        ("tp2", float("inf")),
+        ("tp2", float("-inf")),
+    ],
+)
+def test_validate_analog_value_rejects_out_of_envelope(name: str, value: float) -> None:
+    with pytest.raises(ValueError, match=f"{name} outside hard"):
+        validate_analog_value(name, value)

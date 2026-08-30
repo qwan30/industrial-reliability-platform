@@ -4,11 +4,45 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from typing import cast
 
 from industrial_reliability.contracts import Event, Split
+
+
+@dataclass(frozen=True, slots=True)
+class AnalogSignalContract:
+    name: str
+    unit: str
+    hard_min: float
+    hard_max: float
+
+
+ANALOG_SIGNAL_CONTRACTS: tuple[AnalogSignalContract, ...] = (
+    AnalogSignalContract("tp2", "bar", -1.0, 20.0),
+    AnalogSignalContract("tp3", "bar", -1.0, 20.0),
+    AnalogSignalContract("h1", "bar", -1.0, 20.0),
+    AnalogSignalContract("dv_pressure", "bar", -1.0, 20.0),
+    AnalogSignalContract("reservoirs", "bar", -1.0, 20.0),
+    AnalogSignalContract("oil_temperature", "degC", -40.0, 150.0),
+    AnalogSignalContract("motor_current", "A", 0.0, 50.0),
+)
+
+ANALOG_SIGNAL_BY_NAME: dict[str, AnalogSignalContract] = {
+    c.name: c for c in ANALOG_SIGNAL_CONTRACTS
+}
+
+
+def validate_analog_value(name: str, value: float) -> float:
+    contract = ANALOG_SIGNAL_BY_NAME[name]
+    if not math.isfinite(value) or not (contract.hard_min <= value <= contract.hard_max):
+        raise ValueError(
+            f"{name} outside hard {contract.unit} envelope "
+            f"[{contract.hard_min}, {contract.hard_max}]: {value}"
+        )
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +75,8 @@ class Phase1BContract:
     calibration: Split
     holdout: Split
     events: tuple[MetroPT3Event, ...]
+    timestamp_semantics: str = "timezone-naive source clock"
+    nominal_cadence_seconds: int = 10
     bin_seconds: int = 300
     min_bin_observations: int = 24
     lookback_bins: int = 6
@@ -65,10 +101,12 @@ class Phase1BContract:
     autoencoder_epochs: int = 20
 
 
+MetroPT3Contract = Phase1BContract
+
 DEFAULT_CONDITION = "air leak / high stress"
 
 PHASE1B = Phase1BContract(
-    contract_version="phase1b-contract-v1",
+    contract_version="phase1b-contract-v2",
     source_url="https://archive.ics.uci.edu/static/public/791/metropt%2B3%2Bdataset.zip",
     source_doi="10.24432/C5VW3R",
     license="CC BY 4.0",

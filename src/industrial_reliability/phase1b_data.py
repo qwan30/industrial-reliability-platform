@@ -19,6 +19,7 @@ from industrial_reliability.phase1b_contracts import (
     PHASE1B,
     Phase1BContract,
     phase1b_contract_manifest,
+    validate_analog_value,
 )
 
 
@@ -105,9 +106,17 @@ def _validate_source_structure(frame: pd.DataFrame, contract: Phase1BContract) -
 
 def _validate_telemetry_values(raw_data: pd.DataFrame, contract: Phase1BContract) -> None:
     for col in contract.analog_columns:
-        values = raw_data[col].to_numpy()
+        values = raw_data[col].to_numpy(dtype=np.float64)
         if not np.all(np.isfinite(values)):
             raise MetroPT3ContractError(f"non-finite values in analog column {col}")
+        if len(values) > 0:
+            min_val = float(np.min(values))
+            max_val = float(np.max(values))
+            try:
+                validate_analog_value(col, min_val)
+                validate_analog_value(col, max_val)
+            except ValueError as exc:
+                raise MetroPT3ContractError(str(exc)) from exc
 
     for col in contract.digital_columns:
         values = raw_data[col].to_numpy()

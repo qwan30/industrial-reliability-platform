@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from industrial_reliability.phase1b_contracts import validate_analog_value
+
 HEX_64_PATTERN = r"^[0-9a-f]{64}$"
 ERR_SOURCE_TS_NAIVE = "source_timestamp must be timezone-naive"
 ERR_EMITTED_AT_UTC = "emitted_at must be timezone-aware UTC"
@@ -271,18 +273,16 @@ class TelemetryEventV1(FrozenMessage):
         if self.emitted_at.tzinfo is None:
             raise ValueError(ERR_EMITTED_AT_UTC)
 
-        analog_fields = [
-            self.tp2,
-            self.tp3,
-            self.h1,
-            self.dv_pressure,
-            self.reservoirs,
-            self.oil_temperature,
-            self.motor_current,
-        ]
-        for val in analog_fields:
-            if not math.isfinite(val):
-                raise ValueError("Analog telemetry values must be finite")
+        for name in (
+            "tp2",
+            "tp3",
+            "h1",
+            "dv_pressure",
+            "reservoirs",
+            "oil_temperature",
+            "motor_current",
+        ):
+            validate_analog_value(name, getattr(self, name))
 
         return self
 

@@ -12,7 +12,8 @@ from uuid import UUID
 import psycopg
 from psycopg.rows import dict_row
 
-from industrial_reliability.alert_state import AlertState, TransitionResult
+from industrial_reliability.alert_policy import LockedAlertPolicyV1
+from industrial_reliability.alert_state import AlertState, TransitionResult, transition
 from industrial_reliability.console_stream import ConsoleEventV1
 from industrial_reliability.runtime_messages import (
     RcaReportV1,
@@ -384,7 +385,36 @@ class RuntimeStore:
             ),
         )
 
-    def load_alert_state(self, replay_session_id: UUID, machine_id: str) -> AlertState:
+    def _reconstruct_alert_state(
+        self,
+        cur: psycopg.Cursor[Any],
+        replay_session_id: UUID,
+        machine_id: str,
+        policy: LockedAlertPolicyV1,
+    ) -> AlertState:
+        cur.execute(
+            """
+            SELECT payload
+            FROM score_decisions
+            WHERE replay_session_id = %s
+            ORDER BY source_timestamp ASC, decision_id ASC
+            """,
+            (str(replay_session_id),),
+        )
+        state = AlertState.empty(replay_session_id, machine_id)
+        for row in cur.fetchall():
+            raw = row["payload"]
+            payload = raw if isinstance(raw, dict) else json.loads(raw)
+            decision = ScoreDecisionV1.model_validate(payload)
+            state = transition(state, decision, policy).state
+        return state
+
+    def load_alert_state(
+        self,
+        replay_session_id: UUID,
+        machine_id: str,
+        policy: LockedAlertPolicyV1 | None = None,
+    ) -> AlertState:
         with psycopg.connect(self.db_url, row_factory=dict_row) as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -395,13 +425,43 @@ class RuntimeStore:
                 (str(replay_session_id), machine_id),
             )
             row = cur.fetchone()
-            if not row:
-                return AlertState.empty(replay_session_id, machine_id)
+            if row:
+                payload = (
+                    row["payload"]
+                    if isinstance(row["payload"], dict)
+                    else json.loads(row["payload"])
+                )
+                return _state_from_payload(payload)
 
-            payload = (
-                row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"])
+            cur.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM score_decisions
+                WHERE replay_session_id = %s;
+                """,
+                (str(replay_session_id),),
             )
-            return _state_from_payload(payload)
+            count_row = cur.fetchone()
+            decision_count = int(count_row["count"]) if count_row else 0
+            if decision_count == 0:
+                return AlertState.empty(replay_session_id, machine_id)
+            if policy is None:
+                raise RuntimeError("alert policy is required to reconstruct legacy runtime state")
+            state = self._reconstruct_alert_state(cur, replay_session_id, machine_id, policy)
+            cur.execute(
+                """
+                INSERT INTO alert_runtime_states (replay_session_id, machine_id, payload)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (replay_session_id, machine_id) DO NOTHING;
+                """,
+                (
+                    str(replay_session_id),
+                    machine_id,
+                    json.dumps(_state_payload(state)),
+                ),
+            )
+            conn.commit()
+            return state
 
     def record_decision_transition(
         self,

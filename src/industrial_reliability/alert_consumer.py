@@ -143,7 +143,11 @@ class AlertConsumer:
             await self._fail_session(session_id, decision.source_timestamp, "CONTRACT_MISMATCH")
             return ProcessOutcome.SESSION_FAILED
 
-        state = self.store.load_alert_state(session_id, self.machine_id)
+        state = self.store.load_alert_state(
+            session_id,
+            self.machine_id,
+            self.policy,
+        )
         result = transition(state, decision, self.policy)
         self.store.record_decision_transition(decision, result)
 

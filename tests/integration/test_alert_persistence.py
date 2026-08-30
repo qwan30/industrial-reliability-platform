@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
+import psycopg
 import pytest
 from tests.test_persistence import _make_decision, _make_policy
 
@@ -105,3 +106,45 @@ def test_two_anomalies_open_one_alert_across_restart(store: RuntimeStore) -> Non
     restarted.record_decision_transition(second, result2)
     assert restarted.count("alerts", "replay_session_id", str(session_id)) == 1
     assert restarted.count("alert_outbox") == 1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("decisions_before_upgrade", [2, 3])
+def test_load_alert_state_replays_legacy_decisions_exactly(
+    store: RuntimeStore,
+    decisions_before_upgrade: int,
+) -> None:
+    session_id = uuid4()
+    policy = replace(_make_policy(), persistence_decisions=3, cooldown_decisions=2)
+    first = _make_decision(session_id, is_anomaly=True)
+    decisions = [first]
+    for index in range(1, decisions_before_upgrade):
+        decisions.append(
+            replace(
+                first,
+                decision_id=uuid4(),
+                window_id=uuid4(),
+                source_timestamp=first.source_timestamp + timedelta(minutes=5 * index),
+            )
+        )
+    state = AlertState.empty(session_id, "metropt3")
+    for decision in decisions:
+        result = transition(state, decision, policy)
+        store.record_decision_transition(decision, result)
+        state = result.state
+
+    with psycopg.connect(store.db_url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "DELETE FROM alert_runtime_states WHERE replay_session_id = %s",
+            (str(session_id),),
+        )
+        connection.commit()
+
+    recovered = store.load_alert_state(session_id, "metropt3", policy)
+    assert recovered.active_alert_id == state.active_alert_id
+    assert recovered.anomaly_decision_ids == state.anomaly_decision_ids
+    assert recovered.anomaly_streak == state.anomaly_streak
+    assert recovered.normal_streak == state.normal_streak
+    assert recovered.last_decision_id == decisions[-1].decision_id
+    assert store.count("alert_runtime_states", "replay_session_id", str(session_id)) == 1
+

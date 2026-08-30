@@ -250,8 +250,8 @@ def test_store_load_alert_state_empty() -> None:
         assert state.replay_session_id == session_id
         assert state.anomaly_streak == 0
         # Verify SQL queries alert_runtime_states
-        query = mock_cur.execute.call_args[0][0]
-        assert "alert_runtime_states" in query
+        queries = [call[0][0] for call in mock_cur.execute.call_args_list]
+        assert any("alert_runtime_states" in q for q in queries)
 
 
 def test_store_outbox_operations() -> None:
@@ -548,3 +548,41 @@ def test_update_replay_checkpoint_state_rejects_missing_session() -> None:
         pytest.raises(LookupError, match="Replay checkpoint not found"),
     ):
         store.update_replay_checkpoint_state(uuid4(), "STOPPED")
+
+
+def test_missing_runtime_state_with_legacy_decisions_requires_policy() -> None:
+    store = RuntimeStore("postgresql://test:5432/test")
+    session_id = uuid4()
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.__enter__.return_value = connection
+    connection.cursor.return_value.__enter__.return_value = cursor
+    cursor.fetchone.side_effect = [None, {"count": 1}]
+    with (
+        patch("psycopg.connect", return_value=connection),
+        pytest.raises(RuntimeError, match="policy is required"),
+    ):
+        store.load_alert_state(session_id, "metropt3")
+
+
+def test_missing_runtime_state_reconstructs_with_policy() -> None:
+    store = RuntimeStore("postgresql://test:5432/test")
+    session_id = uuid4()
+    policy = _make_policy()
+    decision = _make_decision(session_id, is_anomaly=True)
+    decision_payload = decision.model_dump(mode="json")
+
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.__enter__.return_value = connection
+    connection.cursor.return_value.__enter__.return_value = cursor
+    cursor.fetchone.side_effect = [None, {"count": 1}]
+    cursor.fetchall.return_value = [{"payload": decision_payload}]
+
+    with patch("psycopg.connect", return_value=connection):
+        state = store.load_alert_state(session_id, "metropt3", policy)
+        assert state.anomaly_streak == 1
+        assert state.active_alert_id is not None
+        assert cursor.execute.call_count >= 3
+        assert connection.commit.called
+

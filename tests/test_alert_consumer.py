@@ -48,7 +48,7 @@ async def test_alert_consumer_commits_after_successful_persistence() -> None:
 
     outcome = await consumer.process(record)
     assert outcome == ProcessOutcome.COMMITTED
-    assert mock_store.load_alert_state.called
+    mock_store.load_alert_state.assert_called_once_with(session_id, "metropt3", policy)
     assert mock_store.record_decision_transition.called
 
 

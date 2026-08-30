@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pandas as pd
@@ -12,6 +13,7 @@ import pytest
 
 from industrial_reliability import phase1b_benchmark
 from industrial_reliability.artifact_integrity import ArtifactIntegrityError
+from industrial_reliability.champion import ChampionIntegrityError
 from industrial_reliability.ml_lifecycle import (
     CandidateResult,
     ImportCandidateRequest,
@@ -68,6 +70,22 @@ class FakeMlflowClient:
         self.artifacts: dict[str, dict[str, bytes]] = {}
         self.runs: dict[str, FakeRun] = {}
         self.model_versions: dict[str, list[FakeModelVersion]] = {}
+
+    def set_tracking_uri(self, uri: str) -> None:
+        pass
+
+    @contextlib.contextmanager
+    def start_run(self, run_id: str | None = None, **kwargs: Any) -> Any:
+        yield self.runs.get(run_id) if run_id else None
+
+    @property
+    def pyfunc(self) -> Any:
+        class _FakePyFunc:
+            @staticmethod
+            def log_model(*args: Any, **kwargs: Any) -> None:
+                pass
+
+        return _FakePyFunc
 
     def create_run(self, experiment_id: str, tags: dict[str, str] | None = None) -> FakeRun:
         run_id = f"fake-run-{uuid.uuid4().hex[:12]}"
@@ -594,3 +612,19 @@ def test_cli_main_subcommands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     )
     assert ret_promote == 0
     assert out_receipt.exists()
+
+
+def test_reproduction_rejects_tampered_detector_before_joblib_load(tmp_path: Path) -> None:
+    run_dir, features, package = _create_mock_feasible_phase1b_run(tmp_path)
+    detector = package / "detector.joblib"
+    detector.write_bytes(detector.read_bytes() + b"tamper")
+    with (
+        patch("industrial_reliability.ml_lifecycle.joblib.load") as unsafe_load,
+        pytest.raises(ChampionIntegrityError, match=r"detector\.joblib SHA-256 mismatch"),
+    ):
+        reproduce_candidate(
+            ReproductionRequest(features, run_dir, package),
+            mlflow_client=FakeMlflowClient(),
+        )
+    unsafe_load.assert_not_called()
+

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import platform
 import subprocess
@@ -76,19 +75,24 @@ if TYPE_CHECKING:
     import mlflow
     import mlflow.pyfunc
     from mlflow import MlflowClient
+    from mlflow.pyfunc import PythonModel  # type: ignore[attr-defined]
 else:
     try:
         import mlflow
         import mlflow.pyfunc
         from mlflow import MlflowClient
+        from mlflow.pyfunc import PythonModel
     except ImportError:
         mlflow = None
         MlflowClient = None
 
+        class PythonModel:  # type: ignore[no-redef]
+            pass
+
 __all__ = ["MlflowClient", "import_candidate", "promote_candidate", "reproduce_candidate"]
 
 
-class PackagedChampionPyFunc:
+class PackagedChampionPyFunc(PythonModel):
     def __init__(self, expected_manifest_sha256: str | None = None) -> None:
         self.expected_manifest_sha256 = expected_manifest_sha256
         self._champion: Any = None
@@ -275,12 +279,13 @@ def import_candidate(
 
     # Log PyFunc model wrapping packaged champion
     model_uri = f"runs:/{run_id}/champion-model"
-    if mlflow is not None and hasattr(mlflow, "pyfunc") and hasattr(mlflow.pyfunc, "log_model"):
-        with contextlib.suppress(Exception):
+    if mlflow_client is None:
+        assert mlflow is not None
+        with mlflow.start_run(run_id=run_id):
             mlflow.pyfunc.log_model(
                 artifact_path="champion-model",
                 python_model=PackagedChampionPyFunc(expected_manifest_sha256=pkg_manifest_sha),
-                artifacts={"champion_package": str(request.champion_package)},
+                artifacts={"champion_package": str(request.champion_package.resolve())},
             )
 
     return CandidateResult(
@@ -326,11 +331,12 @@ def reproduce_candidate(
     feature_cols = list(pkg_manifest.feature_names)
     matrix = calib_df[feature_cols].to_numpy(dtype=np.float64, copy=False)
 
-    detector_file = request.champion_package / "detector.joblib"
-    if not detector_file.is_file():
-        raise FileNotFoundError(f"Detector binary not found in package: {detector_file}")
-
-    detector = joblib.load(detector_file)
+    scorer = load_champion(
+        request.champion_package,
+        expected_manifest_sha256=pkg_manifest_sha,
+        allow_research_candidate=True,
+    )
+    detector = scorer.detector
     calib_scores = detector.score(matrix)
 
     threshold = calibrate_threshold(calib_scores, PHASE1C)

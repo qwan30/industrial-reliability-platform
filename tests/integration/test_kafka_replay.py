@@ -23,7 +23,9 @@ from industrial_reliability.replay import ReplaySource
 from industrial_reliability.replay_service import ReplayService
 from industrial_reliability.runtime_messages import (
     REPLAY_COMMANDS_TOPIC,
+    REPLAY_STATUS_TOPIC,
     TELEMETRY_TOPIC,
+    ReplayStatusV1,
     TelemetryEventV1,
 )
 
@@ -164,4 +166,89 @@ async def test_replay_resumes_from_durable_checkpoint(
     assert payloads[0].sequence == 26
     assert payloads[0].source_timestamp > first_batch[-1].source_timestamp
     assert [event.sequence for event in payloads] == list(range(26, payloads[-1].sequence + 1))
-    assert store.load_replay_checkpoint(command.replay_session_id).state == "COMPLETED"
+    saved = store.load_replay_checkpoint(command.replay_session_id)
+    assert saved is not None
+    assert saved.state == "COMPLETED"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_replay_resume_from_zero_is_lossless_and_terminal(
+    store: RuntimeStore,
+    tmp_path: Path,
+) -> None:
+    source = ReplaySource(
+        _create_mock_parquet(tmp_path, n_rows=6),
+        expected_contract_sha256="b" * 64,
+    )
+    command = make_sample_replay_command(
+        action="START",
+        session_id=uuid4(),
+        speed=1000,
+        range_start=datetime(2020, 3, 1),
+        range_end=datetime(2020, 3, 1, 0, 1),
+        source_dataset_sha256=source.identity.source_dataset_sha256,
+        contract_sha256=source.identity.contract_sha256,
+    )
+    expected = list(source.iter_events(command))
+    store.record_replay_checkpoint(command, "RUNNING", 0, None)
+    checkpoint = store.load_replay_checkpoint(command.replay_session_id)
+    assert checkpoint is not None
+    service = ReplayService(
+        KafkaSettings("localhost:29092"),
+        source,
+        store=store,
+        enable_pacing=False,
+    )
+    service.producer = AsyncMock()
+
+    await service.resume_checkpoint(checkpoint)
+
+    telemetry = [
+        decode_message(call.kwargs["value"], TelemetryEventV1)
+        for call in service.producer.send_and_wait.await_args_list
+        if call.args[0] == TELEMETRY_TOPIC
+    ]
+    statuses = [
+        decode_message(call.kwargs["value"], ReplayStatusV1)
+        for call in service.producer.send_and_wait.await_args_list
+        if call.args[0] == REPLAY_STATUS_TOPIC
+    ]
+    assert [(event.sequence, event.source_timestamp) for event in telemetry] == [
+        (event.sequence, event.source_timestamp) for event in expected
+    ]
+    assert statuses[-1].state == "COMPLETED"
+    assert statuses[-1].last_sequence == len(expected)
+    saved = store.load_replay_checkpoint(command.replay_session_id)
+    assert saved is not None
+    assert saved.state == "COMPLETED"
+
+
+@pytest.mark.integration
+def test_replay_checkpoint_control_state_is_durable(store: RuntimeStore) -> None:
+    command = make_sample_replay_command(
+        action="START",
+        session_id=uuid4(),
+        speed=1000,
+    )
+    store.record_replay_checkpoint(command, "RUNNING", 0, None)
+
+    store.update_replay_checkpoint_state(command.replay_session_id, "PAUSED")
+    paused = store.load_replay_checkpoint(command.replay_session_id)
+    assert paused is not None
+    assert paused.state == "PAUSED"
+    assert paused.command == command
+    assert any(
+        checkpoint.replay_session_id == command.replay_session_id
+        for checkpoint in store.load_incomplete_replays()
+    )
+
+    store.update_replay_checkpoint_state(command.replay_session_id, "STOPPED")
+    stopped = store.load_replay_checkpoint(command.replay_session_id)
+    assert stopped is not None
+    assert stopped.state == "STOPPED"
+    assert stopped.command == command
+    assert all(
+        checkpoint.replay_session_id != command.replay_session_id
+        for checkpoint in store.load_incomplete_replays()
+    )

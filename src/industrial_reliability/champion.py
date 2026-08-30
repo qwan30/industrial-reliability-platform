@@ -9,7 +9,11 @@ from typing import Any
 import joblib
 import numpy as np
 
-from industrial_reliability.package_champion import ChampionManifest
+from industrial_reliability.drift import load_reference
+from industrial_reliability.package_champion import (
+    DRIFT_REFERENCE_FILENAME,
+    ChampionManifest,
+)
 from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.runtime_messages import (
     EvidenceValueV1,
@@ -51,6 +55,8 @@ class ChampionScorer:
         self.threshold = manifest.threshold
         self.contract_sha256 = manifest.contract_sha256
         self.source_dataset_sha256 = manifest.source_dataset_sha256
+        self.prepared_output_sha256 = manifest.prepared_output_sha256
+        self.feature_output_sha256 = manifest.feature_output_sha256
 
     def _validate_identity(self, feature: FeatureVectorV1) -> None:
         if feature.contract_sha256 != self.contract_sha256:
@@ -144,6 +150,14 @@ def load_champion(
     mad = baseline["mad"]
     if len(median) != len(manifest.feature_names) or len(mad) != len(manifest.feature_names):
         raise ChampionIntegrityError("evidence-baseline dimensions mismatch with feature count")
+
+    drift_path = _resolve_safe_child(resolved_pkg, DRIFT_REFERENCE_FILENAME)
+    if not drift_path.is_file():
+        raise ChampionIntegrityError(f"Artifact {DRIFT_REFERENCE_FILENAME} missing in package")
+    try:
+        load_reference(drift_path, expected_manifest=manifest.model_dump())
+    except Exception as e:
+        raise ChampionIntegrityError(f"drift reference verification failed: {e}") from e
 
     return ChampionScorer(
         manifest=manifest,

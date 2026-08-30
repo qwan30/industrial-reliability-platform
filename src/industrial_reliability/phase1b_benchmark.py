@@ -16,6 +16,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from numpy.typing import NDArray
 
+from industrial_reliability.artifact_integrity import (
+    ArtifactIntegrityError,
+    load_self_hashed_manifest,
+    verify_file_sha256,
+    verify_prepared_parquet,
+)
 from industrial_reliability.autoencoder import DenseAutoencoderDetector
 from industrial_reliability.evaluation import (
     EvaluationResult,
@@ -23,13 +29,15 @@ from industrial_reliability.evaluation import (
     calibrate_threshold,
     evaluate,
 )
+from industrial_reliability.ml_provenance import validate_git_sha
 from industrial_reliability.models import (
     IsolationForestDetector,
     RobustStatisticalDetector,
 )
 from industrial_reliability.phase1b_contracts import (
-    PHASE1B,
+    PHASE1C,
     Phase1BContract,
+    metropt3_contract_manifest,
     phase1b_evaluation_events,
 )
 from industrial_reliability.phase1b_data import sha256_file
@@ -73,7 +81,7 @@ class Phase1BBenchmarkResult:
 
 def detector_for(
     model_id: ModelId,
-    contract: Phase1BContract = PHASE1B,
+    contract: Phase1BContract = PHASE1C,
 ) -> RobustStatisticalDetector | IsolationForestDetector | DenseAutoencoderDetector:
     if model_id == "statistical":
         return RobustStatisticalDetector()
@@ -89,7 +97,7 @@ def fit_phase1b_candidate(
     model_id: ModelId,
     train_features: NDArray[np.float64],
     calibration_features: NDArray[np.float64],
-    contract: Phase1BContract = PHASE1B,
+    contract: Phase1BContract = PHASE1C,
 ) -> FittedCandidate:
     detector = detector_for(model_id, contract).fit(train_features)
     calib_scores = detector.score(calibration_features)
@@ -110,7 +118,7 @@ def evaluate_candidate_holdout(
     fitted: FittedCandidate,
     holdout_df: pd.DataFrame,
     active_features: tuple[str, ...],
-    contract: Phase1BContract = PHASE1B,
+    contract: Phase1BContract = PHASE1C,
 ) -> CandidateResult:
     feature_matrix = holdout_df[list(active_features)].to_numpy(dtype=np.float64)
     scores = fitted.detector.score(feature_matrix)
@@ -172,21 +180,48 @@ def _serialize_candidate_evaluation(res: EvaluationResult) -> dict[str, Any]:
 
 
 def run_phase1b_benchmark(
-    *,
     prepared_dir: Path,
     feature_path: Path,
     artifact_dir: Path,
-    contract: Phase1BContract = PHASE1B,
+    expected_prepared_output_sha256: str,
+    source_git_sha: str,
+    contract: Phase1BContract = PHASE1C,
 ) -> Phase1BBenchmarkResult:
     resolved_prep = prepared_dir.resolve()
     resolved_feat = feature_path.resolve()
+    prep_parquet_file = (resolved_prep / "telemetry.parquet").resolve()
     prep_manifest_file = (resolved_prep / "manifest.json").resolve()
     feat_manifest_file = (resolved_feat.parent / "feature_manifest.json").resolve()
-    if not prep_manifest_file.is_file() or not feat_manifest_file.is_file():
+    if (
+        not prep_parquet_file.is_file()
+        or not prep_manifest_file.is_file()
+        or not feat_manifest_file.is_file()
+        or not resolved_feat.is_file()
+    ):
         raise FileNotFoundError("Prerequisite manifest files missing")
 
-    data_manifest = json.loads(prep_manifest_file.read_text(encoding="utf-8"))
-    feat_manifest = json.loads(feat_manifest_file.read_text(encoding="utf-8"))
+    contract_manifest = metropt3_contract_manifest(contract)
+    expected_contract_sha = str(contract_manifest["contract_sha256"])
+
+    verified_data = verify_prepared_parquet(
+        prep_parquet_file,
+        expected_contract_sha256=expected_contract_sha,
+        expected_source_dataset_sha256=contract.archive_sha256,
+        expected_output_sha256=expected_prepared_output_sha256,
+    )
+    feat_manifest = load_self_hashed_manifest(feat_manifest_file)
+    verify_file_sha256(
+        resolved_feat, str(feat_manifest.get("output_sha256", "")), "features.parquet"
+    )
+
+    if feat_manifest.get("contract_sha256") != expected_contract_sha:
+        raise ArtifactIntegrityError(
+            f"features contract SHA-256 mismatch: expected {expected_contract_sha}, got {feat_manifest.get('contract_sha256')}"
+        )
+    if feat_manifest.get("data_manifest_sha256") != verified_data.manifest_sha256:
+        raise ArtifactIntegrityError(
+            f"features data manifest mismatch: expected {verified_data.manifest_sha256}, got {feat_manifest.get('data_manifest_sha256')}"
+        )
 
     active_features = tuple(feat_manifest["active_feature_names"])
     features_df = pq.read_table(resolved_feat).to_pandas()
@@ -255,9 +290,10 @@ def run_phase1b_benchmark(
         "verdict": verdict,
         "selected_model": selected_model,
         "contract_sha256": feat_manifest["contract_sha256"],
-        "source_dataset_sha256": data_manifest["archive_sha256"],
-        "prepared_output_sha256": data_manifest["output_sha256"],
-        "feature_output_sha256": feat_manifest["output_sha256"],
+        "source_dataset_sha256": verified_data.source_dataset_sha256,
+        "prepared_output_sha256": verified_data.parquet_sha256,
+        "feature_output_sha256": str(feat_manifest["output_sha256"]),
+        "source_git_sha": validate_git_sha(source_git_sha),
         "models": {
             cr.model_id: _serialize_candidate_evaluation(cr.evaluation) for cr in candidate_results
         },
@@ -278,7 +314,8 @@ def run_phase1b_benchmark(
             "threshold_provenance": asdict(selected.fitted.threshold_provenance),
             "active_feature_names": list(active_features),
             "contract_sha256": feat_manifest["contract_sha256"],
-            "source_dataset_sha256": data_manifest["archive_sha256"],
+            "source_dataset_sha256": verified_data.source_dataset_sha256,
+            "prepared_output_sha256": verified_data.parquet_sha256,
             "feature_output_sha256": feat_manifest["output_sha256"],
             "artifact_sha256": {
                 "scores_parquet": sha256_file(scores_path),
@@ -295,7 +332,7 @@ def run_phase1b_benchmark(
         verdict=verdict,
         selected_model=selected_model,
         contract_sha256=feat_manifest["contract_sha256"],
-        source_dataset_sha256=data_manifest["archive_sha256"],
+        source_dataset_sha256=verified_data.source_dataset_sha256,
         run_id=run_id,
     )
 
@@ -324,6 +361,9 @@ def publish_phase1b_results(
         "selected_model": run_manifest["selected_model"],
         "contract_sha256": run_manifest["contract_sha256"],
         "source_dataset_sha256": run_manifest["source_dataset_sha256"],
+        "prepared_output_sha256": run_manifest["prepared_output_sha256"],
+        "feature_output_sha256": run_manifest["feature_output_sha256"],
+        "source_git_sha": run_manifest["source_git_sha"],
         "models": run_manifest["models"],
     }
     metrics_file.write_text(json.dumps(published_metrics, indent=2), encoding="utf-8")
@@ -376,6 +416,12 @@ def main() -> None:
     parser.add_argument(
         "--prepared-dir", type=Path, required=True, help="Directory with prepared telemetry"
     )
+    parser.add_argument(
+        "--prepared-output-sha256",
+        type=str,
+        required=True,
+        help="Expected SHA-256 digest of prepared telemetry.parquet",
+    )
     parser.add_argument("--features", type=Path, required=True, help="Path to features.parquet")
     parser.add_argument(
         "--artifact-dir", type=Path, required=True, help="Directory for private artifacts"
@@ -383,12 +429,20 @@ def main() -> None:
     parser.add_argument(
         "--publish-dir", type=Path, required=True, help="Directory for published metrics/report"
     )
+    parser.add_argument(
+        "--source-git-sha",
+        type=str,
+        required=True,
+        help="Git commit SHA-256 (40-character hex) corresponding to this run",
+    )
     args = parser.parse_args()
 
     result = run_phase1b_benchmark(
         prepared_dir=args.prepared_dir,
         feature_path=args.features,
         artifact_dir=args.artifact_dir,
+        expected_prepared_output_sha256=args.prepared_output_sha256,
+        source_git_sha=args.source_git_sha,
     )
     publish_phase1b_results(result.run_dir, args.publish_dir)
     print(

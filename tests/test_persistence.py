@@ -511,3 +511,41 @@ def test_store_replay_checkpoints() -> None:
     with patch("psycopg.connect", return_value=mock_conn):
         cnt = store.count("replay_checkpoints")
         assert cnt == 3
+
+
+def test_update_replay_checkpoint_state_preserves_cursor_and_command() -> None:
+    store = RuntimeStore("postgresql://test:5432/test")
+    session_id = uuid4()
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_cur.rowcount = 1
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+    with patch("psycopg.connect", return_value=mock_conn):
+        store.update_replay_checkpoint_state(session_id, "PAUSED")
+
+    query, params = mock_cur.execute.call_args.args
+    assert "UPDATE replay_checkpoints" in query
+    assert "SET state = %s" in query
+    assert "command_payload" not in query
+    assert "last_sequence" not in query
+    assert "source_timestamp" not in query
+    assert params == ("PAUSED", str(session_id))
+    assert mock_conn.commit.called
+
+
+def test_update_replay_checkpoint_state_rejects_missing_session() -> None:
+    store = RuntimeStore("postgresql://test:5432/test")
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_cur.rowcount = 0
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+    with (
+        patch("psycopg.connect", return_value=mock_conn),
+        pytest.raises(LookupError, match="Replay checkpoint not found"),
+    ):
+        store.update_replay_checkpoint_state(uuid4(), "STOPPED")
+

@@ -9,7 +9,7 @@ import hashlib
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -22,7 +22,11 @@ from industrial_reliability.kafka_io import (
     encode_message,
 )
 from industrial_reliability.metrics import RuntimeMetrics, start_process_metrics
-from industrial_reliability.persistence import ReplayCheckpoint, RuntimeStore
+from industrial_reliability.persistence import (
+    ReplayCheckpoint,
+    ReplayCheckpointState,
+    RuntimeStore,
+)
 from industrial_reliability.replay import (
     ReplayController,
     ReplaySource,
@@ -50,6 +54,17 @@ class RunningSession:
     task: asyncio.Task[None]
     pause_event: asyncio.Event
     stop_event: asyncio.Event
+
+
+def _checkpoint_state(
+    pause_event: asyncio.Event,
+    stop_event: asyncio.Event,
+) -> ReplayCheckpointState:
+    if stop_event.is_set():
+        return "STOPPED"
+    if not pause_event.is_set():
+        return "PAUSED"
+    return "RUNNING"
 
 
 class ReplayService:
@@ -100,20 +115,34 @@ class ReplayService:
                 )
             if incomplete:
                 checkpoint = incomplete[0]
+                if checkpoint.state not in ("RUNNING", "PAUSED"):
+                    raise RuntimeError(f"cannot resume checkpoint in state {checkpoint.state}")
+                pause_event = asyncio.Event()
+                if checkpoint.state == "RUNNING":
+                    pause_event.set()
+                stop_event = asyncio.Event()
+                controller = ReplayController.created(
+                    checkpoint.replay_session_id,
+                    checkpoint.command.source_dataset_sha256,
+                    checkpoint.command.contract_sha256,
+                ).apply(checkpoint.command)
+                controller = replace(
+                    controller,
+                    state=checkpoint.state,
+                    last_sequence=checkpoint.last_sequence,
+                    current_source_timestamp=checkpoint.source_timestamp,
+                )
                 task = asyncio.create_task(
-                    self.resume_checkpoint(checkpoint),
+                    self.resume_checkpoint(checkpoint, pause_event, stop_event),
                     name=f"replay-resume-{checkpoint.replay_session_id}",
                 )
                 self.active_session = RunningSession(
-                    controller=ReplayController.created(
-                        checkpoint.replay_session_id,
-                        checkpoint.command.source_dataset_sha256,
-                        checkpoint.command.contract_sha256,
-                    ),
+                    controller=controller,
                     task=task,
-                    pause_event=asyncio.Event(),
-                    stop_event=asyncio.Event(),
+                    pause_event=pause_event,
+                    stop_event=stop_event,
                 )
+
 
     async def resume_checkpoint(
         self,
@@ -150,10 +179,11 @@ class ReplayService:
                 if self.store is not None:
                     self.store.record_replay_checkpoint(
                         command=checkpoint.command,
-                        state="RUNNING",
+                        state=_checkpoint_state(pause_event, stop_event),
                         last_sequence=last_sequence,
                         source_timestamp=last_timestamp,
                     )
+
 
             await pause_event.wait()
             if stop_event.is_set():
@@ -337,9 +367,11 @@ class ReplayService:
             and self.active_session.controller.session_id == command.replay_session_id
             and not self.active_session.task.done()
         ):
-            self.active_session.pause_event.clear()
             ctrl = self.active_session.controller.apply(command)
+            if self.store is not None:
+                self.store.update_replay_checkpoint_state(ctrl.session_id, "PAUSED")
             self.active_session.controller = ctrl
+            self.active_session.pause_event.clear()
             await self.publish_status(ctrl.status())
 
     async def _handle_resume_command(self, command: ReplayCommandV1) -> None:
@@ -349,6 +381,8 @@ class ReplayService:
             and not self.active_session.task.done()
         ):
             ctrl = self.active_session.controller.apply(command)
+            if self.store is not None:
+                self.store.update_replay_checkpoint_state(ctrl.session_id, "RUNNING")
             self.active_session.controller = ctrl
             self.active_session.pause_event.set()
             await self.publish_status(ctrl.status())
@@ -359,10 +393,12 @@ class ReplayService:
             and self.active_session.controller.session_id == command.replay_session_id
             and not self.active_session.task.done()
         ):
+            ctrl = self.active_session.controller.apply(command)
+            if self.store is not None:
+                self.store.update_replay_checkpoint_state(ctrl.session_id, "STOPPED")
+            self.active_session.controller = ctrl
             self.active_session.stop_event.set()
             self.active_session.pause_event.set()
-            ctrl = self.active_session.controller.apply(command)
-            self.active_session.controller = ctrl
             await self.publish_status(ctrl.status())
 
     async def handle_command(self, command: ReplayCommandV1) -> None:
@@ -422,11 +458,14 @@ class ReplayService:
                 if self.store is not None:
                     self.store.record_replay_checkpoint(
                         command=start_cmd,
-                        state="RUNNING",
+                        state=_checkpoint_state(pause_event, stop_event),
                         last_sequence=last_seq,
                         source_timestamp=last_ts,
                     )
 
+            await pause_event.wait()
+            if stop_event.is_set():
+                return
             ctrl = ctrl.mark_completed(last_seq, last_ts)
             if self.store is not None:
                 self.store.record_replay_checkpoint(
@@ -436,6 +475,7 @@ class ReplayService:
                     source_timestamp=last_ts,
                 )
             await self.publish_status(ctrl.status())
+
 
         except Exception as err:
             logger.exception("Replay session failed: %s", err)

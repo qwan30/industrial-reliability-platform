@@ -51,13 +51,23 @@ class ReplaySessionRecord:
     updated_at: datetime
 
 
+type ReplayCheckpointState = Literal[
+    "RUNNING",
+    "PAUSED",
+    "STOPPED",
+    "COMPLETED",
+    "FAILED",
+]
+
+
 @dataclass(frozen=True, slots=True)
 class ReplayCheckpoint:
     replay_session_id: UUID
     command: ReplayCommandV1
-    state: Literal["RUNNING", "PAUSED", "STOPPED", "COMPLETED", "FAILED"]
+    state: ReplayCheckpointState
     last_sequence: int
     source_timestamp: datetime | None
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,7 +229,7 @@ class RuntimeStore:
     def record_replay_checkpoint(
         self,
         command: ReplayCommandV1,
-        state: str,
+        state: ReplayCheckpointState,
         last_sequence: int,
         source_timestamp: datetime | None,
     ) -> None:
@@ -247,6 +257,25 @@ class RuntimeStore:
                 ),
             )
             conn.commit()
+
+    def update_replay_checkpoint_state(
+        self,
+        replay_session_id: UUID,
+        state: ReplayCheckpointState,
+    ) -> None:
+        with psycopg.connect(self.db_url) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE replay_checkpoints
+                SET state = %s, updated_at = now()
+                WHERE replay_session_id = %s;
+                """,
+                (state, str(replay_session_id)),
+            )
+            if cur.rowcount != 1:
+                raise LookupError(f"Replay checkpoint not found: {replay_session_id}")
+            conn.commit()
+
 
     def load_replay_checkpoint(self, replay_session_id: UUID) -> ReplayCheckpoint | None:
         with psycopg.connect(self.db_url, row_factory=dict_row) as conn, conn.cursor() as cur:

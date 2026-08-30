@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from datetime import datetime
+
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -65,7 +67,8 @@ async def test_replay_service_pause_resume_stop_lifecycle(tmp_path: Path) -> Non
     pq_path = _create_mock_parquet(tmp_path, n_rows=20)
     settings = KafkaSettings(bootstrap_servers="localhost:9092")
     source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
-    service = ReplayService(settings, source, enable_pacing=True)
+    store = MagicMock(spec=RuntimeStore)
+    service = ReplayService(settings, source, store=store, enable_pacing=True)
 
     published_status = []
     service.publish_telemetry = AsyncMock()  # type: ignore[method-assign]
@@ -91,6 +94,68 @@ async def test_replay_service_pause_resume_stop_lifecycle(tmp_path: Path) -> Non
     assert any(st.state == "STOPPED" for st in published_status)
 
     await service.stop()
+
+    assert [
+        call.args[1]
+        for call in store.update_replay_checkpoint_state.call_args_list
+    ] == ["PAUSED", "RUNNING", "STOPPED"]
+
+
+@pytest.mark.asyncio
+async def test_paused_checkpoint_waits_until_resume(tmp_path: Path) -> None:
+    source = ReplaySource(
+        _create_mock_parquet(tmp_path, n_rows=10),
+        expected_contract_sha256="b" * 64,
+    )
+    command = make_sample_replay_command(
+        action="START",
+        session_id=uuid4(),
+        speed=1000,
+        range_end=datetime(2020, 3, 1, 1),
+    )
+    first_three = list(source.iter_events(command))[:3]
+    checkpoint = ReplayCheckpoint(
+        replay_session_id=command.replay_session_id,
+        command=command,
+        state="PAUSED",
+        last_sequence=3,
+        source_timestamp=first_three[-1].source_timestamp,
+    )
+    store = MagicMock(spec=RuntimeStore)
+    store.load_incomplete_replays.return_value = (checkpoint,)
+    service = ReplayService(
+        KafkaSettings("localhost:9092"),
+        source,
+        store=store,
+        enable_pacing=False,
+    )
+    telemetry = []
+    service.publish_telemetry = AsyncMock(side_effect=telemetry.append)  # type: ignore[method-assign]
+    service.publish_status = AsyncMock()  # type: ignore[method-assign]
+
+    with (
+        patch("industrial_reliability.replay_service.AIOKafkaProducer") as producer_cls,
+        patch("industrial_reliability.replay_service.AIOKafkaConsumer") as consumer_cls,
+    ):
+        producer_cls.return_value = AsyncMock()
+        consumer_cls.return_value = AsyncMock()
+        await service.start()
+        assert service.active_session is not None
+        await asyncio.sleep(0)
+        assert service.active_session.controller.state == "PAUSED"
+        assert telemetry == []
+
+        resume = make_sample_replay_command(
+            action="RESUME",
+            session_id=command.replay_session_id,
+            speed=1000,
+        )
+        await service.handle_command(resume)
+        await service.active_session.task
+        assert telemetry[0].sequence == 4
+        assert telemetry[0].source_timestamp > first_three[-1].source_timestamp
+        await service.stop()
+
 
 
 @pytest.mark.asyncio

@@ -78,8 +78,11 @@ services:
       KAFKA_CLIENT_ID: industrial-reliability
       REPLAY_PARQUET_PATH: /runtime/data/metropt3/telemetry.parquet
       METRICS_PORT: "9101"
+      DATABASE_URL: postgresql://irp:irp_password@postgres:5432/irp
     depends_on:
       kafka:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   streaming-worker:

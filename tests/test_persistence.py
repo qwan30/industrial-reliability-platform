@@ -16,12 +16,14 @@ from industrial_reliability.alert_state import (
 )
 from industrial_reliability.console_stream import ConsoleEventV1
 from industrial_reliability.persistence import (
+    ReplayCheckpoint,
     RuntimeStore,
     _state_from_payload,
     _state_payload,
 )
 from industrial_reliability.runtime_messages import (
     EvidenceValueV1,
+    ReplayCommandV1,
     ReplayStatusV1,
     ScoreDecisionV1,
 )
@@ -431,3 +433,82 @@ def test_store_append_and_query_console_events() -> None:
         mock_cur.fetchone.return_value = None
         events_unknown = store.events_after(str(session_id), after_event_id="ev-unknown")
         assert events_unknown == ()
+
+
+def test_store_replay_checkpoints() -> None:
+    store = RuntimeStore("postgresql://test:5432/test")
+    session_id = uuid4()
+    cmd = ReplayCommandV1(
+        message_id=uuid4(),
+        replay_session_id=session_id,
+        source_dataset_sha256="a" * 64,
+        contract_sha256="b" * 64,
+        source_timestamp=datetime(2020, 3, 1, 0, 0, 0),
+        emitted_at=datetime.now(UTC),
+        command_id=uuid4(),
+        action="START",
+        speed=1000,
+        range_start=datetime(2020, 3, 1, 0, 0, 0),
+        range_end=datetime(2020, 3, 1, 1, 0, 0),
+    )
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+    # 1. record_replay_checkpoint
+    with patch("psycopg.connect", return_value=mock_conn):
+        store.record_replay_checkpoint(cmd, "RUNNING", 10, datetime(2020, 3, 1, 0, 1, 40))
+        assert mock_cur.execute.called
+        assert mock_conn.commit.called
+        query = mock_cur.execute.call_args[0][0]
+        assert "replay_checkpoints" in query
+        assert "ON CONFLICT" in query
+
+    # 2. load_replay_checkpoint - found
+    mock_cur.fetchone.return_value = {
+        "replay_session_id": str(session_id),
+        "command_payload": cmd.model_dump(mode="json"),
+        "state": "RUNNING",
+        "last_sequence": 10,
+        "source_timestamp": datetime(2020, 3, 1, 0, 1, 40),
+    }
+    with patch("psycopg.connect", return_value=mock_conn):
+        cp = store.load_replay_checkpoint(session_id)
+        assert cp is not None
+        assert isinstance(cp, ReplayCheckpoint)
+        assert cp.replay_session_id == session_id
+        assert cp.command == cmd
+        assert cp.state == "RUNNING"
+        assert cp.last_sequence == 10
+        assert cp.source_timestamp == datetime(2020, 3, 1, 0, 1, 40)
+
+    # 3. load_replay_checkpoint - not found
+    mock_cur.fetchone.return_value = None
+    with patch("psycopg.connect", return_value=mock_conn):
+        assert store.load_replay_checkpoint(uuid4()) is None
+
+    # 4. load_incomplete_replays
+    mock_cur.fetchall.return_value = [
+        {
+            "replay_session_id": str(session_id),
+            "command_payload": cmd.model_dump(mode="json"),
+            "state": "RUNNING",
+            "last_sequence": 10,
+            "source_timestamp": datetime(2020, 3, 1, 0, 1, 40),
+        }
+    ]
+    with patch("psycopg.connect", return_value=mock_conn):
+        incompletes = store.load_incomplete_replays()
+        assert len(incompletes) == 1
+        assert incompletes[0].replay_session_id == session_id
+        query = mock_cur.execute.call_args[0][0]
+        assert "WHERE state IN ('RUNNING', 'PAUSED')" in query
+
+    # 5. count allowed tables includes replay_checkpoints
+    mock_cur.fetchone.return_value = (3,)
+    with patch("psycopg.connect", return_value=mock_conn):
+        cnt = store.count("replay_checkpoints")
+        assert cnt == 3
+

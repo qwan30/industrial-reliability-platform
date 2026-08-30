@@ -22,6 +22,7 @@ from industrial_reliability.kafka_io import (
     encode_message,
 )
 from industrial_reliability.metrics import RuntimeMetrics, start_process_metrics
+from industrial_reliability.persistence import ReplayCheckpoint, RuntimeStore
 from industrial_reliability.replay import (
     ReplayController,
     ReplaySource,
@@ -56,11 +57,13 @@ class ReplayService:
         self,
         settings: KafkaSettings,
         replay_source: ReplaySource,
+        store: RuntimeStore | None = None,
         enable_pacing: bool = True,
         metrics: RuntimeMetrics | None = None,
     ) -> None:
         self.settings = settings
         self.source = replay_source
+        self.store = store
         self.enable_pacing = enable_pacing
         self.metrics = metrics
         self.producer: AIOKafkaProducer | None = None
@@ -88,6 +91,57 @@ class ReplayService:
         if self.metrics is not None:
             self.metrics.set_dependency_ready("kafka", True)
         self._running = True
+
+        if self.store is not None:
+            incomplete = self.store.load_incomplete_replays()
+            if len(incomplete) > 1:
+                raise RuntimeError(
+                    "multiple incomplete replay sessions require operator resolution"
+                )
+            if incomplete:
+                checkpoint = incomplete[0]
+                task = asyncio.create_task(
+                    self.resume_checkpoint(checkpoint),
+                    name=f"replay-resume-{checkpoint.replay_session_id}",
+                )
+                self.active_session = RunningSession(
+                    controller=ReplayController.created(
+                        checkpoint.replay_session_id,
+                        checkpoint.command.source_dataset_sha256,
+                        checkpoint.command.contract_sha256,
+                    ),
+                    task=task,
+                    pause_event=asyncio.Event(),
+                    stop_event=asyncio.Event(),
+                )
+
+    async def resume_checkpoint(self, checkpoint: ReplayCheckpoint) -> None:
+        last_sequence = checkpoint.last_sequence
+        last_timestamp = checkpoint.source_timestamp
+        for event in self.source.iter_events(
+            checkpoint.command,
+            start_sequence=checkpoint.last_sequence + 1,
+            resume_from_timestamp=checkpoint.source_timestamp,
+        ):
+            if last_timestamp is not None and event.source_timestamp <= last_timestamp:
+                continue
+            await self.publish_telemetry(event)
+            last_sequence = event.sequence
+            last_timestamp = event.source_timestamp
+            if self.store is not None:
+                self.store.record_replay_checkpoint(
+                    command=checkpoint.command,
+                    state="RUNNING",
+                    last_sequence=last_sequence,
+                    source_timestamp=last_timestamp,
+                )
+        if self.store is not None:
+            self.store.record_replay_checkpoint(
+                command=checkpoint.command,
+                state="COMPLETED",
+                last_sequence=last_sequence,
+                source_timestamp=last_timestamp,
+            )
 
     async def stop(self) -> None:
         self._running = False
@@ -201,6 +255,9 @@ class ReplayService:
             await self.publish_status(failed.status())
             return
 
+        if self.store is not None:
+            self.store.record_replay_checkpoint(command, "RUNNING", 0, command.range_start)
+
         ctrl = ReplayController.created(
             command.replay_session_id,
             command.source_dataset_sha256,
@@ -311,8 +368,22 @@ class ReplayService:
                 last_seq = event.sequence
 
                 await self.publish_telemetry(event)
+                if self.store is not None:
+                    self.store.record_replay_checkpoint(
+                        command=start_cmd,
+                        state="RUNNING",
+                        last_sequence=last_seq,
+                        source_timestamp=last_ts,
+                    )
 
             ctrl = ctrl.mark_completed(last_seq, last_ts)
+            if self.store is not None:
+                self.store.record_replay_checkpoint(
+                    command=start_cmd,
+                    state="COMPLETED",
+                    last_sequence=last_seq,
+                    source_timestamp=last_ts,
+                )
             await self.publish_status(ctrl.status())
 
         except Exception as err:
@@ -322,6 +393,13 @@ class ReplayService:
                 last_sequence=last_seq,
                 source_timestamp=last_ts,
             )
+            if self.store is not None:
+                self.store.record_replay_checkpoint(
+                    command=start_cmd,
+                    state="FAILED",
+                    last_sequence=last_seq,
+                    source_timestamp=last_ts,
+                )
             await self.publish_status(ctrl.status())
 
 
@@ -430,7 +508,9 @@ def main() -> None:
 
         settings = KafkaSettings.from_env()
         source = ReplaySource(args.parquet.resolve())
-        service = ReplayService(settings, source, metrics=metrics)
+        db_url = os.environ.get("DATABASE_URL")
+        store = RuntimeStore(db_url) if db_url else None
+        service = ReplayService(settings, source, store=store, metrics=metrics)
         asyncio.run(service.run())
 
 

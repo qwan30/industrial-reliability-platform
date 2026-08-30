@@ -210,3 +210,29 @@ def test_replay_source_uses_verified_identity(tmp_path: Path) -> None:
     assert event.source_dataset_sha256 == source.identity.source_dataset_sha256
     assert event.contract_sha256 == source.identity.contract_sha256
 
+
+def test_replay_iter_events_resumes_from_timestamp(tmp_path: Path) -> None:
+    pq_path = _create_mock_parquet(tmp_path, n_rows=10)
+    source = ReplaySource(pq_path, expected_contract_sha256="b" * 64)
+    session_id = uuid4()
+    range_start = datetime(2020, 3, 1, 0, 0, 0)
+    range_end = datetime(2020, 3, 1, 0, 2, 0)
+    cmd = _start_command(session_id, range_start, range_end, speed=1000)
+
+    all_events = list(source.iter_events(cmd))
+    assert len(all_events) == 10
+
+    # Resume from event 3 (index 2)
+    resume_ts = all_events[2].source_timestamp
+    resumed_events = list(
+        source.iter_events(cmd, start_sequence=4, resume_from_timestamp=resume_ts)
+    )
+    assert len(resumed_events) == 7
+    assert resumed_events[0].sequence == 4
+    assert resumed_events[0].source_timestamp > resume_ts
+    assert [e.sequence for e in resumed_events] == [4, 5, 6, 7, 8, 9, 10]
+    assert [e.source_timestamp for e in resumed_events] == [
+        e.source_timestamp for e in all_events[3:]
+    ]
+
+

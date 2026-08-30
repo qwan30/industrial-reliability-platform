@@ -217,8 +217,9 @@ class ReplaySource:
         )
         lower_scalar = pa.scalar(lower_bound, type=ts_col.type)
         upper_scalar = pa.scalar(command.range_end, type=ts_col.type)
+        lower_op = pc.greater if resume_from_timestamp is not None else pc.greater_equal
         mask = pc.and_(
-            pc.greater_equal(ts_col, lower_scalar),
+            lower_op(ts_col, lower_scalar),
             pc.less(ts_col, upper_scalar),
         )
         filtered = table.filter(mask)

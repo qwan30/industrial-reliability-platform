@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
 import psycopg
@@ -16,6 +16,7 @@ from industrial_reliability.alert_state import AlertState, TransitionResult
 from industrial_reliability.console_stream import ConsoleEventV1
 from industrial_reliability.runtime_messages import (
     RcaReportV1,
+    ReplayCommandV1,
     ReplayStatusV1,
     ScoreDecisionV1,
 )
@@ -48,6 +49,15 @@ class ReplaySessionRecord:
     source_timestamp: datetime | None
     error_code: str | None
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayCheckpoint:
+    replay_session_id: UUID
+    command: ReplayCommandV1
+    state: Literal["RUNNING", "PAUSED", "STOPPED", "COMPLETED", "FAILED"]
+    last_sequence: int
+    source_timestamp: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +189,7 @@ class RuntimeStore:
             "console_events",
             "rca_reports",
             "alert_runtime_states",
+            "replay_checkpoints",
         }
         if table_name not in allowed_tables:
             raise ValueError(f"Invalid table name: {table_name}")
@@ -204,6 +215,94 @@ class RuntimeStore:
                 cur.execute(f"SELECT COUNT(*) FROM {table_name}")
             row = cur.fetchone()
             return int(row[0]) if row else 0
+
+    def record_replay_checkpoint(
+        self,
+        command: ReplayCommandV1,
+        state: str,
+        last_sequence: int,
+        source_timestamp: datetime | None,
+    ) -> None:
+        payload_json = json.dumps(command.model_dump(mode="json"))
+        with psycopg.connect(self.db_url) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO replay_checkpoints (
+                    replay_session_id, command_payload, state,
+                    last_sequence, source_timestamp, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, now())
+                ON CONFLICT (replay_session_id) DO UPDATE SET
+                    command_payload = EXCLUDED.command_payload,
+                    state = EXCLUDED.state,
+                    last_sequence = EXCLUDED.last_sequence,
+                    source_timestamp = EXCLUDED.source_timestamp,
+                    updated_at = now();
+                """,
+                (
+                    str(command.replay_session_id),
+                    payload_json,
+                    state,
+                    last_sequence,
+                    source_timestamp,
+                ),
+            )
+            conn.commit()
+
+    def load_replay_checkpoint(self, replay_session_id: UUID) -> ReplayCheckpoint | None:
+        with psycopg.connect(self.db_url, row_factory=dict_row) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT replay_session_id, command_payload, state, last_sequence, source_timestamp
+                FROM replay_checkpoints
+                WHERE replay_session_id = %s;
+                """,
+                (str(replay_session_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            payload = (
+                row["command_payload"]
+                if isinstance(row["command_payload"], dict)
+                else json.loads(row["command_payload"])
+            )
+            command = ReplayCommandV1.model_validate(payload)
+            return ReplayCheckpoint(
+                replay_session_id=UUID(row["replay_session_id"]),
+                command=command,
+                state=row["state"],
+                last_sequence=int(row["last_sequence"]),
+                source_timestamp=row["source_timestamp"],
+            )
+
+    def load_incomplete_replays(self) -> tuple[ReplayCheckpoint, ...]:
+        with psycopg.connect(self.db_url, row_factory=dict_row) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT replay_session_id, command_payload, state, last_sequence, source_timestamp
+                FROM replay_checkpoints
+                WHERE state IN ('RUNNING', 'PAUSED')
+                ORDER BY updated_at ASC;
+                """
+            )
+            results: list[ReplayCheckpoint] = []
+            for row in cur.fetchall():
+                payload = (
+                    row["command_payload"]
+                    if isinstance(row["command_payload"], dict)
+                    else json.loads(row["command_payload"])
+                )
+                command = ReplayCommandV1.model_validate(payload)
+                results.append(
+                    ReplayCheckpoint(
+                        replay_session_id=UUID(row["replay_session_id"]),
+                        command=command,
+                        state=row["state"],
+                        last_sequence=int(row["last_sequence"]),
+                        source_timestamp=row["source_timestamp"],
+                    )
+                )
+            return tuple(results)
 
     def record_replay_status(self, status: ReplayStatusV1) -> None:
         with psycopg.connect(self.db_url) as conn:

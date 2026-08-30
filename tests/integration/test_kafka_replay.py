@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+from datetime import datetime
+from itertools import islice
 from pathlib import Path
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -15,11 +18,15 @@ from industrial_reliability.kafka_io import (
     decode_message,
     encode_message,
 )
+from industrial_reliability.persistence import RuntimeStore
+from industrial_reliability.phase1b_data import sha256_file
 from industrial_reliability.replay import ReplaySource
 from industrial_reliability.replay_service import ReplayService
 from industrial_reliability.runtime_messages import (
     REPLAY_COMMANDS_TOPIC,
+    REPLAY_STATUS_TOPIC,
     TELEMETRY_TOPIC,
+    ReplayStatusV1,
     TelemetryEventV1,
 )
 
@@ -43,7 +50,12 @@ async def test_kafka_replay_end_to_end(tmp_path: Path) -> None:
 
     pq_path = _create_mock_parquet(tmp_path, n_rows=6)
     settings = KafkaSettings(bootstrap_servers="localhost:29092")
-    source = ReplaySource(pq_path)
+    source = ReplaySource(
+        pq_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(pq_path),
+    )
     service = ReplayService(settings, source, enable_pacing=False)
 
     service_task = asyncio.create_task(service.run())
@@ -86,3 +98,171 @@ async def test_kafka_replay_end_to_end(tmp_path: Path) -> None:
         await service.stop()
         with contextlib.suppress(TimeoutError, asyncio.CancelledError):
             await asyncio.wait_for(service_task, timeout=2.0)
+
+
+@pytest.fixture
+def store() -> RuntimeStore:
+    require_live = os.environ.get("REQUIRE_INTEGRATION_SERVICES", "").lower() in ("true", "1")
+    test_db_url = os.environ.get("DATABASE_URL", "postgresql://irp:irp_password@localhost:5432/irp")
+    try:
+        st = RuntimeStore(test_db_url)
+        st.check_connection()
+        migration_sql_001 = Path("db/migrations/001_alert_lifecycle.sql").read_text(
+            encoding="utf-8"
+        )
+        st.execute_script(migration_sql_001)
+        migration_sql_004 = Path("db/migrations/004_alert_runtime_state.sql").read_text(
+            encoding="utf-8"
+        )
+        st.execute_script(migration_sql_004)
+        return st
+    except Exception as exc:
+        if require_live:
+            raise RuntimeError(
+                f"Required integration database unavailable at {test_db_url}: {exc}"
+            ) from exc
+        pytest.skip("PostgreSQL unavailable at " + test_db_url)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_replay_resumes_from_durable_checkpoint(
+    store: RuntimeStore,
+    tmp_path: Path,
+) -> None:
+    parquet_path = _create_mock_parquet(tmp_path, n_rows=50)
+    source = ReplaySource(
+        parquet_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(parquet_path),
+    )
+    command = make_sample_replay_command(
+        action="START",
+        session_id=uuid4(),
+        speed=1000,
+        range_start=datetime(2020, 3, 1),
+        range_end=datetime(2020, 3, 1, 1),
+        source_dataset_sha256=source.identity.source_dataset_sha256,
+        contract_sha256=source.identity.contract_sha256,
+    )
+    first_batch = list(islice(source.iter_events(command), 25))
+    store.record_replay_checkpoint(
+        command=command,
+        state="RUNNING",
+        last_sequence=first_batch[-1].sequence,
+        source_timestamp=first_batch[-1].source_timestamp,
+    )
+    incomplete_replays = [
+        r
+        for r in store.load_incomplete_replays()
+        if r.replay_session_id == command.replay_session_id
+    ]
+    assert len(incomplete_replays) == 1
+    checkpoint = incomplete_replays[0]
+    service = ReplayService(
+        KafkaSettings("localhost:29092"),
+        source,
+        store=store,
+        enable_pacing=False,
+    )
+    service.producer = AsyncMock()
+    await service.resume_checkpoint(checkpoint)
+
+    payloads = [
+        decode_message(call.kwargs["value"], TelemetryEventV1)
+        for call in service.producer.send_and_wait.await_args_list
+        if call.args[0] == TELEMETRY_TOPIC
+    ]
+    assert payloads[0].sequence == 26
+    assert payloads[0].source_timestamp > first_batch[-1].source_timestamp
+    assert [event.sequence for event in payloads] == list(range(26, payloads[-1].sequence + 1))
+    saved = store.load_replay_checkpoint(command.replay_session_id)
+    assert saved is not None
+    assert saved.state == "COMPLETED"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_replay_resume_from_zero_is_lossless_and_terminal(
+    store: RuntimeStore,
+    tmp_path: Path,
+) -> None:
+    parquet_path = _create_mock_parquet(tmp_path, n_rows=6)
+    source = ReplaySource(
+        parquet_path,
+        expected_contract_sha256="b" * 64,
+        expected_source_dataset_sha256="a" * 64,
+        expected_output_sha256=sha256_file(parquet_path),
+    )
+    command = make_sample_replay_command(
+        action="START",
+        session_id=uuid4(),
+        speed=1000,
+        range_start=datetime(2020, 3, 1),
+        range_end=datetime(2020, 3, 1, 0, 1),
+        source_dataset_sha256=source.identity.source_dataset_sha256,
+        contract_sha256=source.identity.contract_sha256,
+    )
+    expected = list(source.iter_events(command))
+    store.record_replay_checkpoint(command, "RUNNING", 0, None)
+    checkpoint = store.load_replay_checkpoint(command.replay_session_id)
+    assert checkpoint is not None
+    service = ReplayService(
+        KafkaSettings("localhost:29092"),
+        source,
+        store=store,
+        enable_pacing=False,
+    )
+    service.producer = AsyncMock()
+
+    await service.resume_checkpoint(checkpoint)
+
+    telemetry = [
+        decode_message(call.kwargs["value"], TelemetryEventV1)
+        for call in service.producer.send_and_wait.await_args_list
+        if call.args[0] == TELEMETRY_TOPIC
+    ]
+    statuses = [
+        decode_message(call.kwargs["value"], ReplayStatusV1)
+        for call in service.producer.send_and_wait.await_args_list
+        if call.args[0] == REPLAY_STATUS_TOPIC
+    ]
+    assert [(event.sequence, event.source_timestamp) for event in telemetry] == [
+        (event.sequence, event.source_timestamp) for event in expected
+    ]
+    assert statuses[-1].state == "COMPLETED"
+    assert statuses[-1].last_sequence == len(expected)
+    saved = store.load_replay_checkpoint(command.replay_session_id)
+    assert saved is not None
+    assert saved.state == "COMPLETED"
+
+
+@pytest.mark.integration
+def test_replay_checkpoint_control_state_is_durable(store: RuntimeStore) -> None:
+    command = make_sample_replay_command(
+        action="START",
+        session_id=uuid4(),
+        speed=1000,
+    )
+    store.record_replay_checkpoint(command, "RUNNING", 0, None)
+
+    store.update_replay_checkpoint_state(command.replay_session_id, "PAUSED")
+    paused = store.load_replay_checkpoint(command.replay_session_id)
+    assert paused is not None
+    assert paused.state == "PAUSED"
+    assert paused.command == command
+    assert any(
+        checkpoint.replay_session_id == command.replay_session_id
+        for checkpoint in store.load_incomplete_replays()
+    )
+
+    store.update_replay_checkpoint_state(command.replay_session_id, "STOPPED")
+    stopped = store.load_replay_checkpoint(command.replay_session_id)
+    assert stopped is not None
+    assert stopped.state == "STOPPED"
+    assert stopped.command == command
+    assert all(
+        checkpoint.replay_session_id != command.replay_session_id
+        for checkpoint in store.load_incomplete_replays()
+    )

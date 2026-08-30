@@ -106,6 +106,7 @@ def _setup_test_champion(base_dir: Path) -> tuple[Path, Path, Path]:
         "active_feature_names": feature_names,
         "contract_sha256": "a" * 64,
         "source_dataset_sha256": "b" * 64,
+        "prepared_output_sha256": "c" * 64,
         "feature_output_sha256": sha256_file(feat_path),
         "artifact_sha256": {
             "scores_parquet": sha256_file(scores_path),

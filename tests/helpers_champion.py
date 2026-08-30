@@ -130,6 +130,7 @@ def create_mock_phase1b_champion_run(base_dir: Path) -> MockChampionRun:
         "active_feature_names": _MOCK_FEATURE_NAMES,
         "contract_sha256": "a" * 64,
         "source_dataset_sha256": "b" * 64,
+        "prepared_output_sha256": "c" * 64,
         "feature_output_sha256": sha256_file(feat_path),
         "artifact_sha256": {
             "scores_parquet": sha256_file(scores_path),
@@ -179,6 +180,7 @@ def build_research_candidate_from_mock_run(base_dir: Path) -> MockResearchCandid
                 "selected_model": None,
                 "contract_sha256": "a" * 64,
                 "source_dataset_sha256": "b" * 64,
+                "prepared_output_sha256": "c" * 64,
                 "feature_output_sha256": sha256_file(mock_run.features_path),
                 "models": {
                     "statistical": {

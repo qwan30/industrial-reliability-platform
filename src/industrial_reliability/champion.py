@@ -55,6 +55,7 @@ class ChampionScorer:
         self.threshold = manifest.threshold
         self.contract_sha256 = manifest.contract_sha256
         self.source_dataset_sha256 = manifest.source_dataset_sha256
+        self.prepared_output_sha256 = manifest.prepared_output_sha256
         self.feature_output_sha256 = manifest.feature_output_sha256
 
     def _validate_identity(self, feature: FeatureVectorV1) -> None:

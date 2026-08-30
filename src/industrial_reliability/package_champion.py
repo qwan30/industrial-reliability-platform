@@ -49,7 +49,7 @@ class ThresholdProvenance(BaseModel):
 
 class ChampionManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    schema_version: Literal["champion-package-v1"] = "champion-package-v1"
+    schema_version: Literal["champion-package-v2"] = "champion-package-v2"
     package_role: Literal["CHAMPION", "RESEARCH_CANDIDATE"] = "CHAMPION"
     evaluation_verdict: Literal["FEASIBLE", "NOT_FEASIBLE"] = "FEASIBLE"
     operational_status: Literal["PRODUCTION_CANDIDATE", "RESEARCH_ONLY"] = "PRODUCTION_CANDIDATE"
@@ -59,7 +59,9 @@ class ChampionManifest(BaseModel):
     model_version: str
     contract_sha256: str = Field(pattern=HEX_64_PATTERN)
     source_dataset_sha256: str = Field(pattern=HEX_64_PATTERN)
+    prepared_output_sha256: str = Field(pattern=HEX_64_PATTERN)
     feature_output_sha256: str = Field(pattern=HEX_64_PATTERN)
+
     feature_names: tuple[str, ...] = Field(min_length=1)
     threshold: float
     threshold_provenance: ThresholdProvenance
@@ -370,13 +372,14 @@ def build_champion_package(
         }
 
         package_manifest = ChampionManifest(
-            schema_version="champion-package-v1",
+            schema_version="champion-package-v2",
             source_champion_schema="phase1b-champion-v1",
             source_run_id=champion["run_id"],
             model_id=champion["model_id"],
             model_version=champion["model_version"],
             contract_sha256=champion["contract_sha256"],
             source_dataset_sha256=champion["source_dataset_sha256"],
+            prepared_output_sha256=champion["prepared_output_sha256"],
             feature_output_sha256=champion["feature_output_sha256"],
             feature_names=tuple(champion["active_feature_names"]),
             threshold=float(champion["threshold"]),
@@ -405,23 +408,49 @@ def build_champion_package(
     )
 
 
-def main() -> None:
+def verify_package_files(package_dir: Path) -> ChampionManifest:
+    resolved = package_dir.resolve()
+    manifest_path = resolved / MANIFEST_FILENAME
+    if not manifest_path.is_file():
+        raise ChampionPackageError(f"{MANIFEST_FILENAME} not found in {resolved}")
+    try:
+        manifest = ChampionManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise ChampionPackageError(f"Invalid package manifest: {e}") from e
+    for name, expected in manifest.artifact_sha256.items():
+        child = _resolve_path(resolved, name)
+        if not child.is_file() or sha256_file(child) != expected:
+            raise ChampionPackageError(f"{name} missing or SHA-256 mismatch")
+    return manifest
+
+
+def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description="Package Phase 1B champion model.")
+    parser.add_argument("--verify-package", type=Path)
+    parser.add_argument("--run-dir", type=Path, help="Directory containing Phase 1B run artifacts")
+    parser.add_argument("--features", type=Path, help="Path to features.parquet")
     parser.add_argument(
-        "--run-dir", type=Path, required=True, help="Directory containing Phase 1B run artifacts"
+        "--output-dir", type=Path, help="Destination directory for champion package"
     )
-    parser.add_argument("--features", type=Path, required=True, help="Path to features.parquet")
-    parser.add_argument(
-        "--output-dir", type=Path, required=True, help="Destination directory for champion package"
-    )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    if args.verify_package is not None:
+        verify_package_files(args.verify_package)
+        print("champion-package-v2 verified")
+        return 0
+
+    if args.run_dir is None or args.features is None or args.output_dir is None:
+        parser.error("--run-dir, --features, and --output-dir are required for build")
 
     result = build_champion_package(args.run_dir, args.features, args.output_dir)
     print(f"Successfully built champion package at {result.output_dir}")
     print(f"Trust anchor manifest SHA-256: {result.manifest_sha256}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    sys.exit(main())

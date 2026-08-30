@@ -307,6 +307,7 @@ def run_phase1b_benchmark(
             "active_feature_names": list(active_features),
             "contract_sha256": feat_manifest["contract_sha256"],
             "source_dataset_sha256": verified_data.source_dataset_sha256,
+            "prepared_output_sha256": verified_data.parquet_sha256,
             "feature_output_sha256": feat_manifest["output_sha256"],
             "artifact_sha256": {
                 "scores_parquet": sha256_file(scores_path),

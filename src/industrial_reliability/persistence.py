@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import psycopg
@@ -71,6 +72,62 @@ class AlertDetailRecord:
     rca: dict[str, Any] | None = None
 
 
+def _state_payload(state: AlertState) -> dict[str, object]:
+    return {
+        "replay_session_id": str(state.replay_session_id),
+        "machine_id": state.machine_id,
+        "active_alert_id": str(state.active_alert_id) if state.active_alert_id is not None else None,
+        "previous_alert_id": str(state.previous_alert_id) if state.previous_alert_id is not None else None,
+        "first_detection": state.first_detection.isoformat() if state.first_detection is not None else None,
+        "last_detection": state.last_detection.isoformat() if state.last_detection is not None else None,
+        "resolved_at": state.resolved_at.isoformat() if state.resolved_at is not None else None,
+        "anomaly_decision_ids": [str(d_id) for d_id in state.anomaly_decision_ids],
+        "anomaly_streak": state.anomaly_streak,
+        "normal_streak": state.normal_streak,
+        "last_decision_id": str(state.last_decision_id) if state.last_decision_id is not None else None,
+        "last_source_timestamp": (
+            state.last_source_timestamp.isoformat() if state.last_source_timestamp is not None else None
+        ),
+    }
+
+
+def _state_from_payload(payload: Mapping[str, object]) -> AlertState:
+    def optional_uuid(name: str) -> UUID | None:
+        val = payload.get(name)
+        if val is None:
+            return None
+        if isinstance(val, UUID):
+            return val
+        return UUID(str(val))
+
+    def optional_datetime(name: str) -> datetime | None:
+        val = payload.get(name)
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            return val
+        return datetime.fromisoformat(str(val))
+
+    raw_ids = payload.get("anomaly_decision_ids", [])
+    ids = cast(list[object], raw_ids) if isinstance(raw_ids, (list, tuple)) else []
+    return AlertState(
+        replay_session_id=UUID(str(payload["replay_session_id"])),
+        machine_id=str(payload["machine_id"]),
+        active_alert_id=optional_uuid("active_alert_id"),
+        previous_alert_id=optional_uuid("previous_alert_id"),
+        first_detection=optional_datetime("first_detection"),
+        last_detection=optional_datetime("last_detection"),
+        resolved_at=optional_datetime("resolved_at"),
+        anomaly_decision_ids=tuple(
+            item if isinstance(item, UUID) else UUID(str(item)) for item in ids
+        ),
+        anomaly_streak=int(cast(int, payload.get("anomaly_streak", 0))),
+        normal_streak=int(cast(int, payload.get("normal_streak", 0))),
+        last_decision_id=optional_uuid("last_decision_id"),
+        last_source_timestamp=optional_datetime("last_source_timestamp"),
+    )
+
+
 class RuntimeStore:
     def __init__(self, db_url: str) -> None:
         self.db_url = db_url
@@ -109,6 +166,7 @@ class RuntimeStore:
             "alert_outbox",
             "console_events",
             "rca_reports",
+            "alert_runtime_states",
         }
         if table_name not in allowed_tables:
             raise ValueError(f"Invalid table name: {table_name}")
@@ -122,6 +180,7 @@ class RuntimeStore:
                     "message_id",
                     "window_id",
                     "report_id",
+                    "machine_id",
                 }
                 if column not in allowed_columns:
                     raise ValueError(f"Invalid column name: {column}")
@@ -189,53 +248,24 @@ class RuntimeStore:
 
     def load_alert_state(self, replay_session_id: UUID, machine_id: str) -> AlertState:
         with psycopg.connect(self.db_url, row_factory=dict_row) as conn, conn.cursor() as cur:
-            # Find current open alert if any
             cur.execute(
                 """
-                SELECT alert_id, state, first_detection, last_detection, resolved_at, latest_decision_id
-                FROM alerts
-                WHERE replay_session_id = %s AND machine_id = %s
-                ORDER BY last_detection DESC
-                LIMIT 1;
+                SELECT payload
+                FROM alert_runtime_states
+                WHERE replay_session_id = %s AND machine_id = %s;
                 """,
                 (str(replay_session_id), machine_id),
             )
-            alert_row = cur.fetchone()
-            if not alert_row:
+            row = cur.fetchone()
+            if not row:
                 return AlertState.empty(replay_session_id, machine_id)
 
-            active_id = UUID(alert_row["alert_id"]) if alert_row["state"] == "OPEN" else None
-            prev_id = UUID(alert_row["alert_id"]) if alert_row["state"] == "RESOLVED" else None
-
-            # Find latest decision timestamp
-            cur.execute(
-                """
-                SELECT decision_id, source_timestamp
-                FROM score_decisions
-                WHERE replay_session_id = %s
-                ORDER BY source_timestamp DESC
-                LIMIT 1;
-                """,
-                (str(replay_session_id),),
+            payload = (
+                row["payload"]
+                if isinstance(row["payload"], dict)
+                else json.loads(row["payload"])
             )
-            last_dec_row = cur.fetchone()
-            last_dec_id = UUID(last_dec_row["decision_id"]) if last_dec_row else None
-            last_ts = last_dec_row["source_timestamp"] if last_dec_row else None
-
-            return AlertState(
-                replay_session_id=replay_session_id,
-                machine_id=machine_id,
-                active_alert_id=active_id,
-                previous_alert_id=prev_id,
-                first_detection=alert_row["first_detection"],
-                last_detection=alert_row["last_detection"],
-                resolved_at=alert_row["resolved_at"],
-                anomaly_decision_ids=(),
-                anomaly_streak=1 if active_id else 0,
-                normal_streak=0,
-                last_decision_id=last_dec_id,
-                last_source_timestamp=last_ts,
-            )
+            return _state_from_payload(payload)
 
     def record_decision_transition(
         self,
@@ -351,6 +381,22 @@ class RuntimeStore:
                         json.dumps(event.model_dump(mode="json")),
                     ),
                 )
+
+            # 4. Upsert alert runtime state
+            cur.execute(
+                """
+                INSERT INTO alert_runtime_states (replay_session_id, machine_id, payload)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (replay_session_id, machine_id) DO UPDATE SET
+                  payload = EXCLUDED.payload,
+                  updated_at = now()
+                """,
+                (
+                    str(result.state.replay_session_id),
+                    result.state.machine_id,
+                    json.dumps(_state_payload(result.state)),
+                ),
+            )
 
             conn.commit()
 

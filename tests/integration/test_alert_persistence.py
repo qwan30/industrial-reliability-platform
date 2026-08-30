@@ -1,5 +1,5 @@
-from __future__ import annotations
-
+from dataclasses import replace
+from datetime import timedelta
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -24,8 +24,10 @@ def store() -> RuntimeStore:
     try:
         store = RuntimeStore(TEST_DB_URL)
         store.check_connection()
-        migration_sql = Path("db/migrations/001_alert_lifecycle.sql").read_text(encoding="utf-8")
-        store.execute_script(migration_sql)
+        migration_sql_001 = Path("db/migrations/001_alert_lifecycle.sql").read_text(encoding="utf-8")
+        store.execute_script(migration_sql_001)
+        migration_sql_004 = Path("db/migrations/004_alert_runtime_state.sql").read_text(encoding="utf-8")
+        store.execute_script(migration_sql_004)
         return store
     except Exception as exc:
         if require_live:
@@ -72,3 +74,30 @@ def test_load_alert_state_recovers_open_alert(store: RuntimeStore) -> None:
     recovered_state = store.load_alert_state(session_id, "metropt3")
     assert recovered_state.active_alert_id == result.event.alert_id
     assert recovered_state.last_decision_id == decision.decision_id
+
+
+@pytest.mark.integration
+def test_two_anomalies_open_one_alert_across_restart(store: RuntimeStore) -> None:
+    session_id = uuid4()
+    policy = replace(_make_policy(), persistence_decisions=2)
+    first = _make_decision(session_id, is_anomaly=True)
+    second = replace(
+        _make_decision(session_id, is_anomaly=True),
+        decision_id=uuid4(),
+        window_id=uuid4(),
+        source_timestamp=first.source_timestamp + timedelta(minutes=5),
+    )
+    result1 = transition(AlertState.empty(session_id, "metropt3"), first, policy)
+    assert result1.event is None
+    store.record_decision_transition(first, result1)
+
+    restarted = RuntimeStore(TEST_DB_URL)
+    recovered = restarted.load_alert_state(session_id, "metropt3")
+    assert recovered.anomaly_streak == 1
+    assert recovered.anomaly_decision_ids == (first.decision_id,)
+
+    result2 = transition(recovered, second, policy)
+    assert result2.event is not None
+    restarted.record_decision_transition(second, result2)
+    assert restarted.count("alerts", "replay_session_id", str(session_id)) == 1
+    assert restarted.count("alert_outbox") == 1

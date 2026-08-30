@@ -548,4 +548,3 @@ def test_update_replay_checkpoint_state_rejects_missing_session() -> None:
         pytest.raises(LookupError, match="Replay checkpoint not found"),
     ):
         store.update_replay_checkpoint_state(uuid4(), "STOPPED")
-

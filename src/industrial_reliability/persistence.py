@@ -69,7 +69,6 @@ class ReplayCheckpoint:
     source_timestamp: datetime | None
 
 
-
 @dataclass(frozen=True, slots=True)
 class AlertSummaryRecord:
     alert_id: UUID
@@ -275,7 +274,6 @@ class RuntimeStore:
             if cur.rowcount != 1:
                 raise LookupError(f"Replay checkpoint not found: {replay_session_id}")
             conn.commit()
-
 
     def load_replay_checkpoint(self, replay_session_id: UUID) -> ReplayCheckpoint | None:
         with psycopg.connect(self.db_url, row_factory=dict_row) as conn, conn.cursor() as cur:

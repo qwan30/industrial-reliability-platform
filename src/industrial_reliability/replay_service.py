@@ -143,7 +143,6 @@ class ReplayService:
                     stop_event=stop_event,
                 )
 
-
     async def resume_checkpoint(
         self,
         checkpoint: ReplayCheckpoint,
@@ -184,7 +183,6 @@ class ReplayService:
                         source_timestamp=last_timestamp,
                     )
 
-
             await pause_event.wait()
             if stop_event.is_set():
                 return
@@ -222,7 +220,6 @@ class ReplayService:
                     source_timestamp=terminal_timestamp,
                 )
             await self.publish_status(ctrl.status())
-
 
     async def stop(self) -> None:
         self._running = False
@@ -475,7 +472,6 @@ class ReplayService:
                     source_timestamp=last_ts,
                 )
             await self.publish_status(ctrl.status())
-
 
         except Exception as err:
             logger.exception("Replay session failed: %s", err)

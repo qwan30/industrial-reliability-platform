@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import sys
 from datetime import datetime
-
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -95,10 +94,11 @@ async def test_replay_service_pause_resume_stop_lifecycle(tmp_path: Path) -> Non
 
     await service.stop()
 
-    assert [
-        call.args[1]
-        for call in store.update_replay_checkpoint_state.call_args_list
-    ] == ["PAUSED", "RUNNING", "STOPPED"]
+    assert [call.args[1] for call in store.update_replay_checkpoint_state.call_args_list] == [
+        "PAUSED",
+        "RUNNING",
+        "STOPPED",
+    ]
 
 
 @pytest.mark.asyncio
@@ -155,7 +155,6 @@ async def test_paused_checkpoint_waits_until_resume(tmp_path: Path) -> None:
         assert telemetry[0].sequence == 4
         assert telemetry[0].source_timestamp > first_three[-1].source_timestamp
         await service.stop()
-
 
 
 @pytest.mark.asyncio
@@ -378,7 +377,6 @@ async def test_resume_failure_records_and_publishes_failed(tmp_path: Path) -> No
     assert failed.kwargs["state"] == "FAILED"
     assert statuses[-1].state == "FAILED"
     assert statuses[-1].error_code == "REPLAY_STREAM_ERROR"
-
 
 
 @pytest.mark.asyncio

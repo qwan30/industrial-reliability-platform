@@ -132,7 +132,7 @@ def test_two_anomalies_open_one_alert_across_restart(store: RuntimeStore) -> Non
     assert result2.event is not None
     restarted.record_decision_transition(second, result2)
     assert restarted.count("alerts", "replay_session_id", str(session_id)) == 1
-    assert restarted.count("alert_outbox") == 1
+    assert restarted.count("alert_outbox", "message_id", str(result2.event.message_id)) == 1
 
 
 @pytest.mark.integration

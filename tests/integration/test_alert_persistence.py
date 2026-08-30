@@ -1,13 +1,17 @@
 import os
-from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import psycopg
 import pytest
-from tests.test_persistence import _make_decision, _make_policy
+from tests.test_persistence import _make_decision
 
+from industrial_reliability.alert_policy import (
+    LockedAlertPolicyV1,
+    compute_policy_sha256,
+)
 from industrial_reliability.alert_state import (
     AlertState,
     transition,
@@ -17,6 +21,28 @@ from industrial_reliability.persistence import (
 )
 
 TEST_DB_URL = os.environ.get("DATABASE_URL", "postgresql://irp:irp_password@localhost:5432/irp")
+
+
+def _make_custom_policy(**kwargs: Any) -> LockedAlertPolicyV1:
+    payload: dict[str, Any] = {
+        "schema_version": "alert-policy-v1",
+        "source_split": "calibration",
+        "source_scores_sha256": "a" * 64,
+        "source_dataset_sha256": "b" * 64,
+        "contract_sha256": "c" * 64,
+        "model_id": "statistical",
+        "model_version": "champion-statistical-v1",
+        "threshold": 1.0,
+        "stride_seconds": 300,
+        "persistence_decisions": 1,
+        "cooldown_decisions": 1,
+        "merge_gap_seconds": 300,
+        "calibration_false_episodes_per_day": 0.1,
+        "calibration_time_in_alert": 0.01,
+    }
+    payload.update(kwargs)
+    sha = compute_policy_sha256(payload)
+    return LockedAlertPolicyV1(**payload, policy_sha256=sha)
 
 
 @pytest.fixture
@@ -45,7 +71,7 @@ def store() -> RuntimeStore:
 @pytest.mark.integration
 def test_record_transition_is_atomic_and_idempotent(store: RuntimeStore) -> None:
     session_id = uuid4()
-    policy = _make_policy()
+    policy = _make_custom_policy()
     decision = _make_decision(session_id, is_anomaly=True)
     state = AlertState.empty(session_id, "metropt3")
 
@@ -68,7 +94,7 @@ def test_record_transition_is_atomic_and_idempotent(store: RuntimeStore) -> None
 @pytest.mark.integration
 def test_load_alert_state_recovers_open_alert(store: RuntimeStore) -> None:
     session_id = uuid4()
-    policy = _make_policy()
+    policy = _make_custom_policy()
     decision = _make_decision(session_id, is_anomaly=True)
     state = AlertState.empty(session_id, "metropt3")
 
@@ -84,13 +110,14 @@ def test_load_alert_state_recovers_open_alert(store: RuntimeStore) -> None:
 @pytest.mark.integration
 def test_two_anomalies_open_one_alert_across_restart(store: RuntimeStore) -> None:
     session_id = uuid4()
-    policy = replace(_make_policy(), persistence_decisions=2)
+    policy = _make_custom_policy(persistence_decisions=2)
     first = _make_decision(session_id, is_anomaly=True)
-    second = replace(
-        _make_decision(session_id, is_anomaly=True),
-        decision_id=uuid4(),
-        window_id=uuid4(),
-        source_timestamp=first.source_timestamp + timedelta(minutes=5),
+    second = first.model_copy(
+        update={
+            "decision_id": uuid4(),
+            "window_id": uuid4(),
+            "source_timestamp": first.source_timestamp + timedelta(minutes=5),
+        }
     )
     result1 = transition(AlertState.empty(session_id, "metropt3"), first, policy)
     assert result1.event is None
@@ -115,16 +142,17 @@ def test_load_alert_state_replays_legacy_decisions_exactly(
     decisions_before_upgrade: int,
 ) -> None:
     session_id = uuid4()
-    policy = replace(_make_policy(), persistence_decisions=3, cooldown_decisions=2)
+    policy = _make_custom_policy(persistence_decisions=3, cooldown_decisions=2)
     first = _make_decision(session_id, is_anomaly=True)
     decisions = [first]
     for index in range(1, decisions_before_upgrade):
         decisions.append(
-            replace(
-                first,
-                decision_id=uuid4(),
-                window_id=uuid4(),
-                source_timestamp=first.source_timestamp + timedelta(minutes=5 * index),
+            first.model_copy(
+                update={
+                    "decision_id": uuid4(),
+                    "window_id": uuid4(),
+                    "source_timestamp": first.source_timestamp + timedelta(minutes=5 * index),
+                }
             )
         )
     state = AlertState.empty(session_id, "metropt3")

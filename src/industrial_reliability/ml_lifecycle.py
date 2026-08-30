@@ -78,13 +78,13 @@ if TYPE_CHECKING:
     import mlflow
     import mlflow.pyfunc
     from mlflow import MlflowClient
-    from mlflow.pyfunc import PythonModel  # type: ignore[attr-defined]
+    from mlflow.pyfunc.model import PythonModel
 else:
     try:
         import mlflow
         import mlflow.pyfunc
         from mlflow import MlflowClient
-        from mlflow.pyfunc import PythonModel
+        from mlflow.pyfunc.model import PythonModel
     except ImportError:
         mlflow = None
         MlflowClient = None

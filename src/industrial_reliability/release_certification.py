@@ -29,6 +29,13 @@ _CURRENT_SCHEMAS = frozenset(
     }
 )
 
+_AUTHORITATIVE_PHASE1B_METRICS_PATH = (
+    Path(__file__).resolve().parents[2] / "docs" / "results" / "phase-1b-metrics.json"
+)
+_AUTHORITATIVE_PHASE1B_METRICS_SHA256 = (
+    "4a948d8d1079952ea4d7af46dd4bf582f82e751fec5422748aad751d81813a4b"
+)
+
 _P8_EVIDENCE_SPECS = {
     "phase-8-live-fault-drills.json": (
         "phase8-live-fault-drills-v1",
@@ -83,6 +90,21 @@ def _report_matches_git_sha(data: dict[str, Any], git_sha: str) -> bool:
     if "git_sha" in data:
         return data.get("git_sha") == git_sha
     return data.get("schema_version") not in _CURRENT_SCHEMAS
+
+def _verify_authoritative_phase1b_artifact(candidate: Path) -> bool:
+    """Require the candidate to match the separately trusted published artifact."""
+    try:
+        canonical_bytes = _AUTHORITATIVE_PHASE1B_METRICS_PATH.read_bytes()
+        candidate_bytes = candidate.read_bytes()
+    except OSError:
+        return False
+
+    canonical_hash = hashlib.sha256(canonical_bytes).hexdigest()
+    candidate_hash = hashlib.sha256(candidate_bytes).hexdigest()
+    return hmac.compare_digest(canonical_hash, _AUTHORITATIVE_PHASE1B_METRICS_SHA256) and hmac.compare_digest(
+        candidate_hash,
+        _AUTHORITATIVE_PHASE1B_METRICS_SHA256,
+    )
 
 
 def _verify_phase8_drills(data: dict[str, Any]) -> bool:
@@ -311,56 +333,61 @@ class ReleaseCertificationValidator:
         is_feasible = False
         phase1b_valid = False
         if p1b_file.is_file():
-            data = _load_json_report(p1b_file)
-            if data is not None and data.get("schema_version") == "phase1b-benchmark-v1":
-                # Validate required top-level fields
-                has_req_fields = all(
-                    k in data
-                    for k in (
-                        "run_id",
-                        "contract_sha256",
-                        "source_dataset_sha256",
-                        "models",
-                        "verdict",
-                    )
+            if not _verify_authoritative_phase1b_artifact(p1b_file):
+                limitations.append(
+                    "Phase 1B metrics are not byte-identical to the committed authoritative artifact."
                 )
-                contract_ok = (
-                    isinstance(data.get("contract_sha256"), str)
-                    and len(data["contract_sha256"]) == 64
-                )
-                dataset_ok = (
-                    isinstance(data.get("source_dataset_sha256"), str)
-                    and len(data["source_dataset_sha256"]) == 64
-                )
-                models = data.get("models")
-                models_ok = isinstance(models, dict) and all(
-                    m in models
-                    and isinstance(models[m], dict)
-                    and "feasible" in models[m]
-                    and "event_results" in models[m]
-                    for m in ("statistical", "isolation_forest", "autoencoder")
-                )
-
-                if has_req_fields and contract_ok and dataset_ok and models_ok:
-                    verdict_val = data.get("verdict")
-                    selected_model = data.get("selected_model")
-                    if verdict_val == "NOT FEASIBLE" and selected_model is None:
-                        artifact_hashes["phase1b_metrics"] = hashlib.sha256(
-                            p1b_file.read_bytes()
-                        ).hexdigest()
-                        phase1b_valid = True
-                        phases_passed.append("phase1b_negative_benchmark")
-                        limitations.append(
-                            "Phase 1B offline ML feasibility did not meet event detection/false alarm gates on MetroPT-3 holdout."
+            else:
+                data = _load_json_report(p1b_file)
+                if data is not None and data.get("schema_version") == "phase1b-benchmark-v1":
+                    # Validate required top-level fields
+                    has_req_fields = all(
+                        k in data
+                        for k in (
+                            "run_id",
+                            "contract_sha256",
+                            "source_dataset_sha256",
+                            "models",
+                            "verdict",
                         )
+                    )
+                    contract_ok = (
+                        isinstance(data.get("contract_sha256"), str)
+                        and len(data["contract_sha256"]) == 64
+                    )
+                    dataset_ok = (
+                        isinstance(data.get("source_dataset_sha256"), str)
+                        and len(data["source_dataset_sha256"]) == 64
+                    )
+                    models = data.get("models")
+                    models_ok = isinstance(models, dict) and all(
+                        m in models
+                        and isinstance(models[m], dict)
+                        and "feasible" in models[m]
+                        and "event_results" in models[m]
+                        for m in ("statistical", "isolation_forest", "autoencoder")
+                    )
+
+                    if has_req_fields and contract_ok and dataset_ok and models_ok:
+                        verdict_val = data.get("verdict")
+                        selected_model = data.get("selected_model")
+                        if verdict_val == "NOT FEASIBLE" and selected_model is None:
+                            artifact_hashes["phase1b_metrics"] = hashlib.sha256(
+                                p1b_file.read_bytes()
+                            ).hexdigest()
+                            phase1b_valid = True
+                            phases_passed.append("phase1b_negative_benchmark")
+                            limitations.append(
+                                "Phase 1B offline ML feasibility did not meet event detection/false alarm gates on MetroPT-3 holdout."
+                            )
+                        else:
+                            limitations.append(
+                                "Fabricated or unproven Phase 1B verdict rejected; repository finding is permanently NOT FEASIBLE with selected_model: null."
+                            )
                     else:
                         limitations.append(
-                            "Fabricated or unproven Phase 1B verdict rejected; repository finding is permanently NOT FEASIBLE with selected_model: null."
+                            "Phase 1B metrics missing required model breakdowns or SHA hashes."
                         )
-                else:
-                    limitations.append(
-                        "Phase 1B metrics missing required model breakdowns or SHA hashes."
-                    )
         if not phase1b_valid and not any("Phase 1B" in lim for lim in limitations):
             limitations.append("Phase 1B metrics missing or invalid schema; phase not certified.")
 

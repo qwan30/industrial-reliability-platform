@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,13 @@ def _write_self_hashed_report(
 
 
 def _write_phase1b_metrics(tmp_path: Path, verdict: str = "NOT FEASIBLE") -> None:
+    if verdict == "NOT FEASIBLE":
+        shutil.copyfile(
+            Path(__file__).resolve().parents[1] / "docs" / "results" / "phase-1b-metrics.json",
+            tmp_path / "phase-1b-metrics.json",
+        )
+        return
+
     models = {
         "statistical": {
             "threshold": 3500.0,
@@ -372,6 +380,24 @@ def test_validator_rejects_fabricated_feasible_phase1b(tmp_path: Path) -> None:
     assert report.verdict == "INVALID"
     assert report.is_certified is False
 
+
+
+def test_validator_rejects_fabricated_negative_phase1b(tmp_path: Path) -> None:
+    canonical = Path(__file__).resolve().parents[1] / "docs" / "results" / "phase-1b-metrics.json"
+    fabricated = json.loads(canonical.read_text(encoding="utf-8"))
+    fabricated["run_id"] = "fabricated"
+    (tmp_path / "phase-1b-metrics.json").write_text(
+        json.dumps(fabricated),
+        encoding="utf-8",
+    )
+    _write_passing_phase8_report(tmp_path)
+    _write_passing_phase9_report(tmp_path)
+
+    report = ReleaseCertificationValidator(artifact_dir=tmp_path).evaluate(git_sha="a" * 40)
+
+    assert "phase1b_negative_benchmark" not in report.phases_passed
+    assert report.verdict == "INVALID"
+    assert report.is_certified is False
 
 def test_validator_rejects_failing_phase9_evidence(tmp_path: Path) -> None:
     _write_phase1b_metrics(tmp_path)

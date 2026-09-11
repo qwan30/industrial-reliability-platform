@@ -154,6 +154,7 @@ def _verify_phase9_checks(data: dict[str, Any], provider_mode: str | None) -> bo
 _REQUIRED_DEPENDENCIES: dict[str, set[str]] = {
     "phase8-live-fault-drills-v1": {"kafka", "postgres", "scoring_api"},
     "phase-9-rca-openai-v1": {"openai"},
+    "phase-9-rca-fallback-v1": {"postgres", "scoring_api"},
 }
 
 
@@ -390,26 +391,30 @@ class ReleaseCertificationValidator:
                 "unit-level, or bound to a different commit; phase not certified."
             )
 
-        # 4. Check Phase 9 Grounded RCA
         phase9_valid = False
+        phase9_candidates: list[tuple[str, Path]] = []
         for filename, (schema, verdict_field, passing_val) in _P9_EVIDENCE_SPECS.items():
             candidate = self.artifact_dir / filename
-            if candidate.is_file():
-                expected_mode = _P9_PROVIDER_MODES.get(filename)
-                if _verify_release_evidence(
-                    _load_json_report(candidate),
-                    schema,
-                    verdict_field,
-                    passing_val,
-                    resolved_sha,
-                    expected_provider_mode=expected_mode,
-                ):
-                    phase9_valid = True
-                    phases_passed.append("phase9_grounded_rca")
-                    artifact_hashes["phase9_rca"] = hashlib.sha256(
-                        candidate.read_bytes()
-                    ).hexdigest()
-                break
+            if candidate.is_file() and _verify_release_evidence(
+                _load_json_report(candidate),
+                schema,
+                verdict_field,
+                passing_val,
+                resolved_sha,
+                expected_provider_mode=_P9_PROVIDER_MODES.get(filename),
+            ):
+                phase9_candidates.append((filename, candidate))
+
+        if len(phase9_candidates) == 1:
+            filename, candidate = phase9_candidates[0]
+            phase9_valid = True
+            phases_passed.append("phase9_grounded_rca")
+            artifact_hashes["phase9_rca"] = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        elif len(phase9_candidates) > 1:
+            limitations.append(
+                "Phase 9 evidence profiles are ambiguous; exactly one valid provider profile is required."
+            )
+
         if not phase9_valid:
             limitations.append(
                 "Phase 9 grounded-RCA evidence missing, failing, unreadable, tampered, "

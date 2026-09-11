@@ -204,7 +204,7 @@ def _write_passing_phase9_report(
         ]
         filename = "phase-9-rca-fallback.json"
         schema = "phase-9-rca-fallback-v1"
-        default_receipts = []
+        default_receipts = [{"dependency": "postgres"}, {"dependency": "scoring_api"}]
 
     _write_self_hashed_report(
         tmp_path / filename,
@@ -618,6 +618,57 @@ def test_validator_rejects_phase9_live_missing_openai_receipt(tmp_path: Path) ->
     assert "phase9_grounded_rca" not in report.phases_passed
     assert report.verdict == "INVALID"
     assert report.is_certified is False
+
+def test_validator_rejects_fallback_without_runtime_dependency_receipts(tmp_path: Path) -> None:
+    _write_phase1b_metrics(tmp_path)
+    _write_passing_phase8_report(tmp_path)
+    _write_passing_phase9_report(
+        tmp_path,
+        evidence_level="INTEGRATION",
+        provider_mode="FALLBACK_ONLY",
+        dependency_receipts=[],
+    )
+
+    report = ReleaseCertificationValidator(artifact_dir=tmp_path).evaluate(git_sha="a" * 40)
+
+    assert "phase9_grounded_rca" not in report.phases_passed
+    assert report.verdict == "INVALID"
+    assert report.is_certified is False
+
+
+def test_validator_does_not_let_invalid_openai_profile_shadow_valid_fallback(
+    tmp_path: Path,
+) -> None:
+    _write_phase1b_metrics(tmp_path)
+    _write_passing_phase8_report(tmp_path)
+    (tmp_path / "phase-9-rca-openai.json").write_text("not-json{{", encoding="utf-8")
+    _write_passing_phase9_report(
+        tmp_path,
+        evidence_level="INTEGRATION",
+        provider_mode="FALLBACK_ONLY",
+    )
+
+    report = ReleaseCertificationValidator(artifact_dir=tmp_path).evaluate(git_sha="a" * 40)
+
+    assert "phase9_grounded_rca" in report.phases_passed
+    assert report.is_certified is True
+
+
+def test_validator_rejects_ambiguous_valid_phase9_profiles(tmp_path: Path) -> None:
+    _write_phase1b_metrics(tmp_path)
+    _write_passing_phase8_report(tmp_path)
+    _write_passing_phase9_report(tmp_path, provider_mode="LIVE_OPENAI")
+    _write_passing_phase9_report(
+        tmp_path,
+        evidence_level="INTEGRATION",
+        provider_mode="FALLBACK_ONLY",
+    )
+
+    report = ReleaseCertificationValidator(artifact_dir=tmp_path).evaluate(git_sha="a" * 40)
+
+    assert "phase9_grounded_rca" not in report.phases_passed
+    assert any("ambiguous" in limitation.lower() for limitation in report.limitations)
+    assert report.verdict == "INVALID"
 
 
 @pytest.mark.parametrize("receipts", [None, "openai", {}, ["openai"]])

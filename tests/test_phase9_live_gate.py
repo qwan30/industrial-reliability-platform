@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import Mock
+from urllib.request import Request
 
 import pytest
 
@@ -11,6 +13,7 @@ from industrial_reliability.phase9_live_gate import (
     Phase9LiveGate,
     ProviderCallReceipt,
     check_live_openai_generation,
+    check_persisted_rca_round_trip,
     main,
     run_phase9_live_gate,
 )
@@ -38,8 +41,15 @@ def test_phase9_live_gate_fallback_mode(tmp_path: Path, monkeypatch: pytest.Monk
     assert compute_self_hash(report, "report_sha256") == report["report_sha256"]
 
 
-def test_phase9_live_gate_live_openai_mode(tmp_path: Path) -> None:
-    gate = Phase9LiveGate(api_key="sk-test-key-mock", model="gpt-4o-mini")
+def test_phase9_live_gate_live_openai_mode() -> None:
+    gate = Phase9LiveGate(
+        provider_receipt=ProviderCallReceipt(
+            dependency="openai",
+            model="gpt-4o-mini",
+            report_id="rca-live-123",
+            evidence_bundle_sha256="0" * 64,
+        )
+    )
     assert gate.provider_mode == "LIVE_OPENAI"
 
     passed = gate.run_all_checks()
@@ -47,7 +57,7 @@ def test_phase9_live_gate_live_openai_mode(tmp_path: Path) -> None:
     assert len(gate.checks) == 5
 
     git_sha = "d" * 40
-    report = gate.generate_report(git_sha=git_sha, evidence_level="LIVE")
+    report = gate.generate_report(git_sha=git_sha)
     assert report["schema_version"] == "phase-9-rca-openai-v1"
     assert report["evidence_level"] == "LIVE"
     assert report["provider_mode"] == "LIVE_OPENAI"
@@ -55,6 +65,14 @@ def test_phase9_live_gate_live_openai_mode(tmp_path: Path) -> None:
     assert report["git_sha"] == git_sha
     assert len(report["report_sha256"]) == 64
     assert report["simulated_components"]
+
+
+def test_phase9_report_rejects_evidence_relabeling() -> None:
+    gate = Phase9LiveGate()
+    gate.run_all_checks()
+
+    with pytest.raises(TypeError):
+        gate.generate_report(git_sha="a" * 40, evidence_level="LIVE")
 
 
 @pytest.mark.parametrize("invalid_sha", ["0" * 40, "abc", "G" * 40, ""])
@@ -74,11 +92,18 @@ def test_phase9_live_gate_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert (out_dir / "phase-9-rca-fallback.md").exists()
 
 
-def test_phase9_live_gate_cli_openai_suffix(tmp_path: Path) -> None:
-    gate = Phase9LiveGate(api_key="sk-test-key-mock", model="gpt-4o-mini")
+def test_phase9_live_gate_cli_openai_suffix() -> None:
+    gate = Phase9LiveGate(
+        provider_receipt=ProviderCallReceipt(
+            dependency="openai",
+            model="gpt-4o-mini",
+            report_id="rca-live-789",
+            evidence_bundle_sha256="4" * 64,
+        )
+    )
     assert gate.provider_mode == "LIVE_OPENAI"
     gate.run_all_checks()
-    report = gate.generate_report(git_sha="f" * 40, evidence_level="LIVE")
+    report = gate.generate_report(git_sha="f" * 40)
     assert report["schema_version"] == "phase-9-rca-openai-v1"
     assert report["evidence_level"] == "LIVE"
 
@@ -130,6 +155,27 @@ def test_live_key_creates_live_receipt(tmp_path: Path, monkeypatch: pytest.Monke
         }
     ]
 
+def test_runtime_verification_failure_cannot_publish_release_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "industrial_reliability.phase9_live_gate.check_persisted_rca_round_trip",
+        Mock(side_effect=RuntimeError("database unavailable")),
+    )
+
+    report = run_phase9_live_gate(
+        output_dir=tmp_path,
+        git_sha="a" * 40,
+        base_url="http://scoring-api:8000",
+        alert_id="alert-123",
+    )
+
+    assert report["evidence_level"] == "IN_PROCESS"
+    assert report["verdict"] == "FAIL"
+    assert report["simulated_components"]
+    assert any(check["name"] == "persisted_rca_round_trip" for check in report["checks"])
+
 
 def test_check_live_openai_generation_success(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_report = Mock(
@@ -176,3 +222,108 @@ def test_check_live_openai_generation_failure(monkeypatch: pytest.MonkeyPatch) -
 
     with pytest.raises(RuntimeError, match="provider did not return a complete grounded report"):
         check_live_openai_generation("sk-test", "gpt-4o-mini")
+
+def test_persisted_rca_round_trip_returns_runtime_receipts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report = {
+        "report_id": "rca-persisted-123",
+        "status": "COMPLETE",
+        "evidence_bundle_sha256": "a" * 64,
+        "provider_model": "gpt-4o-mini",
+    }
+    responses = iter(
+        [
+            {"success": True, "data": report, "error": None},
+            {"success": True, "data": {"rca": report}, "error": None},
+        ]
+    )
+
+    class _Response:
+        status = 200
+
+        def __init__(self, payload: dict[str, object]) -> None:
+            self.payload = payload
+
+        def __enter__(self) -> _Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(self.payload).encode("utf-8")
+
+    def fake_urlopen(request: Request, timeout: float) -> _Response:
+        assert timeout == 7.0
+        if request.get_method() == "POST":
+            assert request.full_url == "http://scoring-api:8000/v1/alerts/alert-123/rca"
+        else:
+            assert request.get_method() == "GET"
+            assert request.full_url == "http://scoring-api:8000/v1/alerts/alert-123"
+        return _Response(next(responses))
+
+    monkeypatch.setattr("industrial_reliability.phase9_live_gate.urlopen", fake_urlopen)
+
+    receipt, dependencies = check_persisted_rca_round_trip(
+        "http://scoring-api:8000/",
+        "alert-123",
+        timeout_seconds=7.0,
+    )
+
+    assert receipt == ProviderCallReceipt(
+        dependency="openai",
+        model="gpt-4o-mini",
+        report_id="rca-persisted-123",
+        evidence_bundle_sha256="a" * 64,
+    )
+    assert {item["dependency"] for item in dependencies} == {
+        "postgres",
+        "scoring_api",
+        "openai",
+    }
+
+def test_successful_runtime_round_trip_is_the_only_path_without_simulated_components(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt = ProviderCallReceipt(
+        dependency="openai",
+        model="gpt-4o-mini",
+        report_id="rca-runtime-123",
+        evidence_bundle_sha256="b" * 64,
+    )
+    monkeypatch.setattr(
+        "industrial_reliability.phase9_live_gate.check_persisted_rca_round_trip",
+        Mock(
+            return_value=(
+                receipt,
+                [
+                    {"dependency": "postgres"},
+                    {"dependency": "scoring_api"},
+                    {
+                        "dependency": "openai",
+                        "model": receipt.model,
+                        "report_id": receipt.report_id,
+                        "evidence_bundle_sha256": receipt.evidence_bundle_sha256,
+                    },
+                ],
+            )
+        ),
+    )
+
+    report = run_phase9_live_gate(
+        output_dir=tmp_path,
+        git_sha="a" * 40,
+        base_url="http://scoring-api:8000",
+        alert_id="alert-123",
+    )
+
+    assert report["evidence_level"] == "LIVE"
+    assert report["schema_version"] == "phase-9-rca-openai-v1"
+    assert report["simulated_components"] == []
+    assert {item["dependency"] for item in report["dependency_receipts"]} == {
+        "postgres",
+        "scoring_api",
+        "openai",
+    }

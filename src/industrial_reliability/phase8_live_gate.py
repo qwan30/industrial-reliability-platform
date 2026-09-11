@@ -1,9 +1,9 @@
-"""Phase 8 fault-isolation live certification gate.
+"""Phase 8 fault-isolation in-process evidence gate.
 
-The gate executes fault drills against the streaming worker fault-isolation
-subsystems and publishes verified certification evidence. Reports publish
-``evidence_level: LIVE`` with schema ``phase8-live-fault-drills-v1`` to satisfy
-fail-closed release certification requirements.
+The gate executes the fault drills against isolated in-process doubles and
+publishes a truthful ``evidence_level: IN_PROCESS`` report. It is not a
+dependency-backed release certificate: no Kafka broker, scoring API, or
+PostgreSQL service is contacted by these drill runners.
 """
 
 from __future__ import annotations
@@ -48,15 +48,13 @@ def publish_live_drill_report(
     json_path: Path,
     md_path: Path,
     git_sha: str,
-    evidence_level: str = "IN_PROCESS",
-    schema_version: str = PHASE8_LIVE_SCHEMA,
 ) -> FaultReportV1:
-    """Publish the in-process drill report as JSON + Markdown with truthful evidence level."""
+    """Publish an in-process drill report with a fixed evidence level/schema."""
     report = build_fault_report(
         drills,
         git_sha,
-        evidence_level=evidence_level,
-        schema_version=schema_version,
+        evidence_level="IN_PROCESS",
+        schema_version=PHASE8_LIVE_SCHEMA,
     )
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,7 +67,7 @@ def publish_live_drill_report(
 
 def _render_markdown(report: FaultReportV1) -> str:
     md_lines = [
-        "# Phase 8 Observability & Reliability Live Fault Drill Report",
+        "# Phase 8 Observability & Reliability Fault Drill Report",
         "",
         f"- **Verdict:** `{'PASS' if report.all_passed else 'FAIL'}`",
         f"- **Evidence Level:** `{report.evidence_level}`",
@@ -125,7 +123,6 @@ def run_phase8_live_gate(
         json_path=json_path,
         md_path=md_path,
         git_sha=sha,
-        evidence_level="IN_PROCESS",
     )
 
 

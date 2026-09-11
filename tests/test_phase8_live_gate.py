@@ -55,7 +55,6 @@ def test_publish_live_drill_report(tmp_path: Path) -> None:
         json_path=json_path,
         md_path=md_path,
         git_sha=git_sha,
-        evidence_level="IN_PROCESS",
     )
 
     assert report.all_passed is True
@@ -75,9 +74,19 @@ def test_publish_live_drill_report(tmp_path: Path) -> None:
     assert data["simulated_components"]
 
     md_text = md_path.read_text(encoding="utf-8")
-    assert "Live Fault Drill Report" in md_text
+    assert "Fault Drill Report" in md_text
     assert git_sha in md_text
     assert "Simulated Components" in md_text
+
+def test_publish_live_drill_report_rejects_evidence_relabeling(tmp_path: Path) -> None:
+    with pytest.raises(TypeError):
+        publish_live_drill_report(
+            [],
+            json_path=tmp_path / "report.json",
+            md_path=tmp_path / "report.md",
+            git_sha="a" * 40,
+            evidence_level="LIVE",
+        )
 
 
 @pytest.mark.parametrize("invalid_sha", ["0" * 40, "abc", "G" * 40, ""])

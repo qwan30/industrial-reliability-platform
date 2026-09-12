@@ -82,3 +82,34 @@ def test_deterministic_multi_step_run() -> None:
     assert s2.tick == 40
     for nid, p in s1.pressures_pa.items():
         assert p == s2.pressures_pa[nid]
+
+
+@pytest.mark.asyncio
+async def test_engine_run_once_execution() -> None:
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_pool.connection.return_value.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_cur.fetchone.return_value = None  # Force initial checkpoint creation
+
+    engine = SimulationEngine(mock_pool)
+    engine.store.checkpoint = MagicMock(return_value=True)
+
+    ref_lab = get_reference_lab_definition()
+    from industrial_reliability.lab.contracts import RunSpec, SimulationRun
+
+    run = SimulationRun(
+        run_id=uuid4(),
+        spec=RunSpec(lab_id=ref_lab.lab_id, lab_revision=1, seed=42, speed=1, max_ticks=40),
+        status="RUNNING",
+        definition=ref_lab,
+        definition_digest="digest",
+        scene_digest="scene",
+        profile_digest="profile",
+        sampling_digest="sampling",
+    )
+
+    success = await engine.run_once(run)
+    assert success is True
+    assert engine.store.checkpoint.call_count == 20  # 40 ticks / 2 ticks per batch

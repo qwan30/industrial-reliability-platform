@@ -101,28 +101,72 @@ def _write_passing_phase8_report(
 ) -> None:
     drills = [
         {
-            "drill_type": "scoring-outage",
+            "drill_type": "broker-interruption",
             "expected_classification": "SERVICE",
             "actual_classification": "SERVICE",
             "passed": True,
-            "deltas": {"score_unavailable_delta": 1.0},
-            "evidence_summary": "Scoring unavailable detected",
+            "recovery_seconds": 0.5,
+            "messages_before": 10,
+            "messages_after": 10,
+            "committed_offset_before": 100,
+            "committed_offset_after": 110,
+            "lost_messages": 0,
+            "duplicate_messages": 0,
+            "quarantine_messages": 0,
+            "alert_persisted": False,
+            "alert_id": None,
+            "evidence_summary": "Kafka restart recovered with no message loss or duplication.",
+        },
+        {
+            "drill_type": "database-interruption",
+            "expected_classification": "SERVICE",
+            "actual_classification": "SERVICE",
+            "passed": True,
+            "recovery_seconds": 0.5,
+            "messages_before": 10,
+            "messages_after": 10,
+            "committed_offset_before": 100,
+            "committed_offset_after": 110,
+            "lost_messages": 0,
+            "duplicate_messages": 0,
+            "quarantine_messages": 0,
+            "alert_persisted": False,
+            "alert_id": None,
+            "evidence_summary": "Postgres restart recovered with all alerts persisted uniquely.",
         },
         {
             "drill_type": "malformed-telemetry",
             "expected_classification": "DATA",
             "actual_classification": "DATA",
             "passed": True,
-            "deltas": {"telemetry_quarantined_delta": 1.0},
-            "evidence_summary": "Telemetry quarantined",
+            "recovery_seconds": 0.1,
+            "messages_before": 0,
+            "messages_after": 0,
+            "committed_offset_before": None,
+            "committed_offset_after": None,
+            "lost_messages": 0,
+            "duplicate_messages": 0,
+            "quarantine_messages": 1,
+            "alert_persisted": False,
+            "alert_id": None,
+            "evidence_summary": "Malformed telemetry was quarantined without scoring or alerting.",
         },
         {
             "drill_type": "known-abnormal-replay",
             "expected_classification": "MACHINE",
             "actual_classification": "MACHINE",
             "passed": True,
-            "deltas": {"anomaly_decisions_delta": 1.0},
-            "evidence_summary": "Anomaly decision made",
+            "recovery_seconds": 0.1,
+            "messages_before": 10,
+            "messages_after": 10,
+            "committed_offset_before": 100,
+            "committed_offset_after": 110,
+            "lost_messages": 0,
+            "duplicate_messages": 0,
+            "quarantine_messages": 0,
+            "alert_persisted": True,
+            "alert_id": "alert-runtime-1",
+            "evidence_summary": "Known abnormal replay produced a persisted alert with evidence.",
         },
     ]
     _write_self_hashed_report(
@@ -130,6 +174,7 @@ def _write_passing_phase8_report(
         {
             "schema_version": "phase8-live-fault-drills-v1",
             "evidence_level": evidence_level,
+            "provider_mode": "INTEGRATION",
             "simulated_components": [] if simulated_components is None else simulated_components,
             "dependency_receipts": (
                 [
@@ -260,6 +305,24 @@ def test_rejected_phase8_makes_aggregate_invalid(tmp_path: Path) -> None:
     assert "phase8_observability_fault_drills" not in report.phases_passed
 
 
+def test_validator_rejects_relabelled_phase8_drill(tmp_path: Path) -> None:
+    _write_phase1b_metrics(tmp_path)
+    _write_passing_phase8_report(tmp_path)
+    path = tmp_path / "phase-8-live-fault-drills.json"
+    report = json.loads(path.read_text(encoding="utf-8"))
+    report["drills"][0]["expected_classification"] = "MACHINE"
+    report["drills"][0]["actual_classification"] = "MACHINE"
+    report["self_sha256"] = ""
+    report["self_sha256"] = compute_self_hash(report, "self_sha256")
+    path.write_text(json.dumps(report), encoding="utf-8")
+
+    result = ReleaseCertificationValidator(tmp_path).evaluate(git_sha="a" * 40)
+
+    assert result.verdict == "INVALID"
+    assert result.is_certified is False
+    assert "phase8_observability_fault_drills" not in result.phases_passed
+
+
 def test_rejected_phase9_makes_aggregate_invalid(tmp_path: Path) -> None:
     _write_phase1b_metrics(tmp_path)
     _write_passing_phase8_report(tmp_path)
@@ -381,7 +444,6 @@ def test_validator_rejects_fabricated_feasible_phase1b(tmp_path: Path) -> None:
     assert report.is_certified is False
 
 
-
 def test_validator_rejects_fabricated_negative_phase1b(tmp_path: Path) -> None:
     canonical = Path(__file__).resolve().parents[1] / "docs" / "results" / "phase-1b-metrics.json"
     fabricated = json.loads(canonical.read_text(encoding="utf-8"))
@@ -398,6 +460,7 @@ def test_validator_rejects_fabricated_negative_phase1b(tmp_path: Path) -> None:
     assert "phase1b_negative_benchmark" not in report.phases_passed
     assert report.verdict == "INVALID"
     assert report.is_certified is False
+
 
 def test_validator_rejects_failing_phase9_evidence(tmp_path: Path) -> None:
     _write_phase1b_metrics(tmp_path)
@@ -644,6 +707,7 @@ def test_validator_rejects_phase9_live_missing_openai_receipt(tmp_path: Path) ->
     assert "phase9_grounded_rca" not in report.phases_passed
     assert report.verdict == "INVALID"
     assert report.is_certified is False
+
 
 def test_validator_rejects_fallback_without_runtime_dependency_receipts(tmp_path: Path) -> None:
     _write_phase1b_metrics(tmp_path)

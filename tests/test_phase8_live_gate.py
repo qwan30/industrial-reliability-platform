@@ -7,10 +7,11 @@ from pathlib import Path
 
 import pytest
 
+import industrial_reliability.phase8_live_gate as phase8_live_gate
 from industrial_reliability.fault_report import DrillMetricDeltasV1, DrillResultV1
 from industrial_reliability.phase8_live_gate import (
-    PHASE8_LIVE_SCHEMA,
     PHASE8_REPORT_BASENAME,
+    LiveFaultReportV1,
     execute_live_drills,
     main,
     publish_live_drill_report,
@@ -58,16 +59,16 @@ def test_publish_live_drill_report(tmp_path: Path) -> None:
     )
 
     assert report.all_passed is True
-    assert report.evidence_level == "IN_PROCESS"
+    assert report.evidence_level == "UNIT"
     assert report.verdict == "PASS"
     assert report.git_sha == git_sha
-    assert report.schema_version == PHASE8_LIVE_SCHEMA
+    assert report.schema_version == "phase8-fault-report-v1"
     assert len(report.self_sha256) == 64
     assert report.simulated_components
 
     data = json.loads(json_path.read_text(encoding="utf-8"))
-    assert data["schema_version"] == PHASE8_LIVE_SCHEMA
-    assert data["evidence_level"] == "IN_PROCESS"
+    assert data["schema_version"] == "phase8-fault-report-v1"
+    assert data["evidence_level"] == "UNIT"
     assert data["verdict"] == "PASS"
     assert data["git_sha"] == git_sha
     assert data["self_sha256"] == report.self_sha256
@@ -77,6 +78,7 @@ def test_publish_live_drill_report(tmp_path: Path) -> None:
     assert "Fault Drill Report" in md_text
     assert git_sha in md_text
     assert "Simulated Components" in md_text
+
 
 def test_publish_live_drill_report_rejects_evidence_relabeling(tmp_path: Path) -> None:
     with pytest.raises(TypeError):
@@ -112,14 +114,96 @@ async def test_execute_live_drills() -> None:
     assert results[2].actual_classification == "MACHINE"
 
 
-def test_phase8_live_gate_cli(tmp_path: Path) -> None:
+def test_phase8_live_gate_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "industrial_reliability.phase8_live_gate._runtime_preflight",
+        lambda: (("runtime prerequisites unavailable",), ()),
+    )
     out_dir = tmp_path / "live_out"
     code = main(["--output-dir", str(out_dir), "--git-sha", "b" * 40])
-    assert code == 0
+    assert code == 1
     assert (out_dir / "phase-8-live-fault-drills.json").exists()
     assert (out_dir / "phase-8-live-fault-drills.md").exists()
 
 
-def test_phase8_in_process_gate_cannot_claim_integration(tmp_path: Path) -> None:
+def test_request_status_accepts_plaintext_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+    class PlaintextResponse:
+        status = 200
+
+        def __enter__(self) -> PlaintextResponse:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        phase8_live_gate,
+        "urlopen",
+        lambda *_args, **_kwargs: PlaintextResponse(),
+    )
+
+    phase8_live_gate._request_status("GET", "http://127.0.0.1:9090/-/ready")
+
+
+def test_phase8_runtime_runner_is_blocked_without_dependencies(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "industrial_reliability.phase8_live_gate._runtime_preflight",
+        lambda: (("runtime prerequisites unavailable",), ()),
+    )
     report = run_phase8_live_gate(output_dir=tmp_path, git_sha="a" * 40)
-    assert report.evidence_level == "IN_PROCESS"
+
+    assert isinstance(report, LiveFaultReportV1)
+    assert report.evidence_level == "INTEGRATION"
+    assert report.verdict == "BLOCKED"
+    assert report.all_passed is False
+    assert report.drills == ()
+
+
+def test_broker_interruption_waits_for_active_replay(monkeypatch: pytest.MonkeyPatch) -> None:
+    states = iter(({"state": "CREATED"}, {"state": "RUNNING"}))
+    monkeypatch.setattr(
+        phase8_live_gate,
+        "_replay_status",
+        lambda _api_url, _session_id: next(states),
+    )
+    monkeypatch.setattr(phase8_live_gate.time, "sleep", lambda _seconds: None)
+
+    phase8_live_gate._wait_for_replay_active("http://127.0.0.1:8000", "session-1")
+
+
+def test_malformed_telemetry_requires_worker_health(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = {
+        "accepted": 1,
+        "duplicate": 0,
+        "quarantine": 0,
+        "score_ok": 1,
+        "score_unavailable": 0,
+        "anomaly": 1,
+        "alerts": 1,
+    }
+    after = {**before, "quarantine": 1}
+    counters = iter((before, after))
+    monkeypatch.setattr(phase8_live_gate, "_runtime_counters", lambda _url: next(counters))
+
+    async def publish_malformed() -> bool:
+        return True
+
+    monkeypatch.setattr(phase8_live_gate, "_publish_malformed_telemetry", publish_malformed)
+    monkeypatch.setattr(
+        phase8_live_gate,
+        "_compose_service_healthy",
+        lambda _service: False,
+    )
+    monkeypatch.setattr(phase8_live_gate.time, "sleep", lambda _seconds: None)
+
+    result = phase8_live_gate._run_malformed_telemetry(
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:9090",
+    )
+
+    assert result.passed is False

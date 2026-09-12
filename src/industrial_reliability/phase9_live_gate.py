@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -30,14 +31,13 @@ from industrial_reliability.rca_gate_checks import (
 )
 from industrial_reliability.rca_openai import OpenAiRcaGenerator, evidence_only_report
 from industrial_reliability.report_hashes import resolve_git_sha
+from industrial_reliability.runtime_messages import RcaReportV1
 
 logger = logging.getLogger(__name__)
 
 PHASE9_RCA_SCHEMA_LIVE = "phase-9-rca-openai-v1"
 PHASE9_RCA_SCHEMA_FALLBACK = "phase-9-rca-fallback-v1"
-PHASE9_SIMULATED_COMPONENTS = (
-    "alert store (in-process double)",
-)
+PHASE9_SIMULATED_COMPONENTS = ("alert store (in-process double)",)
 PHASE9_OPERATIONAL_INVARIANTS = (
     "4 Allowlisted projection tools strictly enforced: `get_alert`, "
     "`get_score_evidence`, `get_model_provenance`, `get_system_health`.",
@@ -55,6 +55,44 @@ class ProviderCallReceipt:
     model: str
     report_id: str
     evidence_bundle_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeployedRcaVerification:
+    provider_mode: Literal["FALLBACK_ONLY", "LIVE_OPENAI"]
+    evidence_level: Literal["INTEGRATION", "LIVE"]
+    schema_version: str
+    provider_receipt: ProviderCallReceipt | None
+    dependency_receipts: tuple[dict[str, Any], ...]
+
+
+def classify_deployed_rca(
+    posted: Mapping[str, Any],
+    stored: Mapping[str, Any],
+) -> tuple[
+    Literal["FALLBACK_ONLY", "LIVE_OPENAI"],
+    Literal["INTEGRATION", "LIVE"],
+    str,
+]:
+    """Classify only a validated, byte-for-byte equivalent deployed report."""
+    try:
+        posted_report = RcaReportV1.model_validate(posted)
+        stored_report = RcaReportV1.model_validate(stored)
+    except Exception as exc:
+        raise ValueError("deployed RCA response is invalid") from exc
+    if posted_report.model_dump(mode="json") != stored_report.model_dump(mode="json"):
+        raise ValueError("deployed RCA POST/GET identity mismatch")
+    if (
+        not posted_report.alert_id
+        or "Anomaly evidence does not prove a mechanical root cause."
+        not in posted_report.uncertainty
+    ):
+        raise ValueError("deployed RCA response failed grounding checks")
+    if posted_report.status == "COMPLETE" and posted_report.provider_model:
+        return "LIVE_OPENAI", "LIVE", PHASE9_RCA_SCHEMA_LIVE
+    if posted_report.status == "UNAVAILABLE" and posted_report.provider_model is None:
+        return "FALLBACK_ONLY", "INTEGRATION", PHASE9_RCA_SCHEMA_FALLBACK
+    raise ValueError("deployed RCA response does not match a certifiable provider mode")
 
 
 def check_live_openai_generation(api_key: str, model: str) -> ProviderCallReceipt:
@@ -90,43 +128,60 @@ def check_persisted_rca_round_trip(
     alert_id: str,
     *,
     timeout_seconds: float = 20.0,
-) -> tuple[ProviderCallReceipt, list[dict[str, str]]]:
-    """Verify POST COMPLETE is followed by a matching persisted GET."""
+    expected_model: str | None = None,
+) -> DeployedRcaVerification:
+    """Verify POST/GET report identity and derive the deployed provider mode."""
     root = base_url.rstrip("/")
     post_payload = _get_json(
         f"{root}/v1/alerts/{alert_id}/rca",
         timeout_seconds,
         method="POST",
     )
-    if post_payload.get("success") is not True or not isinstance(post_payload.get("data"), dict):
+    posted_payload = post_payload.get("data")
+    if post_payload.get("success") is not True or not isinstance(posted_payload, dict):
         raise RuntimeError("runtime RCA POST did not return a report")
-    posted = post_payload["data"]
-    if posted.get("status") != "COMPLETE":
-        raise RuntimeError("runtime RCA POST did not return COMPLETE")
+    if posted_payload.get("alert_id") != alert_id:
+        raise RuntimeError("runtime RCA POST returned the wrong alert")
 
     detail_payload = _get_json(f"{root}/v1/alerts/{alert_id}", timeout_seconds)
     detail = detail_payload.get("data")
-    persisted = detail.get("rca") if isinstance(detail, dict) else None
-    if not isinstance(persisted, dict):
+    persisted_payload = detail.get("rca") if isinstance(detail, dict) else None
+    if detail_payload.get("success") is not True or not isinstance(persisted_payload, dict):
         raise RuntimeError("runtime RCA GET did not return a persisted report")
-    for field in ("report_id", "evidence_bundle_sha256", "status"):
-        if persisted.get(field) != posted.get(field):
-            raise RuntimeError("runtime RCA POST/GET identity mismatch")
 
-    provider_model = posted.get("provider_model")
-    if not isinstance(provider_model, str) or not provider_model:
-        raise RuntimeError("runtime RCA report has no provider model")
-    receipt = ProviderCallReceipt(
-        dependency="openai",
-        model=provider_model,
-        report_id=str(posted["report_id"]),
-        evidence_bundle_sha256=str(posted["evidence_bundle_sha256"]),
-    )
-    return receipt, [
+    try:
+        classification = classify_deployed_rca(posted_payload, persisted_payload)
+        posted = RcaReportV1.model_validate(posted_payload)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if (
+        expected_model is not None
+        and classification[0] == "LIVE_OPENAI"
+        and posted.provider_model != expected_model
+    ):
+        raise RuntimeError("runtime RCA provider model mismatch")
+
+    receipt: ProviderCallReceipt | None = None
+    dependency_receipts: list[dict[str, Any]] = [
         {"dependency": "postgres"},
         {"dependency": "scoring_api"},
-        asdict(receipt),
     ]
+    if classification[0] == "LIVE_OPENAI":
+        assert posted.provider_model is not None
+        receipt = ProviderCallReceipt(
+            dependency="openai",
+            model=posted.provider_model,
+            report_id=posted.report_id,
+            evidence_bundle_sha256=posted.evidence_bundle_sha256,
+        )
+        dependency_receipts.append(asdict(receipt))
+    return DeployedRcaVerification(
+        provider_mode=classification[0],
+        evidence_level=classification[1],
+        schema_version=classification[2],
+        provider_receipt=receipt,
+        dependency_receipts=tuple(dependency_receipts),
+    )
 
 
 class Phase9LiveGate:
@@ -244,22 +299,25 @@ class Phase9LiveGate:
     def _generate_runtime_report(
         self,
         git_sha: str,
-        dependency_receipts: list[dict[str, Any]],
+        verification: DeployedRcaVerification,
     ) -> dict[str, Any]:
         """Build release evidence only after the runtime round trip succeeded."""
-        if self.provider_receipt is None:
-            raise RuntimeError("runtime RCA evidence requires a complete provider receipt")
-        dependencies = {item.get("dependency") for item in dependency_receipts}
-        if {"postgres", "scoring_api", "openai"} - dependencies:
+        dependencies = {item.get("dependency") for item in verification.dependency_receipts}
+        if {"postgres", "scoring_api"} - dependencies:
             raise RuntimeError("runtime RCA evidence is missing dependency receipts")
+        if verification.provider_mode == "LIVE_OPENAI":
+            if self.provider_receipt is None or "openai" not in dependencies:
+                raise RuntimeError("runtime RCA live evidence is missing the provider receipt")
+        elif verification.provider_receipt is not None:
+            raise RuntimeError("runtime RCA fallback evidence has an unexpected provider receipt")
         return build_gate_report(
             git_sha=git_sha,
-            schema_version=PHASE9_RCA_SCHEMA_LIVE,
-            evidence_level="LIVE",
-            provider_mode="LIVE_OPENAI",
+            schema_version=verification.schema_version,
+            evidence_level=verification.evidence_level,
+            provider_mode=verification.provider_mode,
             simulated_components=(),
             checks=self.checks,
-            dependency_receipts=dependency_receipts,
+            dependency_receipts=list(verification.dependency_receipts),
         )
 
 
@@ -280,7 +338,7 @@ def run_phase9_live_gate(
     resolved_model = model or os.environ.get("RCA_OPENAI_MODEL", "gpt-4o-mini").strip()
 
     receipt: ProviderCallReceipt | None = None
-    runtime_receipts: list[dict[str, Any]] = []
+    runtime_verification: DeployedRcaVerification | None = None
     runtime_requested = base_url is not None or alert_id is not None
     runtime_error: str | None = None
     if runtime_requested:
@@ -288,10 +346,12 @@ def run_phase9_live_gate(
             runtime_error = "both base_url and alert_id are required for runtime RCA evidence"
         else:
             try:
-                receipt, runtime_receipts = check_persisted_rca_round_trip(
+                runtime_verification = check_persisted_rca_round_trip(
                     base_url,
                     alert_id,
+                    expected_model=resolved_model,
                 )
+                receipt = runtime_verification.provider_receipt
             except Exception:
                 logger.exception("Runtime RCA persistence verification failed")
                 runtime_error = "runtime RCA persistence verification failed"
@@ -310,8 +370,11 @@ def run_phase9_live_gate(
     if runtime_error is not None:
         gate.record_check("persisted_rca_round_trip", False, runtime_error)
     report = (
-        gate._generate_runtime_report(git_sha=sha, dependency_receipts=runtime_receipts)
-        if runtime_error is None and runtime_receipts
+        gate._generate_runtime_report(
+            git_sha=sha,
+            verification=runtime_verification,
+        )
+        if runtime_error is None and runtime_verification is not None
         else gate.generate_report(git_sha=sha)
     )
 

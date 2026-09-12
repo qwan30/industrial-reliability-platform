@@ -24,6 +24,8 @@ def store() -> RuntimeStore:
         store.execute_script(m1)
         m3 = Path("db/migrations/003_rca_reports.sql").read_text(encoding="utf-8")
         store.execute_script(m3)
+        m5 = Path("db/migrations/005_rca_reports_fallback.sql").read_text(encoding="utf-8")
+        store.execute_script(m5)
         return store
     except Exception as exc:
         require_live = os.environ.get("REQUIRE_INTEGRATION_SERVICES", "").lower() in ("true", "1")

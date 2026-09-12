@@ -167,6 +167,7 @@ def test_post_rca_returns_complete_and_persists_report() -> None:
     assert data["summary"] == "High compressor discharge pressure observed."
     assert fake_store.save_complete_rca.called
 
+
 def test_post_rca_returns_retryable_error_when_persistence_fails() -> None:
     alert_id = uuid4()
     fake_store = Mock()

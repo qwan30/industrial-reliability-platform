@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import math
 import re
 import subprocess
 import sys
@@ -43,6 +44,13 @@ _P8_EVIDENCE_SPECS = {
         "PASS",
     )
 }
+_PHASE8_DRILL_CLASSIFICATIONS = {
+    "broker-interruption": "SERVICE",
+    "database-interruption": "SERVICE",
+    "malformed-telemetry": "DATA",
+    "known-abnormal-replay": "MACHINE",
+}
+
 
 _P9_EVIDENCE_SPECS = {
     "phase-9-rca-openai.json": ("phase-9-rca-openai-v1", "verdict", "PASS"),
@@ -91,6 +99,7 @@ def _report_matches_git_sha(data: dict[str, Any], git_sha: str) -> bool:
         return data.get("git_sha") == git_sha
     return data.get("schema_version") not in _CURRENT_SCHEMAS
 
+
 def _verify_authoritative_phase1b_artifact(candidate: Path) -> bool:
     """Require the candidate to match the separately trusted published artifact."""
     try:
@@ -101,34 +110,84 @@ def _verify_authoritative_phase1b_artifact(candidate: Path) -> bool:
 
     canonical_hash = hashlib.sha256(canonical_bytes).hexdigest()
     candidate_hash = hashlib.sha256(candidate_bytes).hexdigest()
-    return hmac.compare_digest(canonical_hash, _AUTHORITATIVE_PHASE1B_METRICS_SHA256) and hmac.compare_digest(
+    return hmac.compare_digest(
+        canonical_hash, _AUTHORITATIVE_PHASE1B_METRICS_SHA256
+    ) and hmac.compare_digest(
         candidate_hash,
         _AUTHORITATIVE_PHASE1B_METRICS_SHA256,
     )
 
 
 def _verify_phase8_drills(data: dict[str, Any]) -> bool:
-    """Validate Phase 8 drills contain required types, non-empty summaries and deltas."""
-    drills = data.get("drills")
-    if not isinstance(drills, list) or len(drills) == 0:
+    """Validate four dependency-backed drills and their runtime observations."""
+    if data.get("provider_mode") != "INTEGRATION":
         return False
-    required_drills = {"scoring-outage", "malformed-telemetry", "known-abnormal-replay"}
+    drills = data.get("drills")
+    if not isinstance(drills, list) or len(drills) != 4:
+        return False
+    required_drills = {
+        "broker-interruption",
+        "database-interruption",
+        "malformed-telemetry",
+        "known-abnormal-replay",
+    }
     present_drills = set()
-    for d in drills:
-        if not isinstance(d, dict):
+    for drill in drills:
+        if not isinstance(drill, dict):
             return False
-        d_type = d.get("drill_type")
-        if not d_type or not d.get("passed"):
+        drill_type = drill.get("drill_type")
+        if drill_type not in required_drills or drill_type in present_drills:
             return False
-        if d.get("expected_classification") != d.get("actual_classification"):
+        expected_classification = _PHASE8_DRILL_CLASSIFICATIONS.get(drill_type)
+        if expected_classification is None:
             return False
-        summary = d.get("evidence_summary")
+        if drill.get("expected_classification") != expected_classification:
+            return False
+        if drill.get("actual_classification") != expected_classification:
+            return False
+        if drill.get("passed") is not True:
+            return False
+        summary = drill.get("evidence_summary")
         if not isinstance(summary, str) or not summary.strip():
             return False
-        if not isinstance(d.get("deltas"), dict):
+        for field in (
+            "messages_before",
+            "messages_after",
+            "lost_messages",
+            "duplicate_messages",
+            "quarantine_messages",
+        ):
+            value = drill.get(field)
+            if type(value) is not int or value < 0:
+                return False
+        recovery = drill.get("recovery_seconds")
+        if (
+            not isinstance(recovery, (int, float))
+            or isinstance(recovery, bool)
+            or not math.isfinite(recovery)
+            or recovery < 0
+        ):
             return False
-        present_drills.add(d_type)
-    return required_drills.issubset(present_drills)
+        for field in ("committed_offset_before", "committed_offset_after"):
+            value = drill.get(field)
+            if value is not None and (type(value) is not int or value < 0):
+                return False
+        offset_before = drill.get("committed_offset_before")
+        offset_after = drill.get("committed_offset_after")
+        if offset_before is not None and offset_after is not None and offset_after < offset_before:
+            return False
+        alert_persisted = drill.get("alert_persisted")
+        if alert_persisted is not None and not isinstance(alert_persisted, bool):
+            return False
+        alert_id = drill.get("alert_id")
+        if alert_id is not None and (not isinstance(alert_id, str) or not alert_id.strip()):
+            return False
+        if drill_type == "known-abnormal-replay" and (
+            alert_persisted is not True or alert_id is None
+        ):
+            return False
+        present_drills.add(drill_type)
+    return present_drills == required_drills
 
 
 def _verify_phase9_checks(data: dict[str, Any], provider_mode: str | None) -> bool:

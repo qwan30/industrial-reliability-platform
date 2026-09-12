@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
@@ -15,6 +16,8 @@ from industrial_reliability.fault_report import (
     publish_drill_report,
 )
 from industrial_reliability.metrics import build_runtime_metrics
+from industrial_reliability.phase8_live_gate import run_phase8_live_gate
+from industrial_reliability.report_hashes import compute_self_hash, resolve_git_sha
 from industrial_reliability.runtime_messages import (
     CoverageEvidenceV1,
     EvidenceValueV1,
@@ -209,3 +212,32 @@ async def test_in_process_phase8_fault_drills_matrix(tmp_path: Path) -> None:
         git_sha="a" * 40,
     )
     assert report.all_passed is True
+
+
+@pytest.mark.integration
+def test_runtime_phase8_fault_drills_require_compose(
+    tmp_path: Path,
+) -> None:
+    if os.environ.get("REQUIRE_RUNTIME_DEPS") != "1":
+        pytest.skip("runtime Compose stack is opt-in")
+
+    git_sha = resolve_git_sha(None)
+    report = run_phase8_live_gate(output_dir=tmp_path, git_sha=git_sha)
+    payload = report.to_dict()
+
+    assert report.verdict == "PASS"
+    assert report.evidence_level == "INTEGRATION"
+    assert report.git_sha == git_sha
+    assert compute_self_hash(payload, "self_sha256") == report.self_sha256
+    assert {drill.drill_type for drill in report.drills} == {
+        "broker-interruption",
+        "database-interruption",
+        "malformed-telemetry",
+        "known-abnormal-replay",
+    }
+    assert all(drill.passed for drill in report.drills)
+    assert all(drill.lost_messages == 0 for drill in report.drills)
+    assert all(drill.duplicate_messages == 0 for drill in report.drills)
+    abnormal = next(drill for drill in report.drills if drill.drill_type == "known-abnormal-replay")
+    assert abnormal.alert_persisted is True
+    assert abnormal.alert_id

@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import math
 import re
 import subprocess
 import sys
@@ -29,6 +30,13 @@ _CURRENT_SCHEMAS = frozenset(
     }
 )
 
+_AUTHORITATIVE_PHASE1B_METRICS_PATH = (
+    Path(__file__).resolve().parents[2] / "docs" / "results" / "phase-1b-metrics.json"
+)
+_AUTHORITATIVE_PHASE1B_METRICS_SHA256 = (
+    "4a948d8d1079952ea4d7af46dd4bf582f82e751fec5422748aad751d81813a4b"
+)
+
 _P8_EVIDENCE_SPECS = {
     "phase-8-live-fault-drills.json": (
         "phase8-live-fault-drills-v1",
@@ -36,6 +44,13 @@ _P8_EVIDENCE_SPECS = {
         "PASS",
     )
 }
+_PHASE8_DRILL_CLASSIFICATIONS = {
+    "broker-interruption": "SERVICE",
+    "database-interruption": "SERVICE",
+    "malformed-telemetry": "DATA",
+    "known-abnormal-replay": "MACHINE",
+}
+
 
 _P9_EVIDENCE_SPECS = {
     "phase-9-rca-openai.json": ("phase-9-rca-openai-v1", "verdict", "PASS"),
@@ -85,28 +100,94 @@ def _report_matches_git_sha(data: dict[str, Any], git_sha: str) -> bool:
     return data.get("schema_version") not in _CURRENT_SCHEMAS
 
 
-def _verify_phase8_drills(data: dict[str, Any]) -> bool:
-    """Validate Phase 8 drills contain required types, non-empty summaries and deltas."""
-    drills = data.get("drills")
-    if not isinstance(drills, list) or len(drills) == 0:
+def _verify_authoritative_phase1b_artifact(candidate: Path) -> bool:
+    """Require the candidate to match the separately trusted published artifact."""
+    try:
+        canonical_bytes = _AUTHORITATIVE_PHASE1B_METRICS_PATH.read_bytes()
+        candidate_bytes = candidate.read_bytes()
+    except OSError:
         return False
-    required_drills = {"scoring-outage", "malformed-telemetry", "known-abnormal-replay"}
+
+    canonical_hash = hashlib.sha256(canonical_bytes).hexdigest()
+    candidate_hash = hashlib.sha256(candidate_bytes).hexdigest()
+    return hmac.compare_digest(
+        canonical_hash, _AUTHORITATIVE_PHASE1B_METRICS_SHA256
+    ) and hmac.compare_digest(
+        candidate_hash,
+        _AUTHORITATIVE_PHASE1B_METRICS_SHA256,
+    )
+
+
+def _verify_phase8_drills(data: dict[str, Any]) -> bool:
+    """Validate four dependency-backed drills and their runtime observations."""
+    if data.get("provider_mode") != "INTEGRATION":
+        return False
+    drills = data.get("drills")
+    if not isinstance(drills, list) or len(drills) != 4:
+        return False
+    required_drills = {
+        "broker-interruption",
+        "database-interruption",
+        "malformed-telemetry",
+        "known-abnormal-replay",
+    }
     present_drills = set()
-    for d in drills:
-        if not isinstance(d, dict):
+    for drill in drills:
+        if not isinstance(drill, dict):
             return False
-        d_type = d.get("drill_type")
-        if not d_type or not d.get("passed"):
+        drill_type = drill.get("drill_type")
+        if drill_type not in required_drills or drill_type in present_drills:
             return False
-        if d.get("expected_classification") != d.get("actual_classification"):
+        expected_classification = _PHASE8_DRILL_CLASSIFICATIONS.get(drill_type)
+        if expected_classification is None:
             return False
-        summary = d.get("evidence_summary")
+        if drill.get("expected_classification") != expected_classification:
+            return False
+        if drill.get("actual_classification") != expected_classification:
+            return False
+        if drill.get("passed") is not True:
+            return False
+        summary = drill.get("evidence_summary")
         if not isinstance(summary, str) or not summary.strip():
             return False
-        if not isinstance(d.get("deltas"), dict):
+        for field in (
+            "messages_before",
+            "messages_after",
+            "lost_messages",
+            "duplicate_messages",
+            "quarantine_messages",
+        ):
+            value = drill.get(field)
+            if type(value) is not int or value < 0:
+                return False
+        recovery = drill.get("recovery_seconds")
+        if (
+            not isinstance(recovery, (int, float))
+            or isinstance(recovery, bool)
+            or not math.isfinite(recovery)
+            or recovery < 0
+        ):
             return False
-        present_drills.add(d_type)
-    return required_drills.issubset(present_drills)
+        for field in ("committed_offset_before", "committed_offset_after"):
+            value = drill.get(field)
+            if value is not None and (type(value) is not int or value < 0):
+                return False
+        offset_before = drill.get("committed_offset_before")
+        offset_after = drill.get("committed_offset_after")
+        if offset_before is not None and offset_after is not None and offset_after < offset_before:
+            return False
+        alert_persisted = drill.get("alert_persisted")
+        if alert_persisted is not None and not isinstance(alert_persisted, bool):
+            return False
+        alert_id = drill.get("alert_id")
+        if alert_id is not None and (not isinstance(alert_id, str) or not alert_id.strip()):
+            return False
+        if drill_type == "known-abnormal-replay" and (
+            alert_persisted is not True or alert_id is None
+        ):
+            return False
+        present_drills.add(drill_type)
+    return present_drills == required_drills
 
 
 def _verify_phase9_checks(data: dict[str, Any], provider_mode: str | None) -> bool:
@@ -154,6 +235,7 @@ def _verify_phase9_checks(data: dict[str, Any], provider_mode: str | None) -> bo
 _REQUIRED_DEPENDENCIES: dict[str, set[str]] = {
     "phase8-live-fault-drills-v1": {"kafka", "postgres", "scoring_api"},
     "phase-9-rca-openai-v1": {"openai"},
+    "phase-9-rca-fallback-v1": {"postgres", "scoring_api"},
 }
 
 
@@ -310,56 +392,61 @@ class ReleaseCertificationValidator:
         is_feasible = False
         phase1b_valid = False
         if p1b_file.is_file():
-            data = _load_json_report(p1b_file)
-            if data is not None and data.get("schema_version") == "phase1b-benchmark-v1":
-                # Validate required top-level fields
-                has_req_fields = all(
-                    k in data
-                    for k in (
-                        "run_id",
-                        "contract_sha256",
-                        "source_dataset_sha256",
-                        "models",
-                        "verdict",
-                    )
+            if not _verify_authoritative_phase1b_artifact(p1b_file):
+                limitations.append(
+                    "Phase 1B metrics are not byte-identical to the committed authoritative artifact."
                 )
-                contract_ok = (
-                    isinstance(data.get("contract_sha256"), str)
-                    and len(data["contract_sha256"]) == 64
-                )
-                dataset_ok = (
-                    isinstance(data.get("source_dataset_sha256"), str)
-                    and len(data["source_dataset_sha256"]) == 64
-                )
-                models = data.get("models")
-                models_ok = isinstance(models, dict) and all(
-                    m in models
-                    and isinstance(models[m], dict)
-                    and "feasible" in models[m]
-                    and "event_results" in models[m]
-                    for m in ("statistical", "isolation_forest", "autoencoder")
-                )
-
-                if has_req_fields and contract_ok and dataset_ok and models_ok:
-                    verdict_val = data.get("verdict")
-                    selected_model = data.get("selected_model")
-                    if verdict_val == "NOT FEASIBLE" and selected_model is None:
-                        artifact_hashes["phase1b_metrics"] = hashlib.sha256(
-                            p1b_file.read_bytes()
-                        ).hexdigest()
-                        phase1b_valid = True
-                        phases_passed.append("phase1b_negative_benchmark")
-                        limitations.append(
-                            "Phase 1B offline ML feasibility did not meet event detection/false alarm gates on MetroPT-3 holdout."
+            else:
+                data = _load_json_report(p1b_file)
+                if data is not None and data.get("schema_version") == "phase1b-benchmark-v1":
+                    # Validate required top-level fields
+                    has_req_fields = all(
+                        k in data
+                        for k in (
+                            "run_id",
+                            "contract_sha256",
+                            "source_dataset_sha256",
+                            "models",
+                            "verdict",
                         )
+                    )
+                    contract_ok = (
+                        isinstance(data.get("contract_sha256"), str)
+                        and len(data["contract_sha256"]) == 64
+                    )
+                    dataset_ok = (
+                        isinstance(data.get("source_dataset_sha256"), str)
+                        and len(data["source_dataset_sha256"]) == 64
+                    )
+                    models = data.get("models")
+                    models_ok = isinstance(models, dict) and all(
+                        m in models
+                        and isinstance(models[m], dict)
+                        and "feasible" in models[m]
+                        and "event_results" in models[m]
+                        for m in ("statistical", "isolation_forest", "autoencoder")
+                    )
+
+                    if has_req_fields and contract_ok and dataset_ok and models_ok:
+                        verdict_val = data.get("verdict")
+                        selected_model = data.get("selected_model")
+                        if verdict_val == "NOT FEASIBLE" and selected_model is None:
+                            artifact_hashes["phase1b_metrics"] = hashlib.sha256(
+                                p1b_file.read_bytes()
+                            ).hexdigest()
+                            phase1b_valid = True
+                            phases_passed.append("phase1b_negative_benchmark")
+                            limitations.append(
+                                "Phase 1B offline ML feasibility did not meet event detection/false alarm gates on MetroPT-3 holdout."
+                            )
+                        else:
+                            limitations.append(
+                                "Fabricated or unproven Phase 1B verdict rejected; repository finding is permanently NOT FEASIBLE with selected_model: null."
+                            )
                     else:
                         limitations.append(
-                            "Fabricated or unproven Phase 1B verdict rejected; repository finding is permanently NOT FEASIBLE with selected_model: null."
+                            "Phase 1B metrics missing required model breakdowns or SHA hashes."
                         )
-                else:
-                    limitations.append(
-                        "Phase 1B metrics missing required model breakdowns or SHA hashes."
-                    )
         if not phase1b_valid and not any("Phase 1B" in lim for lim in limitations):
             limitations.append("Phase 1B metrics missing or invalid schema; phase not certified.")
 
@@ -390,26 +477,30 @@ class ReleaseCertificationValidator:
                 "unit-level, or bound to a different commit; phase not certified."
             )
 
-        # 4. Check Phase 9 Grounded RCA
         phase9_valid = False
+        phase9_candidates: list[tuple[str, Path]] = []
         for filename, (schema, verdict_field, passing_val) in _P9_EVIDENCE_SPECS.items():
             candidate = self.artifact_dir / filename
-            if candidate.is_file():
-                expected_mode = _P9_PROVIDER_MODES.get(filename)
-                if _verify_release_evidence(
-                    _load_json_report(candidate),
-                    schema,
-                    verdict_field,
-                    passing_val,
-                    resolved_sha,
-                    expected_provider_mode=expected_mode,
-                ):
-                    phase9_valid = True
-                    phases_passed.append("phase9_grounded_rca")
-                    artifact_hashes["phase9_rca"] = hashlib.sha256(
-                        candidate.read_bytes()
-                    ).hexdigest()
-                break
+            if candidate.is_file() and _verify_release_evidence(
+                _load_json_report(candidate),
+                schema,
+                verdict_field,
+                passing_val,
+                resolved_sha,
+                expected_provider_mode=_P9_PROVIDER_MODES.get(filename),
+            ):
+                phase9_candidates.append((filename, candidate))
+
+        if len(phase9_candidates) == 1:
+            filename, candidate = phase9_candidates[0]
+            phase9_valid = True
+            phases_passed.append("phase9_grounded_rca")
+            artifact_hashes["phase9_rca"] = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        elif len(phase9_candidates) > 1:
+            limitations.append(
+                "Phase 9 evidence profiles are ambiguous; exactly one valid provider profile is required."
+            )
+
         if not phase9_valid:
             limitations.append(
                 "Phase 9 grounded-RCA evidence missing, failing, unreadable, tampered, "

@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import asdict, dataclass
+import re
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -42,6 +43,9 @@ class ReplayBenchmarkSampleV1:
     cpu_seconds: float
     peak_rss_bytes: int
     recovery_passed: bool
+    timing_samples: tuple[dict[str, float], ...] = ()
+    prometheus_samples: tuple[dict[str, float], ...] = ()
+    container_samples: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         for name, val in [
@@ -56,6 +60,22 @@ class ReplayBenchmarkSampleV1:
                 raise ValueError(
                     f"Sample metric {name} must be a non-negative finite float, got {val}"
                 )
+
+        if type(self.repetition) is not int or self.repetition <= 0:
+            raise ValueError(
+                f"Sample metric repetition must be a positive integer, got {self.repetition}"
+            )
+        for name, val in (
+            ("source_events", self.source_events),
+            ("valid_windows", self.valid_windows),
+            ("duplicate_rows", self.duplicate_rows),
+            ("quarantine_rows", self.quarantine_rows),
+            ("peak_rss_bytes", self.peak_rss_bytes),
+        ):
+            if type(val) is not int or val < 0:
+                raise ValueError(f"Sample metric {name} must be a non-negative integer, got {val}")
+        if type(self.recovery_passed) is not bool:
+            raise ValueError("Sample metric recovery_passed must be a boolean")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -101,6 +121,93 @@ class ReplayBenchmarkResultV1:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class ReplayBenchmarkResultV2:
+    schema_version: Literal["replay-benchmark-v2"]
+    evidence_level: Literal["RUNTIME"]
+    implementation: str
+    git_sha: str
+    champion_sha256: str
+    contract_sha256: str
+    source_dataset_sha256: str
+    workload_sha256: str
+    repetitions: int
+    raw_samples: tuple[ReplayBenchmarkSampleV1, ...]
+    source_events: int
+    valid_windows: int
+    feature_digest: str
+    score_digest: str
+    alert_digest: str
+    duplicate_rows: int
+    quarantine_rows: int
+    p50_latency_ms: float
+    p95_latency_ms: float
+    throughput_events_per_second: float
+    max_consumer_lag: float
+    lag_drain_seconds: float
+    cpu_seconds_per_million_events: float
+    peak_rss_bytes: int
+    restart_recovery_passed: bool
+    regression_budget: None = None
+    limitations: tuple[str, ...] = ("baseline only; no budget established",)
+    self_sha256: str = ""
+
+    def __post_init__(self) -> None:
+        if self.schema_version != "replay-benchmark-v2" or self.evidence_level != "RUNTIME":
+            raise ValueError("ReplayBenchmarkResultV2 must be runtime evidence")
+        if (
+            not isinstance(self.git_sha, str)
+            or not re.fullmatch(r"[0-9a-f]{40}", self.git_sha)
+            or self.git_sha == "0" * 40
+        ):
+            raise ValueError("git_sha must be a non-zero lowercase 40-character SHA")
+        for hash_name, hash_value in (
+            ("champion_sha256", self.champion_sha256),
+            ("contract_sha256", self.contract_sha256),
+            ("source_dataset_sha256", self.source_dataset_sha256),
+            ("workload_sha256", self.workload_sha256),
+            ("feature_digest", self.feature_digest),
+            ("score_digest", self.score_digest),
+            ("alert_digest", self.alert_digest),
+        ):
+            if not isinstance(hash_value, str) or not re.fullmatch(r"[0-9a-f]{64}", hash_value):
+                raise ValueError(f"{hash_name} must be a lowercase 64-character SHA-256")
+        if self.repetitions <= 0 or len(self.raw_samples) != self.repetitions:
+            raise ValueError("repetitions must equal the number of raw samples and be positive")
+        if len({sample.repetition for sample in self.raw_samples}) != len(self.raw_samples):
+            raise ValueError("raw sample repetition identifiers must be unique")
+        for metric_name, metric_value in (
+            ("p50_latency_ms", self.p50_latency_ms),
+            ("p95_latency_ms", self.p95_latency_ms),
+            ("throughput_events_per_second", self.throughput_events_per_second),
+            ("max_consumer_lag", self.max_consumer_lag),
+            ("lag_drain_seconds", self.lag_drain_seconds),
+            ("cpu_seconds_per_million_events", self.cpu_seconds_per_million_events),
+        ):
+            if not math.isfinite(metric_value) or metric_value < 0:
+                raise ValueError(f"Metric {metric_name} must be a non-negative finite float")
+        for count_name, count_value in (
+            ("source_events", self.source_events),
+            ("valid_windows", self.valid_windows),
+            ("duplicate_rows", self.duplicate_rows),
+            ("quarantine_rows", self.quarantine_rows),
+            ("peak_rss_bytes", self.peak_rss_bytes),
+        ):
+            if not isinstance(count_value, int) or count_value < 0:
+                raise ValueError(f"Metric {count_name} must be a non-negative integer")
+        if self.self_sha256 and not re.fullmatch(r"[0-9a-f]{64}", self.self_sha256):
+            raise ValueError("self_sha256 must be a lowercase 64-character SHA-256")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def with_computed_hash(self) -> ReplayBenchmarkResultV2:
+        payload = self.to_dict()
+        payload["self_sha256"] = ""
+        computed = hashlib.sha256(_canonical_json(payload)).hexdigest()
+        return replace(self, self_sha256=computed)
 
 
 @dataclass(frozen=True)

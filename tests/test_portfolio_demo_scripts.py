@@ -7,11 +7,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from deploy.preflight import (
     DEFAULT_PREFLIGHT_CONFIG,
+    PreflightConfig,
     verify_host_environment,
 )
-from deploy.preflight import (
-    main as preflight_main,
-)
+from deploy.preflight import main as preflight_main
 
 
 def test_preflight_default_config_ports() -> None:
@@ -41,7 +40,7 @@ def test_preflight_verifies_ram_and_disk_passes() -> None:
         mock_sock_inst.connect_ex.return_value = 1  # Port free
         mock_sock.return_value.__enter__.return_value = mock_sock_inst
 
-        result = verify_host_environment()
+        result = verify_host_environment(config=PreflightConfig(required_paths=()))
         assert result.passed is True
         assert len(result.errors) == 0
 
@@ -60,7 +59,7 @@ def test_preflight_fails_on_low_memory_or_disk() -> None:
         mock_sock_inst.connect_ex.return_value = 1
         mock_sock.return_value.__enter__.return_value = mock_sock_inst
 
-        result = verify_host_environment()
+        result = verify_host_environment(config=PreflightConfig(required_paths=()))
         assert result.passed is False
         assert any("RAM" in err for err in result.errors)
         assert any("Disk" in err for err in result.errors)
@@ -84,17 +83,29 @@ def test_preflight_require_clean_ports_flag() -> None:
         mock_sock.return_value.__enter__.return_value = mock_sock_inst
 
         # By default, bound ports are warnings, not errors
-        res_warn = verify_host_environment(require_clean_ports=False)
+        res_warn = verify_host_environment(
+            config=PreflightConfig(required_paths=()), require_clean_ports=False
+        )
         assert res_warn.passed is True
         assert len(res_warn.warnings) > 0
-
+        res_err = verify_host_environment(
+            config=PreflightConfig(required_paths=()), require_clean_ports=True
+        )
         # With require_clean_ports=True, bound ports are errors
-        res_err = verify_host_environment(require_clean_ports=True)
         assert res_err.passed is False
         assert len(res_err.errors) > 0
 
 
-def test_preflight_cli_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+def test_preflight_cli_json_output(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "compose.yaml").write_text("services: {}", encoding="utf-8")
+    telemetry = tmp_path / "data/processed/phase1b/metropt3/telemetry.parquet"
+    telemetry.parent.mkdir(parents=True)
+    telemetry.write_bytes(b"fixture")
     with (
         patch("deploy.preflight.psutil") as mock_psutil,
         patch(

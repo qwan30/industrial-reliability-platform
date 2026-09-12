@@ -20,7 +20,11 @@ except ImportError:
 class PreflightConfig:
     min_memory_gb: float = 4.0
     min_disk_gb: float = 10.0
-    required_ports: tuple[int, ...] = (5173, 29092, 8000, 5432, 9090, 3001, 5000)
+    required_ports: tuple[int, ...] = (8000, 5173, 5432, 29092, 9090, 3001, 5000)
+    required_paths: tuple[str, ...] = (
+        "compose.yaml",
+        "data/processed/phase1b/metropt3/telemetry.parquet",
+    )
     check_docker: bool = True
     check_artifacts: bool = True
 
@@ -62,7 +66,12 @@ def verify_host_environment(
             f"Insufficient Disk Space: {free_gb:.1f}GB free, {active_config.min_disk_gb}GB required."
         )
 
-    # 3. Check Published Ports
+    # 3. Check repository paths required by the Compose demo
+    for required_path in active_config.required_paths:
+        if not Path(required_path).is_file():
+            errors.append(f"Required path missing: {required_path}")
+
+    # 4. Check Published Ports
     for port in active_config.required_ports:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(0.5)

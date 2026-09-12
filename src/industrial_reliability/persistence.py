@@ -795,10 +795,7 @@ class RuntimeStore:
                 rca=rca_payload,
             )
 
-    def save_complete_rca(self, report: RcaReportV1) -> RcaReportV1:
-        if report.status != "COMPLETE":
-            return report
-
+    def save_rca(self, report: RcaReportV1) -> RcaReportV1:
         with (
             psycopg.connect(self.db_url) as conn,
             conn.cursor(row_factory=dict_row) as cur,
@@ -817,7 +814,7 @@ class RuntimeStore:
                     str(report.alert_id),
                     report.evidence_bundle_sha256,
                     report.status,
-                    report.provider_model or "unknown",
+                    report.provider_model,
                     report.summary,
                     payload_json,
                     report.emitted_at,
@@ -839,12 +836,15 @@ class RuntimeStore:
                     else json.loads(row["payload"])
                 )
                 existing_report = RcaReportV1.model_validate(existing_payload)
-                if existing_report.evidence_bundle_sha256 != report.evidence_bundle_sha256:
-                    raise IdentityMismatchError(
-                        "Stored RCA report evidence bundle hash does not match"
-                    )
+                if existing_report.model_dump(mode="json") != report.model_dump(mode="json"):
+                    raise IdentityMismatchError("Stored RCA report payload does not match")
                 return existing_report
             return report
+
+    def save_complete_rca(self, report: RcaReportV1) -> RcaReportV1:
+        if report.status != "COMPLETE":
+            return report
+        return self.save_rca(report)
 
     def get_rca(
         self, alert_id: str | UUID, evidence_bundle_sha256: str | None = None

@@ -168,6 +168,52 @@ def test_post_rca_returns_complete_and_persists_report() -> None:
     assert fake_store.save_complete_rca.called
 
 
+def test_post_rca_returns_retryable_error_when_persistence_fails() -> None:
+    alert_id = uuid4()
+    fake_store = Mock()
+    fake_store.get_alert_detail.return_value = _fake_alert_detail(alert_id)
+    fake_store.get_rca.return_value = None
+    fake_store.save_complete_rca.side_effect = RuntimeError("database unavailable")
+
+    fake_generator = Mock()
+    fake_generator.generate.side_effect = lambda bundle: RcaReportV1(
+        schema_version="rca-report-v1",
+        message_id=uuid4(),
+        replay_session_id=UUID(bundle.replay_session_id),
+        source_dataset_sha256=bundle.source_dataset_sha256,
+        contract_sha256=bundle.contract_sha256,
+        source_timestamp=datetime.now(UTC).replace(tzinfo=None),
+        emitted_at=datetime.now(UTC),
+        report_id=f"rca-{uuid4().hex[:12]}",
+        alert_id=str(alert_id),
+        status="COMPLETE",
+        summary="High compressor discharge pressure observed.",
+        observations=(
+            RcaObservationV1(
+                claim="Discharge pressure elevated.",
+                evidence_ids=(bundle.items[0].evidence_id,),
+            ),
+        ),
+        uncertainty=("Anomaly evidence does not prove a mechanical root cause.",),
+        next_checks=("Inspect intake check valve.",),
+        evidence_ids=tuple(i.evidence_id for i in bundle.items),
+        evidence_bundle_sha256=bundle.bundle_sha256,
+        provider_model="gpt-4o",
+    )
+
+    app = create_app(_mock_scorer(), store=fake_store, rca_generator=fake_generator)
+    client = TestClient(app)
+
+    response = client.post(f"/v1/alerts/{alert_id}/rca")
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["data"] is None
+    assert payload["error"]["code"] == "RCA_PERSISTENCE_FAILED"
+    assert "database unavailable" not in response.text
+
+
 def test_post_rca_returns_cached_report_without_calling_generator() -> None:
     alert_id = uuid4()
     detail = _fake_alert_detail(alert_id)

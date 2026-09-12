@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import os
@@ -480,9 +479,24 @@ def create_app(
         else:
             report = gen.generate(bundle)
 
-        if report.status == "COMPLETE":
-            with contextlib.suppress(Exception):
+        try:
+            if callable(getattr(type(store), "save_rca", None)):
+                report = store.save_rca(report)
+            elif report.status == "COMPLETE":
                 report = store.save_complete_rca(report)
+        except Exception:
+            logger.exception("RCA persistence failed for alert_id=%s", alert_id)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {
+                        "code": "RCA_PERSISTENCE_FAILED",
+                        "message": "RCA report could not be persisted; retry the request",
+                    },
+                },
+            )
 
         return JSONResponse(
             status_code=200,

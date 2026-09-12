@@ -11,10 +11,16 @@ import { LabApp } from './lab/LabApp';
 export function App({ defaultView }: { defaultView?: 'LAB' | 'REPLAY' } = {}) {
   const [viewMode, setViewMode] = useState<'LAB' | 'REPLAY'>(() => {
     if (defaultView) return defaultView;
-    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
-      return 'REPLAY';
+    if (typeof window !== 'undefined') {
+      const search = window.location.search;
+      if (search.includes('view=lab') || window.location.hash === '#lab') {
+        return 'LAB';
+      }
+      if (search.includes('view=replay') || window.location.hash === '#replay') {
+        return 'REPLAY';
+      }
     }
-    return 'LAB';
+    return 'REPLAY';
   });
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [manualSessionInput, setManualSessionInput] = useState('');
@@ -118,6 +124,24 @@ export function App({ defaultView }: { defaultView?: 'LAB' | 'REPLAY' } = {}) {
           <h1 style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.025em' }}>
             Industrial Reliability Platform - Operator Console
           </h1>
+          <button
+            type="button"
+            data-testid="switch-to-lab-btn"
+            onClick={() => setViewMode('LAB')}
+            style={{
+              marginLeft: '1rem',
+              backgroundColor: '#00a8ff',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '0.35rem 0.75rem',
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            ⚙ 3D Virtual Lab
+          </button>
         </div>
 
         <form

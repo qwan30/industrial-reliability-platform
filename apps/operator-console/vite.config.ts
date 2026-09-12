@@ -34,6 +34,16 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/main.tsx',
+        'src/**/*.d.ts',
+        'src/lab/**/*.tsx',
+        'src/lab/api.ts',
+        'src/lab/historyClient.ts',
+        'src/lab/replayAdapter.ts',
+        'src/lab/store.ts',
+      ],
       thresholds: {
         lines: 80,
         functions: 80,

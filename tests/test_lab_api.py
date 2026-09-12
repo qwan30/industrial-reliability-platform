@@ -72,7 +72,7 @@ class FakeLabStore:
             latest = revs[max(revs.keys())]
             items.append(
                 {
-                    "lab_id": lab_id,
+                    "lab_id": str(lab_id),
                     "name": latest.name,
                     "current_revision": latest.revision,
                     "created_at": "2026-03-31T00:00:00Z",
@@ -234,7 +234,7 @@ def test_run_creation_and_command(client: TestClient) -> None:
     lab_id = create_res.json()["data"]["lab_id"]
 
     run_res = client.post(
-        "/v2/runs", json={"lab_id": lab_id, "lab_revision": 1, "seed": 42, "speed": 1}
+        "/v2/runs", json={"lab_id": str(lab_id), "lab_revision": 1, "seed": 42, "speed": 1}
     )
     assert run_res.status_code == 201
     run_id = run_res.json()["data"]["run_id"]

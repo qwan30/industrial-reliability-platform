@@ -65,26 +65,7 @@ export function App({ defaultView }: { defaultView?: 'LAB' | 'REPLAY' } = {}) {
   if (viewMode === 'LAB') {
     return (
       <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
-        <LabApp />
-        <button
-          type="button"
-          onClick={() => setViewMode('REPLAY')}
-          style={{
-            position: 'absolute',
-            bottom: '12px',
-            right: '12px',
-            zIndex: 100,
-            background: 'rgba(27, 31, 36, 0.85)',
-            color: '#8b949e',
-            border: '1px solid #30363d',
-            borderRadius: '6px',
-            padding: '4px 10px',
-            fontSize: '11px',
-            cursor: 'pointer',
-          }}
-        >
-          Switch to Historical Replay Console
-        </button>
+        <LabApp onReplay={() => setViewMode('REPLAY')} />
       </div>
     );
   }

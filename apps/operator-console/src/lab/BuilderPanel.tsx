@@ -9,22 +9,54 @@ import { updateLab, validateLabRevision } from "./api";
 
 interface BuilderPanelProps {
   onAddAsset: (type: AssetType) => void;
+  onArrangeAssets?: () => void;
   onUndo: () => void;
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
 }
 
-const CATALOG_ITEMS: Array<{ type: AssetType; label: string; icon: string; desc: string }> = [
-  { type: "COMPRESSOR", label: "Compressor", icon: "⚡", desc: "Rotary air source (9.0 bar max)" },
-  { type: "TANK", label: "Air Receiver Tank", icon: "🛢", desc: "0.5 m³ pressure storage buffer" },
-  { type: "ISOLATION_VALVE", label: "Isolation Valve", icon: "⨂", desc: "Quarter-turn 2-position block valve" },
-  { type: "CONTROL_VALVE", label: "Control Valve", icon: "⋈", desc: "Pneumatic modulating throttle valve" },
-  { type: "DEMAND", label: "Pneumatic Load", icon: "⚙", desc: "Factory consumption branch" },
+const CATALOG_ITEMS: Array<{
+  type: AssetType;
+  label: string;
+  icon: string;
+  desc: string;
+}> = [
+  {
+    type: "COMPRESSOR",
+    label: "Compressor",
+    icon: "⚡",
+    desc: "Rotary air source (9.0 bar max)",
+  },
+  {
+    type: "TANK",
+    label: "Air Receiver Tank",
+    icon: "🛢",
+    desc: "0.5 m³ pressure storage buffer",
+  },
+  {
+    type: "ISOLATION_VALVE",
+    label: "Isolation Valve",
+    icon: "⨂",
+    desc: "Quarter-turn 2-position block valve",
+  },
+  {
+    type: "CONTROL_VALVE",
+    label: "Control Valve",
+    icon: "⋈",
+    desc: "Pneumatic modulating throttle valve",
+  },
+  {
+    type: "DEMAND",
+    label: "Pneumatic Load",
+    icon: "⚙",
+    desc: "Factory consumption branch",
+  },
 ];
 
 export function BuilderPanel({
   onAddAsset,
+  onArrangeAssets,
   onUndo,
   onRedo,
   canUndo,
@@ -34,13 +66,32 @@ export function BuilderPanel({
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [validationErrors, setValidationErrors] = useState<LabValidationError[]>([]);
+  const [validationErrors, setValidationErrors] = useState<
+    LabValidationError[]
+  >([]);
+
+  // Check if any assets share the same coordinate (stacked)
+  const hasOverlappingAssets = (() => {
+    if (!lab || lab.assets.length < 2) return false;
+    const seen = new Set<string>();
+    for (const a of lab.assets) {
+      const key = `${a.position_m[0].toFixed(1)},${a.position_m[2].toFixed(1)}`;
+      if (seen.has(key)) return true;
+      seen.add(key);
+    }
+    return false;
+  })();
 
   // Hotkeys: Ctrl+Z for Undo, Ctrl+Shift+Z or Ctrl+Y for Redo
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeTag = document.activeElement?.tagName.toLowerCase();
-      if (activeTag === "input" || activeTag === "textarea") return;
+      if (
+        activeTag === "input" ||
+        activeTag === "textarea" ||
+        activeTag === "select"
+      )
+        return;
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -86,7 +137,9 @@ export function BuilderPanel({
         setStatusMessage("Lab is structurally sound and run-eligible");
         setValidationErrors([]);
       } else {
-        setStatusMessage(`Validation failed with ${res.errors.length} error(s)`);
+        setStatusMessage(
+          `Validation failed with ${res.errors.length} error(s)`,
+        );
         setValidationErrors(res.errors);
       }
     } catch (err: unknown) {
@@ -102,6 +155,17 @@ export function BuilderPanel({
       <div className="panel-header">
         <span className="panel-title">Equipment Catalog</span>
         <div className="undo-redo-cluster">
+          {onArrangeAssets && (
+            <button
+              type="button"
+              className="btn-icon"
+              onClick={onArrangeAssets}
+              title="Auto-arrange equipment on floor grid"
+              aria-label="Auto-arrange on grid"
+            >
+              ⊞
+            </button>
+          )}
           <button
             type="button"
             className="btn-icon"
@@ -126,6 +190,26 @@ export function BuilderPanel({
       </div>
 
       <div className="builder-content">
+        {hasOverlappingAssets && onArrangeAssets && (
+          <div className="builder-arrange-alert" role="alert">
+            <div className="arrange-alert-title">
+              ⚠ Stacked Equipment ({lab.assets.length} items)
+            </div>
+            <p className="arrange-alert-desc">
+              Multiple equipment items are stacked at the same position.
+              Auto-arrange them across the floor grid to make every item
+              visible.
+            </p>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary btn-block"
+              onClick={onArrangeAssets}
+            >
+              ⊞ Auto-arrange on Floor Grid
+            </button>
+          </div>
+        )}
+
         <div className="catalog-list">
           {CATALOG_ITEMS.map((item) => (
             <div
@@ -153,6 +237,17 @@ export function BuilderPanel({
         </div>
 
         <div className="builder-footer-actions">
+          {onArrangeAssets && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-block"
+              onClick={onArrangeAssets}
+              title="Evenly distribute all equipment across the factory floor grid"
+            >
+              ⊞ Auto-arrange Equipment on Grid
+            </button>
+          )}
+
           <button
             type="button"
             className="btn btn-primary btn-block"
@@ -171,7 +266,9 @@ export function BuilderPanel({
             {validating ? "Validating..." : "Validate Topology"}
           </button>
 
-          {statusMessage && <div className="builder-status-text">{statusMessage}</div>}
+          {statusMessage && (
+            <div className="builder-status-text">{statusMessage}</div>
+          )}
 
           {validationErrors.length > 0 && (
             <div className="validation-error-list">

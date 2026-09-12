@@ -458,6 +458,9 @@
 .timeline-slider {
   flex: 1;
   accent-color: var(--lab-primary);
+  cursor: pointer;
+}
+
 /* Builder Panel */
 .lab-builder-panel {
   left: 16px;
@@ -616,11 +619,9 @@
   color: #f39c12;
   font-weight: 700;
 }
-  cursor: pointer;
-}
 /* Incidents & Alarms */
 .lab-incidents-panel {
-  left: 16px;
+  left: 308px;
   width: 320px;
 }
 
@@ -831,8 +832,22 @@
 
 /* Baseline Panel */
 .lab-baseline-panel {
-  left: 16px;
+  right: 16px;
   width: 320px;
+}
+
+.investigate-nav-tabs {
+  position: absolute;
+  top: 16px;
+  right: 360px;
+  z-index: 10;
+  display: flex;
+  gap: 8px;
+  background: rgba(22, 27, 34, 0.85);
+  backdrop-filter: blur(8px);
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--lab-border);
 }
 
 .baseline-desc {

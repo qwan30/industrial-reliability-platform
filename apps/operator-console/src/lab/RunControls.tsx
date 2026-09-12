@@ -8,10 +8,14 @@ import { createRun, submitCommand } from "./api";
 import type { RunSpeed } from "./types";
 
 export function RunControls() {
-  const { lab } = useEditorSlice();
+  const { lab, isDirty } = useEditorSlice();
   const { runId, status: runStatus, tick, speed } = useRunSlice();
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const canStart = ["IDLE", "STOPPED", "COMPLETED", "FAILED"].includes(
+    runStatus,
+  );
 
   const handleStartRun = async () => {
     if (!lab) return;
@@ -27,10 +31,15 @@ export function RunControls() {
       labStore.setRunSnapshot({
         run_id: res.run_id,
         tick: 0,
-        status: "RUNNING",
+        status: res.status,
         control_revision: 0,
         event_sequence: 0,
-        physical: { tick: 0, pressures_pa: {}, flows_kg_s: {}, operating_modes: {} },
+        physical: {
+          tick: 0,
+          pressures_pa: {},
+          flows_kg_s: {},
+          operating_modes: {},
+        },
         observations: [],
         pending_commands: [],
         alerts: [],
@@ -44,8 +53,11 @@ export function RunControls() {
     }
   };
 
-  const handleLifecycleCommand = async (action: "PAUSE" | "RESUME" | "STOP") => {
+  const handleLifecycleCommand = async (
+    action: "PAUSE" | "RESUME" | "STOP",
+  ) => {
     if (!runId) return;
+    setErrorMsg(null);
     setLoading(true);
     try {
       await submitCommand(runId, {
@@ -53,7 +65,8 @@ export function RunControls() {
           typeof crypto !== "undefined" && crypto.randomUUID
             ? crypto.randomUUID()
             : `cmd-${Date.now()}`,
-        expected_control_revision: labStore.getState().run.snapshot?.control_revision ?? 0,
+        expected_control_revision:
+          labStore.getState().run.snapshot?.control_revision ?? 0,
         action,
         parameters: {},
       });
@@ -74,18 +87,25 @@ export function RunControls() {
   return (
     <div className="run-controls-bar">
       <div className="run-status-cluster">
-        <span className={`run-badge status-${runStatus.toLowerCase()}`}>{runStatus}</span>
+        <span className={`run-badge status-${runStatus.toLowerCase()}`}>
+          {runStatus}
+        </span>
         <span className="sim-time">t = {simSeconds}s</span>
         <span className="sim-tick">(tick {tick})</span>
       </div>
 
       <div className="action-buttons">
-        {runStatus === "IDLE" || runStatus === "STOPPED" ? (
+        {canStart ? (
           <button
             type="button"
             className="btn btn-primary"
             onClick={handleStartRun}
-            disabled={loading}
+            disabled={loading || !lab || isDirty}
+            title={
+              isDirty
+                ? "Commit your lab revision before starting a run"
+                : undefined
+            }
           >
             {loading ? "Starting..." : "Start Run"}
           </button>
@@ -127,6 +147,10 @@ export function RunControls() {
               Stop
             </button>
           </>
+        ) : runStatus === "CREATED" ? (
+          <span className="run-worker-wait" role="status">
+            Waiting for simulation worker…
+          </span>
         ) : null}
       </div>
 
@@ -137,6 +161,9 @@ export function RunControls() {
             key={s}
             type="button"
             className={`btn-speed ${speed === s ? "active" : ""}`}
+            disabled={!canStart || loading}
+            aria-pressed={speed === s}
+            title="Speed is configured before starting a run"
             onClick={() => handleSpeedChange(s)}
           >
             {s}x
@@ -144,7 +171,11 @@ export function RunControls() {
         ))}
       </div>
 
-      {errorMsg && <div className="run-error-badge">{errorMsg}</div>}
+      {errorMsg && (
+        <div className="run-error-badge" role="alert">
+          {errorMsg}
+        </div>
+      )}
     </div>
   );
 }

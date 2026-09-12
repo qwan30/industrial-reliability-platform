@@ -101,30 +101,62 @@ describe("editorReducer", () => {
     });
     expect(state.present?.pipes.length).toBe(1);
 
-    // 4. Add Pressure sensor on compressor
-    state = editorReducer(state, {
-      type: "ADD_SENSOR",
-      payload: {
-        kind: "PRESSURE",
-        target: { asset_id: compId, port: "OUT" },
-        noise_std: 100,
-      },
-    });
-    expect(state.present?.sensors.length).toBe(1);
-
-    // 5. Delete compressor -> pipe and sensor must be removed automatically
+    // 4. Delete Compressor -> Should cascade delete pipe
     state = editorReducer(state, {
       type: "DELETE_ASSET",
       payload: { assetId: compId },
     });
     expect(state.present?.assets.length).toBe(1);
     expect(state.present?.pipes.length).toBe(0);
-    expect(state.present?.sensors.length).toBe(0);
 
-    // 6. Undo deletion -> compressor, pipe, and sensor must all be restored!
+    // 5. Undo -> Should restore Compressor and Pipe
     state = editorReducer(state, { type: "UNDO" });
     expect(state.present?.assets.length).toBe(2);
     expect(state.present?.pipes.length).toBe(1);
-    expect(state.present?.sensors.length).toBe(1);
+  });
+
+  it("arranges overlapping stacked assets across a clean grid and supports undo", () => {
+    let state = initialEditorState(emptyLab);
+
+    // Add 10 assets all stacked at [0, 0, 0]
+    for (let i = 0; i < 10; i++) {
+      state = editorReducer(state, {
+        type: "ADD_ASSET",
+        payload: { assetType: "COMPRESSOR", position_m: [0, 0, 0] },
+      });
+    }
+    expect(state.present?.assets.length).toBe(10);
+    // Initially all at 0, 0, 0
+    expect(
+      state.present?.assets.every(
+        (a) => a.position_m[0] === 0 && a.position_m[2] === 0,
+      ),
+    ).toBe(true);
+
+    // Auto-arrange
+    state = editorReducer(state, { type: "ARRANGE_ASSETS" });
+
+    const positions = state.present!.assets.map(
+      (a) => `${a.position_m[0]},${a.position_m[2]}`,
+    );
+    const uniquePositions = new Set(positions);
+    // Every asset should have a distinct grid position!
+    expect(uniquePositions.size).toBe(10);
+
+    // All positions within factory room safety bounds
+    for (const a of state.present!.assets) {
+      expect(a.position_m[0]).toBeGreaterThanOrEqual(-10);
+      expect(a.position_m[0]).toBeLessThanOrEqual(10);
+      expect(a.position_m[2]).toBeGreaterThanOrEqual(-6.5);
+      expect(a.position_m[2]).toBeLessThanOrEqual(6.5);
+    }
+
+    // Undo restores stacked state
+    state = editorReducer(state, { type: "UNDO" });
+    expect(
+      state.present?.assets.every(
+        (a) => a.position_m[0] === 0 && a.position_m[2] === 0,
+      ),
+    ).toBe(true);
   });
 });

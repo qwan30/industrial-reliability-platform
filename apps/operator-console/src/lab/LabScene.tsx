@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
 import { Room } from "./Room";
+import { SceneCallouts } from "./SceneCallouts";
 import { CameraRig } from "./CameraRig";
 import { Equipment } from "./Equipment";
 import { PipeMesh } from "./PipeMesh";
@@ -57,7 +58,10 @@ export function LabScene() {
   }
 
   return (
-    <div className="lab-scene-container" style={{ width: "100%", height: "100%", position: "relative" }}>
+    <div
+      className="lab-scene-container"
+      style={{ width: "100%", height: "100%", position: "relative" }}
+    >
       <Canvas
         shadows
         gl={{
@@ -67,7 +71,7 @@ export function LabScene() {
           powerPreference: "high-performance",
         }}
         dpr={[1, 1.5]}
-        camera={{ position: [12, 10, 14], fov: 45, near: 0.1, far: 100 }}
+        camera={{ position: [24, 22, 28], fov: 45, near: 0.1, far: 100 }}
         onPointerMissed={() => labStore.clearSelection()}
         onCreated={({ gl }) => {
           const dom = gl.domElement;
@@ -82,6 +86,7 @@ export function LabScene() {
       >
         <Room />
         <CameraRig />
+        <SceneCallouts />
 
         {/* Equipment */}
         {lab?.assets.map((asset) => (

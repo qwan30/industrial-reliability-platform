@@ -78,7 +78,7 @@ def test_discover_migrations_is_ordered_and_hashed() -> None:
     migrations = discover_migrations(Path("db/migrations"))
     assert len(migrations) >= 4
     assert [item.name for item in migrations] == sorted(item.name for item in migrations)
-    assert migrations[-1].name == "005_rca_reports_fallback.sql"
+    assert migrations[-1].name == "006_virtual_lab.sql"
     assert all(len(item.sha256) == 64 for item in migrations)
     assert all(isinstance(item, Migration) for item in migrations)
     for item in migrations:
@@ -109,19 +109,20 @@ def test_apply_migrations_idempotent(tmp_path: Path) -> None:
 
     with patch("psycopg.connect", side_effect=fake_connect):
         first_applied = apply_migrations("postgresql://test:test@localhost:5432/test", tmp_path)
-        assert len(first_applied) == 5
+        assert len(first_applied) == 6
         assert first_applied == (
             "001_alert_lifecycle.sql",
             "002_console_stream.sql",
             "003_rca_reports.sql",
             "004_alert_runtime_state.sql",
             "005_rca_reports_fallback.sql",
+            "006_virtual_lab.sql",
         )
-        assert len(db_state) == 5
+        assert len(db_state) == 6
 
         second_applied = apply_migrations("postgresql://test:test@localhost:5432/test", tmp_path)
         assert second_applied == ()
-        assert len(db_state) == 5
+        assert len(db_state) == 6
 
 
 def test_changed_applied_migration_fails(tmp_path: Path) -> None:

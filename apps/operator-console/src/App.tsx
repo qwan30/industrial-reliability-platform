@@ -7,7 +7,21 @@ import { ReplayControls } from './components/ReplayControls';
 import { DependencyHealth, StartReplayParams } from './types';
 import { useReplayStream } from './useReplayStream';
 
-export function App() {
+import { LabApp } from './lab/LabApp';
+export function App({ defaultView }: { defaultView?: 'LAB' | 'REPLAY' } = {}) {
+  const [viewMode, setViewMode] = useState<'LAB' | 'REPLAY'>(() => {
+    if (defaultView) return defaultView;
+    if (typeof window !== 'undefined') {
+      const search = window.location.search;
+      if (search.includes('view=lab') || window.location.hash === '#lab') {
+        return 'LAB';
+      }
+      if (search.includes('view=replay') || window.location.hash === '#replay') {
+        return 'REPLAY';
+      }
+    }
+    return 'REPLAY';
+  });
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [manualSessionInput, setManualSessionInput] = useState('');
   const [health, setHealth] = useState<DependencyHealth>({ api: true, database: true });
@@ -48,6 +62,32 @@ export function App() {
     }
   };
 
+  if (viewMode === 'LAB') {
+    return (
+      <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
+        <LabApp />
+        <button
+          type="button"
+          onClick={() => setViewMode('REPLAY')}
+          style={{
+            position: 'absolute',
+            bottom: '12px',
+            right: '12px',
+            zIndex: 100,
+            background: 'rgba(27, 31, 36, 0.85)',
+            color: '#8b949e',
+            border: '1px solid #30363d',
+            borderRadius: '6px',
+            padding: '4px 10px',
+            fontSize: '11px',
+            cursor: 'pointer',
+          }}
+        >
+          Switch to Historical Replay Console
+        </button>
+      </div>
+    );
+  }
   return (
     <div
       style={{
@@ -84,6 +124,24 @@ export function App() {
           <h1 style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.025em' }}>
             Industrial Reliability Platform - Operator Console
           </h1>
+          <button
+            type="button"
+            data-testid="switch-to-lab-btn"
+            onClick={() => setViewMode('LAB')}
+            style={{
+              marginLeft: '1rem',
+              backgroundColor: '#00a8ff',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '0.35rem 0.75rem',
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            ⚙ 3D Virtual Lab
+          </button>
         </div>
 
         <form

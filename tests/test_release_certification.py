@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -828,3 +829,39 @@ def test_run_release_certification_cli_passes_with_mandatory_evidence(tmp_path: 
     assert report["is_certified"] is True
     assert report["git_sha"] == "a" * 40
     assert len(report["report_sha256"]) == 64
+
+
+def test_phase1b_authoritative_raw_byte_sha256_and_crlf_reproducibility() -> None:
+    from industrial_reliability.release_certification import (
+        _AUTHORITATIVE_PHASE1B_METRICS_PATH,
+        _AUTHORITATIVE_PHASE1B_METRICS_SHA256,
+        _verify_authoritative_phase1b_artifact,
+    )
+
+    raw_bytes = _AUTHORITATIVE_PHASE1B_METRICS_PATH.read_bytes()
+    computed_sha = hashlib.sha256(raw_bytes).hexdigest()
+    assert computed_sha == _AUTHORITATIVE_PHASE1B_METRICS_SHA256
+    assert _verify_authoritative_phase1b_artifact(_AUTHORITATIVE_PHASE1B_METRICS_PATH) is True
+
+    # Confirm that converting CRLF to LF alters byte SHA and fails raw-byte verification
+    lf_bytes = raw_bytes.replace(b"\r\n", b"\n")
+    if lf_bytes != raw_bytes:
+        lf_sha = hashlib.sha256(lf_bytes).hexdigest()
+        assert lf_sha != _AUTHORITATIVE_PHASE1B_METRICS_SHA256
+
+
+def test_phase1b_artifact_byte_tamper_fails(tmp_path: Path) -> None:
+    from industrial_reliability.release_certification import (
+        _AUTHORITATIVE_PHASE1B_METRICS_PATH,
+        _verify_authoritative_phase1b_artifact,
+    )
+
+    candidate = tmp_path / "phase-1b-metrics.json"
+    raw_bytes = _AUTHORITATIVE_PHASE1B_METRICS_PATH.read_bytes()
+
+    # Tamper exactly 1 byte
+    tampered = bytearray(raw_bytes)
+    tampered[-1] = (tampered[-1] + 1) % 256
+    candidate.write_bytes(bytes(tampered))
+
+    assert _verify_authoritative_phase1b_artifact(candidate) is False

@@ -118,35 +118,41 @@ class OpenAiRcaGenerator:
         )
         return cls(client=client, model=model, timeout_seconds=timeout_seconds)
 
+    def generate_draft(
+        self, evidence_json: str, allowed_evidence_ids: tuple[str, ...]
+    ) -> ProviderRcaDraft:
+        response = self._client.responses.parse(
+            model=self._model,
+            input=[
+                {
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": SYSTEM_PROMPT}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": evidence_json}],
+                },
+            ],
+            text_format=ProviderRcaDraft,
+        )
+        draft: ProviderRcaDraft | None = response.output_parsed
+        if draft is None:
+            raise ValueError("Structured output missing from provider response")
+
+        allowed_ids = set(allowed_evidence_ids)
+        for obs in draft.observations:
+            if not obs.evidence_ids:
+                raise ValueError("Observation has empty evidence citations")
+            for ev_id in obs.evidence_ids:
+                if ev_id not in allowed_ids:
+                    raise ValueError(f"Unknown evidence citation '{ev_id}'")
+
+        return draft
+
     def generate(self, bundle: EvidenceBundleV1) -> RcaReportV1:
         try:
-            response = self._client.responses.parse(
-                model=self._model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": [{"type": "input_text", "text": SYSTEM_PROMPT}],
-                    },
-                    {
-                        "role": "user",
-                        "content": [{"type": "input_text", "text": bundle.model_dump_json()}],
-                    },
-                ],
-                text_format=ProviderRcaDraft,
-            )
-            draft: ProviderRcaDraft | None = response.output_parsed
-            if draft is None:
-                raise ValueError("Structured output missing from provider response")
-
-            allowed_ids = set(item.evidence_id for item in bundle.items)
-            for obs in draft.observations:
-                if not obs.evidence_ids:
-                    raise ValueError("Observation has empty evidence citations")
-                for ev_id in obs.evidence_ids:
-                    if ev_id not in allowed_ids:
-                        raise ValueError(f"Unknown evidence citation '{ev_id}'")
-
-            all_evidence_ids = tuple(item.evidence_id for item in bundle.items)
+            allowed_ids = tuple(item.evidence_id for item in bundle.items)
+            draft = self.generate_draft(bundle.model_dump_json(), allowed_ids)
             return RcaReportV1(
                 schema_version="rca-report-v1",
                 message_id=uuid4(),
@@ -162,7 +168,7 @@ class OpenAiRcaGenerator:
                 observations=draft.observations,
                 uncertainty=draft.uncertainty,
                 next_checks=draft.next_checks,
-                evidence_ids=all_evidence_ids,
+                evidence_ids=allowed_ids,
                 evidence_bundle_sha256=bundle.bundle_sha256,
                 provider_model=self._model,
             )

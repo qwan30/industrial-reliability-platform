@@ -221,6 +221,15 @@ def create_app(
 
     @app.get("/readyz")
     def readyz() -> JSONResponse:
+        db_status = "UNKNOWN"
+        if store is not None:
+            try:
+                store.check_connection(timeout=1.0)
+                db_status = "HEALTHY"
+            except Exception as e:
+                logger.warning("Database readyz check failed: %s", e)
+                db_status = "UNAVAILABLE"
+
         if provenance_verifier is not None:
             ok, reason = provenance_verifier.verify()
             if not ok:
@@ -228,16 +237,38 @@ def create_app(
                     status_code=503,
                     content={
                         "success": False,
-                        "data": None,
+                        "data": {"status": "unhealthy", "dependencies": {"database": db_status}},
                         "error": {
                             "code": "CHAMPION_PROVENANCE_MISMATCH",
                             "message": reason or "Champion provenance verification failed",
                         },
                     },
                 )
+
+        if db_status == "UNAVAILABLE":
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "success": False,
+                    "data": {"status": "unhealthy", "dependencies": {"database": "UNAVAILABLE"}},
+                    "error": {
+                        "code": "DATABASE_UNAVAILABLE",
+                        "message": "Configured database is not reachable",
+                    },
+                },
+            )
+
+        data_payload: dict[str, Any] = {"status": "ready"}
+        if store is not None:
+            data_payload["dependencies"] = {"database": db_status}
+
         return JSONResponse(
             status_code=200,
-            content={"success": True, "data": {"status": "ready"}, "error": None},
+            content={
+                "success": True,
+                "data": data_payload,
+                "error": None,
+            },
         )
 
     @app.get("/v1/models/{model_version}/provenance")

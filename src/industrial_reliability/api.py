@@ -258,11 +258,15 @@ def create_app(
                 },
             )
 
+        data_payload: dict[str, Any] = {"status": "ready"}
+        if store is not None:
+            data_payload["dependencies"] = {"database": db_status}
+
         return JSONResponse(
             status_code=200,
             content={
                 "success": True,
-                "data": {"status": "ready", "dependencies": {"database": db_status}},
+                "data": data_payload,
                 "error": None,
             },
         )

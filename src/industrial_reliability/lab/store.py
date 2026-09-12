@@ -64,6 +64,10 @@ class CommandIdentityConflictError(LabStoreError):
     """Duplicate command ID with different payload hash."""
 
 
+def _as_uuid(val: Any) -> UUID:
+    return val if isinstance(val, UUID) else UUID(str(val))
+
+
 class LabStore:
     """PostgreSQL-backed store for virtual lab lifecycle."""
 
@@ -187,7 +191,7 @@ class LabStore:
             rows = cur.fetchall()
             return tuple(
                 {
-                    "lab_id": UUID(r["lab_id"]),
+                    "lab_id": _as_uuid(r["lab_id"]),
                     "name": r["name"],
                     "current_revision": r["current_revision"],
                     "created_at": r["created_at"].isoformat(),
@@ -337,16 +341,16 @@ class LabStore:
             definition = LabDefinition.model_validate(def_data)
 
             spec = RunSpec(
-                lab_id=UUID(row["lab_id"]),
+                lab_id=_as_uuid(row["lab_id"]),
                 lab_revision=row["lab_revision"],
                 seed=row["seed"],
                 speed=row["speed"],
                 max_ticks=row["max_ticks"],
-                baseline_id=UUID(row["baseline_id"]) if row["baseline_id"] else None,
+                baseline_id=_as_uuid(row["baseline_id"]) if row["baseline_id"] else None,
             )
 
             return SimulationRun(
-                run_id=UUID(row["run_id"]),
+                run_id=_as_uuid(row["run_id"]),
                 spec=spec,
                 status=row["status"],
                 definition=definition,
@@ -354,7 +358,7 @@ class LabStore:
                 scene_digest=row["scene_digest"],
                 profile_digest=row["profile_digest"],
                 sampling_digest=row["sampling_digest"],
-                baseline_id=UUID(row["baseline_id"]) if row["baseline_id"] else None,
+                baseline_id=_as_uuid(row["baseline_id"]) if row["baseline_id"] else None,
                 model_version=row["model_version"],
                 dt=0.05,
                 epoch="2000-01-01T00:00:00Z",
@@ -385,7 +389,7 @@ class LabStore:
                         f"Command {request.command_id} already exists with different payload"
                     )
                 return CommandReceipt(
-                    command_id=UUID(existing_cmd["command_id"]),
+                    command_id=_as_uuid(existing_cmd["command_id"]),
                     status=existing_cmd["status"],
                     accepted_sequence=existing_cmd["accepted_sequence"],
                     effective_tick=existing_cmd["effective_tick"],
@@ -506,7 +510,7 @@ class LabStore:
                 cmd_rows = cur.fetchall()
                 pending_cmds = tuple(
                     CommandReceipt(
-                        command_id=UUID(r["command_id"]),
+                        command_id=_as_uuid(r["command_id"]),
                         status=r["status"],
                         accepted_sequence=r["accepted_sequence"],
                         effective_tick=r["effective_tick"],
@@ -530,10 +534,10 @@ class LabStore:
                 alert_rows = cur.fetchall()
                 alerts = tuple(
                     LabAlert(
-                        alert_id=UUID(r["alert_id"]),
-                        run_id=UUID(r["run_id"]),
-                        asset_id=UUID(r["asset_id"]),
-                        sensor_id=UUID(r["sensor_id"]),
+                        alert_id=_as_uuid(r["alert_id"]),
+                        run_id=_as_uuid(r["run_id"]),
+                        asset_id=_as_uuid(r["asset_id"]),
+                        sensor_id=_as_uuid(r["sensor_id"]),
                         origin=r["origin"],
                         kind=r["kind"],
                         state=r["state"],
@@ -574,8 +578,8 @@ class LabStore:
             rows = cur.fetchall()
             return tuple(
                 LabEvent(
-                    event_id=UUID(r["event_id"]),
-                    run_id=UUID(r["run_id"]),
+                    event_id=_as_uuid(r["event_id"]),
+                    run_id=_as_uuid(r["run_id"]),
                     sequence=r["sequence"],
                     kind=r["kind"],
                     tick=r["tick"],

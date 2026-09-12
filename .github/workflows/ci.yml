@@ -30,12 +30,14 @@ jobs:
       - run: ruff format --check .
       - run: mypy src
       - run: pytest -m "not slow and not integration" --cov
+      - run: python scripts/export_lab_contracts.py --check
       - run: pip check
       - run: python -m build
       - name: Test and Build Operator Console
         working-directory: apps/operator-console
         run: |
           npm ci
+          node scripts/generate_lab_assets.mjs --check
           npm run test:coverage
           npm run build
           npx playwright install --with-deps chromium

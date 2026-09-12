@@ -1,0 +1,176 @@
+{
+  "schema_version": "lab-asset-manifest-v1",
+  "origin": "PROJECT_AUTHORED",
+  "license": "MIT",
+  "units": "meter",
+  "lod_distances_m": [
+    12,
+    24
+  ],
+  "assets": {
+    "compressor.glb": {
+      "filename": "compressor.glb",
+      "type": "COMPRESSOR",
+      "sha256": "b3db1cb99c5092318050f127433b78c40c226ebdba4106955b79ec2719b4f5ee",
+      "size_bytes": 47412,
+      "anchors": {
+        "port_OUT": [
+          0.8,
+          0.5,
+          0
+        ]
+      },
+      "node_names": [
+        "port_OUT",
+        "rotor",
+        "gauge"
+      ],
+      "lod_distances_m": [
+        12,
+        24
+      ]
+    },
+    "tank.glb": {
+      "filename": "tank.glb",
+      "type": "TANK",
+      "sha256": "9966e8b455d880983cbac35a29077cc9ebb46b37d20fb9773b1a42cfe2705422",
+      "size_bytes": 116104,
+      "anchors": {
+        "port_A": [
+          -0.45,
+          0.9,
+          0
+        ],
+        "port_B": [
+          0.45,
+          0.9,
+          0
+        ]
+      },
+      "node_names": [
+        "port_A",
+        "port_B",
+        "gauge"
+      ],
+      "lod_distances_m": [
+        12,
+        24
+      ]
+    },
+    "isolation-valve.glb": {
+      "filename": "isolation-valve.glb",
+      "type": "ISOLATION_VALVE",
+      "sha256": "aaf483af341294d3ed878d1c50e061121bf5b71802cb03f029eebf4658d40a87",
+      "size_bytes": 31704,
+      "anchors": {
+        "port_A": [
+          -0.2,
+          0.3,
+          0
+        ],
+        "port_B": [
+          0.2,
+          0.3,
+          0
+        ]
+      },
+      "node_names": [
+        "port_A",
+        "port_B",
+        "handle"
+      ],
+      "lod_distances_m": [
+        12,
+        24
+      ]
+    },
+    "control-valve.glb": {
+      "filename": "control-valve.glb",
+      "type": "CONTROL_VALVE",
+      "sha256": "e3906f13e7eff8503989b65c1a0a5626e5825fbf27616f1f9fa6226705f0f74f",
+      "size_bytes": 42796,
+      "anchors": {
+        "port_A": [
+          -0.2,
+          0.3,
+          0
+        ],
+        "port_B": [
+          0.2,
+          0.3,
+          0
+        ]
+      },
+      "node_names": [
+        "port_A",
+        "port_B",
+        "indicator"
+      ],
+      "lod_distances_m": [
+        12,
+        24
+      ]
+    },
+    "demand.glb": {
+      "filename": "demand.glb",
+      "type": "DEMAND",
+      "sha256": "109ec17d49ee52bf94d7ffa5f7037a98f4f923f4f7ea7fa368f15ff0688095d9",
+      "size_bytes": 19632,
+      "anchors": {
+        "port_IN": [
+          -0.4,
+          0.6,
+          0
+        ]
+      },
+      "node_names": [
+        "port_IN"
+      ],
+      "lod_distances_m": [
+        12,
+        24
+      ]
+    },
+    "pressure-sensor.glb": {
+      "filename": "pressure-sensor.glb",
+      "type": "PRESSURE_SENSOR",
+      "sha256": "88e1a3b7b8753ccce5e0e6d871d198d84caa37eb5558f5aa058fd00fa4c56ca5",
+      "size_bytes": 16696,
+      "anchors": {
+        "sensor_anchor": [
+          0,
+          0,
+          0
+        ]
+      },
+      "node_names": [
+        "sensor_anchor",
+        "needle"
+      ],
+      "lod_distances_m": [
+        12,
+        24
+      ]
+    },
+    "flow-sensor.glb": {
+      "filename": "flow-sensor.glb",
+      "type": "FLOW_SENSOR",
+      "sha256": "566a05ce6ec3c30954af5e320aa0ee58c29876e245a53a4ff0619fc469234ca4",
+      "size_bytes": 21692,
+      "anchors": {
+        "sensor_anchor": [
+          0,
+          0,
+          0
+        ]
+      },
+      "node_names": [
+        "sensor_anchor"
+      ],
+      "lod_distances_m": [
+        12,
+        24
+      ]
+    }
+  }
+}

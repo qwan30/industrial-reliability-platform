@@ -902,6 +902,15 @@ class RuntimeStore:
                 ),
             )
 
+    def console_cursor_exists(self, replay_session_id: str, event_id: str) -> bool:
+        """Check if an event ID exists in console_events for the given replay session."""
+        with psycopg.connect(self.db_url) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM console_events WHERE event_id = %s AND replay_session_id = %s;",
+                (event_id, str(replay_session_id)),
+            )
+            return cur.fetchone() is not None
+
     def events_after(
         self,
         replay_session_id: str,

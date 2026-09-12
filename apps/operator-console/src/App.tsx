@@ -7,7 +7,15 @@ import { ReplayControls } from './components/ReplayControls';
 import { DependencyHealth, StartReplayParams } from './types';
 import { useReplayStream } from './useReplayStream';
 
-export function App() {
+import { LabApp } from './lab/LabApp';
+export function App({ defaultView }: { defaultView?: 'LAB' | 'REPLAY' } = {}) {
+  const [viewMode, setViewMode] = useState<'LAB' | 'REPLAY'>(() => {
+    if (defaultView) return defaultView;
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
+      return 'REPLAY';
+    }
+    return 'LAB';
+  });
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [manualSessionInput, setManualSessionInput] = useState('');
   const [health, setHealth] = useState<DependencyHealth>({ api: true, database: true });
@@ -48,6 +56,32 @@ export function App() {
     }
   };
 
+  if (viewMode === 'LAB') {
+    return (
+      <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
+        <LabApp />
+        <button
+          type="button"
+          onClick={() => setViewMode('REPLAY')}
+          style={{
+            position: 'absolute',
+            bottom: '12px',
+            right: '12px',
+            zIndex: 100,
+            background: 'rgba(27, 31, 36, 0.85)',
+            color: '#8b949e',
+            border: '1px solid #30363d',
+            borderRadius: '6px',
+            padding: '4px 10px',
+            fontSize: '11px',
+            cursor: 'pointer',
+          }}
+        >
+          Switch to Historical Replay Console
+        </button>
+      </div>
+    );
+  }
   return (
     <div
       style={{

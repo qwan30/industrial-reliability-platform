@@ -1,0 +1,3070 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ActiveFault": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "LEAK",
+            "VALVE_STUCK",
+            "SENSOR_BIAS",
+            "SENSOR_DROPOUT",
+            "COMPRESSOR_UNAVAILABLE"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "port": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Port"
+        },
+        "target_id": {
+          "format": "uuid",
+          "title": "Target Id",
+          "type": "string"
+        },
+        "values": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Values",
+          "type": "object"
+        }
+      },
+      "required": [
+        "target_id",
+        "kind"
+      ],
+      "title": "ActiveFault",
+      "type": "object"
+    },
+    "Asset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "format": "uuid",
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "title": "Parameters",
+          "type": "object"
+        },
+        "position_m": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Position M",
+          "type": "array"
+        },
+        "rotation_y_rad": {
+          "title": "Rotation Y Rad",
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "COMPRESSOR",
+            "TANK",
+            "ISOLATION_VALVE",
+            "CONTROL_VALVE",
+            "DEMAND"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "asset_id",
+        "type",
+        "position_m",
+        "rotation_y_rad"
+      ],
+      "title": "Asset",
+      "type": "object"
+    },
+    "CommandReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_sequence": {
+          "minimum": 0,
+          "title": "Accepted Sequence",
+          "type": "integer"
+        },
+        "command_id": {
+          "format": "uuid",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "control_revision": {
+          "minimum": 0,
+          "title": "Control Revision",
+          "type": "integer"
+        },
+        "effective_tick": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effective Tick"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason Code"
+        },
+        "status": {
+          "enum": [
+            "ACCEPTED",
+            "APPLIED",
+            "REJECTED",
+            "FAILED"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "status",
+        "accepted_sequence",
+        "control_revision"
+      ],
+      "title": "CommandReceipt",
+      "type": "object"
+    },
+    "CommandRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "title": "Action",
+          "type": "string"
+        },
+        "command_id": {
+          "format": "uuid",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "expected_control_revision": {
+          "minimum": 0,
+          "title": "Expected Control Revision",
+          "type": "integer"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "target_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Id"
+        }
+      },
+      "required": [
+        "command_id",
+        "expected_control_revision",
+        "action"
+      ],
+      "title": "CommandRequest",
+      "type": "object"
+    },
+    "ControlState": {
+      "$defs": {
+        "ActiveFault": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "LEAK",
+                "VALVE_STUCK",
+                "SENSOR_BIAS",
+                "SENSOR_DROPOUT",
+                "COMPRESSOR_UNAVAILABLE"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "port": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Port"
+            },
+            "target_id": {
+              "format": "uuid",
+              "title": "Target Id",
+              "type": "string"
+            },
+            "values": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "title": "Values",
+              "type": "object"
+            }
+          },
+          "required": [
+            "target_id",
+            "kind"
+          ],
+          "title": "ActiveFault",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "active_faults": {
+          "items": {
+            "$ref": "#/$defs/ActiveFault"
+          },
+          "title": "Active Faults",
+          "type": "array"
+        },
+        "setpoints": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "type": "object"
+          },
+          "title": "Setpoints",
+          "type": "object"
+        }
+      },
+      "title": "ControlState",
+      "type": "object"
+    },
+    "EngineCheckpoint": {
+      "$defs": {
+        "ActiveFault": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "LEAK",
+                "VALVE_STUCK",
+                "SENSOR_BIAS",
+                "SENSOR_DROPOUT",
+                "COMPRESSOR_UNAVAILABLE"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "port": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Port"
+            },
+            "target_id": {
+              "format": "uuid",
+              "title": "Target Id",
+              "type": "string"
+            },
+            "values": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "title": "Values",
+              "type": "object"
+            }
+          },
+          "required": [
+            "target_id",
+            "kind"
+          ],
+          "title": "ActiveFault",
+          "type": "object"
+        },
+        "ControlState": {
+          "additionalProperties": false,
+          "properties": {
+            "active_faults": {
+              "items": {
+                "$ref": "#/$defs/ActiveFault"
+              },
+              "title": "Active Faults",
+              "type": "array"
+            },
+            "setpoints": {
+              "additionalProperties": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              "title": "Setpoints",
+              "type": "object"
+            }
+          },
+          "title": "ControlState",
+          "type": "object"
+        },
+        "PhysicalState": {
+          "additionalProperties": false,
+          "properties": {
+            "flows_kg_s": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "title": "Flows Kg S",
+              "type": "object"
+            },
+            "operating_modes": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "title": "Operating Modes",
+              "type": "object"
+            },
+            "pressures_pa": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "title": "Pressures Pa",
+              "type": "object"
+            },
+            "tick": {
+              "minimum": 0,
+              "title": "Tick",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "tick",
+            "pressures_pa",
+            "flows_kg_s"
+          ],
+          "title": "PhysicalState",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "accepted_scanned_sequence": {
+          "minimum": 0,
+          "title": "Accepted Scanned Sequence",
+          "type": "integer"
+        },
+        "controls": {
+          "$ref": "#/$defs/ControlState"
+        },
+        "definition_digest": {
+          "title": "Definition Digest",
+          "type": "string"
+        },
+        "pending_command_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Pending Command Ids",
+          "type": "array"
+        },
+        "physical": {
+          "$ref": "#/$defs/PhysicalState"
+        },
+        "profile_digest": {
+          "title": "Profile Digest",
+          "type": "string"
+        },
+        "sampling_digest": {
+          "title": "Sampling Digest",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "lab-checkpoint-v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tick",
+        "physical",
+        "controls",
+        "accepted_scanned_sequence",
+        "definition_digest",
+        "profile_digest",
+        "sampling_digest"
+      ],
+      "title": "EngineCheckpoint",
+      "type": "object"
+    },
+    "LabAlert": {
+      "additionalProperties": false,
+      "properties": {
+        "alert_id": {
+          "format": "uuid",
+          "title": "Alert Id",
+          "type": "string"
+        },
+        "asset_id": {
+          "format": "uuid",
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "evidence_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "first_tick": {
+          "minimum": 0,
+          "title": "First Tick",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "BELOW_LIMIT",
+            "ABOVE_LIMIT",
+            "MISSING",
+            "INVALID",
+            "ANOMALY"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "last_tick": {
+          "minimum": 0,
+          "title": "Last Tick",
+          "type": "integer"
+        },
+        "origin": {
+          "enum": [
+            "PROCESS_LIMIT",
+            "DATA_QUALITY",
+            "ML"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "resolved_tick": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Tick"
+        },
+        "run_id": {
+          "format": "uuid",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sensor_id": {
+          "format": "uuid",
+          "title": "Sensor Id",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "OPEN",
+            "RESOLVED"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "alert_id",
+        "run_id",
+        "asset_id",
+        "sensor_id",
+        "origin",
+        "kind",
+        "state",
+        "first_tick",
+        "last_tick"
+      ],
+      "title": "LabAlert",
+      "type": "object"
+    },
+    "LabDefinition": {
+      "$defs": {
+        "Asset": {
+          "additionalProperties": false,
+          "properties": {
+            "asset_id": {
+              "format": "uuid",
+              "title": "Asset Id",
+              "type": "string"
+            },
+            "parameters": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "title": "Parameters",
+              "type": "object"
+            },
+            "position_m": {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "title": "Position M",
+              "type": "array"
+            },
+            "rotation_y_rad": {
+              "title": "Rotation Y Rad",
+              "type": "number"
+            },
+            "type": {
+              "enum": [
+                "COMPRESSOR",
+                "TANK",
+                "ISOLATION_VALVE",
+                "CONTROL_VALVE",
+                "DEMAND"
+              ],
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "asset_id",
+            "type",
+            "position_m",
+            "rotation_y_rad"
+          ],
+          "title": "Asset",
+          "type": "object"
+        },
+        "Pipe": {
+          "additionalProperties": false,
+          "properties": {
+            "conductance_kg_s_pa": {
+              "default": 2e-07,
+              "maximum": 1e-06,
+              "minimum": 1e-12,
+              "title": "Conductance Kg S Pa",
+              "type": "number"
+            },
+            "from_port": {
+              "$ref": "#/$defs/PortRef"
+            },
+            "pipe_id": {
+              "format": "uuid",
+              "title": "Pipe Id",
+              "type": "string"
+            },
+            "to_port": {
+              "$ref": "#/$defs/PortRef"
+            },
+            "waypoints_m": {
+              "items": {
+                "maxItems": 3,
+                "minItems": 3,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "title": "Waypoints M",
+              "type": "array"
+            }
+          },
+          "required": [
+            "pipe_id",
+            "from_port",
+            "to_port"
+          ],
+          "title": "Pipe",
+          "type": "object"
+        },
+        "PortRef": {
+          "additionalProperties": false,
+          "properties": {
+            "asset_id": {
+              "format": "uuid",
+              "title": "Asset Id",
+              "type": "string"
+            },
+            "port": {
+              "enum": [
+                "A",
+                "B",
+                "OUT",
+                "IN"
+              ],
+              "title": "Port",
+              "type": "string"
+            }
+          },
+          "required": [
+            "asset_id",
+            "port"
+          ],
+          "title": "PortRef",
+          "type": "object"
+        },
+        "Sensor": {
+          "additionalProperties": false,
+          "properties": {
+            "alarm_high": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Alarm High"
+            },
+            "alarm_low": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Alarm Low"
+            },
+            "kind": {
+              "enum": [
+                "PRESSURE",
+                "FLOW"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "noise_std": {
+              "title": "Noise Std",
+              "type": "number"
+            },
+            "sensor_id": {
+              "format": "uuid",
+              "title": "Sensor Id",
+              "type": "string"
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PortRef"
+                },
+                {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              ],
+              "title": "Target"
+            }
+          },
+          "required": [
+            "sensor_id",
+            "kind",
+            "target",
+            "noise_std"
+          ],
+          "title": "Sensor",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/Asset"
+          },
+          "title": "Assets",
+          "type": "array"
+        },
+        "lab_id": {
+          "format": "uuid",
+          "title": "Lab Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "pipes": {
+          "items": {
+            "$ref": "#/$defs/Pipe"
+          },
+          "title": "Pipes",
+          "type": "array"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "scene_revision": {
+          "default": "scene-v1",
+          "title": "Scene Revision",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "lab-definition-v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sensors": {
+          "items": {
+            "$ref": "#/$defs/Sensor"
+          },
+          "title": "Sensors",
+          "type": "array"
+        }
+      },
+      "required": [
+        "lab_id",
+        "revision",
+        "name"
+      ],
+      "title": "LabDefinition",
+      "type": "object"
+    },
+    "LabEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "RUN_STATUS",
+            "COMMAND",
+            "OBSERVATION",
+            "ALERT"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "run_id": {
+          "format": "uuid",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "sequence",
+        "kind",
+        "tick",
+        "payload"
+      ],
+      "title": "LabEvent",
+      "type": "object"
+    },
+    "LabValidationError": {
+      "$defs": {
+        "PortRef": {
+          "additionalProperties": false,
+          "properties": {
+            "asset_id": {
+              "format": "uuid",
+              "title": "Asset Id",
+              "type": "string"
+            },
+            "port": {
+              "enum": [
+                "A",
+                "B",
+                "OUT",
+                "IN"
+              ],
+              "title": "Port",
+              "type": "string"
+            }
+          },
+          "required": [
+            "asset_id",
+            "port"
+          ],
+          "title": "PortRef",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "asset_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Asset Ids",
+          "type": "array"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "port_refs": {
+          "items": {
+            "$ref": "#/$defs/PortRef"
+          },
+          "title": "Port Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "LabValidationError",
+      "type": "object"
+    },
+    "LabValidationResult": {
+      "$defs": {
+        "LabValidationError": {
+          "additionalProperties": false,
+          "properties": {
+            "asset_ids": {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "title": "Asset Ids",
+              "type": "array"
+            },
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "port_refs": {
+              "items": {
+                "$ref": "#/$defs/PortRef"
+              },
+              "title": "Port Refs",
+              "type": "array"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "LabValidationError",
+          "type": "object"
+        },
+        "PortRef": {
+          "additionalProperties": false,
+          "properties": {
+            "asset_id": {
+              "format": "uuid",
+              "title": "Asset Id",
+              "type": "string"
+            },
+            "port": {
+              "enum": [
+                "A",
+                "B",
+                "OUT",
+                "IN"
+              ],
+              "title": "Port",
+              "type": "string"
+            }
+          },
+          "required": [
+            "asset_id",
+            "port"
+          ],
+          "title": "PortRef",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "definition_digest": {
+          "title": "Definition Digest",
+          "type": "string"
+        },
+        "errors": {
+          "items": {
+            "$ref": "#/$defs/LabValidationError"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "model_version": {
+          "default": "pneumatic-isothermal-v1",
+          "title": "Model Version",
+          "type": "string"
+        },
+        "run_eligible": {
+          "title": "Run Eligible",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "run_eligible",
+        "definition_digest"
+      ],
+      "title": "LabValidationResult",
+      "type": "object"
+    },
+    "Observation": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "format": "uuid",
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "profile_digest": {
+          "title": "Profile Digest",
+          "type": "string"
+        },
+        "quality": {
+          "enum": [
+            "GOOD",
+            "MISSING",
+            "INVALID"
+          ],
+          "title": "Quality",
+          "type": "string"
+        },
+        "run_id": {
+          "format": "uuid",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sensor_id": {
+          "format": "uuid",
+          "title": "Sensor Id",
+          "type": "string"
+        },
+        "source_mode": {
+          "const": "SIMULATION",
+          "default": "SIMULATION",
+          "title": "Source Mode",
+          "type": "string"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        },
+        "unit": {
+          "enum": [
+            "Pa",
+            "kg/s"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "run_id",
+        "asset_id",
+        "sensor_id",
+        "tick",
+        "unit",
+        "value",
+        "quality",
+        "profile_digest"
+      ],
+      "title": "Observation",
+      "type": "object"
+    },
+    "PhysicalState": {
+      "additionalProperties": false,
+      "properties": {
+        "flows_kg_s": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Flows Kg S",
+          "type": "object"
+        },
+        "operating_modes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Operating Modes",
+          "type": "object"
+        },
+        "pressures_pa": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Pressures Pa",
+          "type": "object"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tick",
+        "pressures_pa",
+        "flows_kg_s"
+      ],
+      "title": "PhysicalState",
+      "type": "object"
+    },
+    "Pipe": {
+      "$defs": {
+        "PortRef": {
+          "additionalProperties": false,
+          "properties": {
+            "asset_id": {
+              "format": "uuid",
+              "title": "Asset Id",
+              "type": "string"
+            },
+            "port": {
+              "enum": [
+                "A",
+                "B",
+                "OUT",
+                "IN"
+              ],
+              "title": "Port",
+              "type": "string"
+            }
+          },
+          "required": [
+            "asset_id",
+            "port"
+          ],
+          "title": "PortRef",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "conductance_kg_s_pa": {
+          "default": 2e-07,
+          "maximum": 1e-06,
+          "minimum": 1e-12,
+          "title": "Conductance Kg S Pa",
+          "type": "number"
+        },
+        "from_port": {
+          "$ref": "#/$defs/PortRef"
+        },
+        "pipe_id": {
+          "format": "uuid",
+          "title": "Pipe Id",
+          "type": "string"
+        },
+        "to_port": {
+          "$ref": "#/$defs/PortRef"
+        },
+        "waypoints_m": {
+          "items": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Waypoints M",
+          "type": "array"
+        }
+      },
+      "required": [
+        "pipe_id",
+        "from_port",
+        "to_port"
+      ],
+      "title": "Pipe",
+      "type": "object"
+    },
+    "PortRef": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "format": "uuid",
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "port": {
+          "enum": [
+            "A",
+            "B",
+            "OUT",
+            "IN"
+          ],
+          "title": "Port",
+          "type": "string"
+        }
+      },
+      "required": [
+        "asset_id",
+        "port"
+      ],
+      "title": "PortRef",
+      "type": "object"
+    },
+    "RunSnapshot": {
+      "$defs": {
+        "CommandReceipt": {
+          "additionalProperties": false,
+          "properties": {
+            "accepted_sequence": {
+              "minimum": 0,
+              "title": "Accepted Sequence",
+              "type": "integer"
+            },
+            "command_id": {
+              "format": "uuid",
+              "title": "Command Id",
+              "type": "string"
+            },
+            "control_revision": {
+              "minimum": 0,
+              "title": "Control Revision",
+              "type": "integer"
+            },
+            "effective_tick": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Effective Tick"
+            },
+            "reason_code": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reason Code"
+            },
+            "status": {
+              "enum": [
+                "ACCEPTED",
+                "APPLIED",
+                "REJECTED",
+                "FAILED"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command_id",
+            "status",
+            "accepted_sequence",
+            "control_revision"
+          ],
+          "title": "CommandReceipt",
+          "type": "object"
+        },
+        "LabAlert": {
+          "additionalProperties": false,
+          "properties": {
+            "alert_id": {
+              "format": "uuid",
+              "title": "Alert Id",
+              "type": "string"
+            },
+            "asset_id": {
+              "format": "uuid",
+              "title": "Asset Id",
+              "type": "string"
+            },
+            "evidence_ids": {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "first_tick": {
+              "minimum": 0,
+              "title": "First Tick",
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "BELOW_LIMIT",
+                "ABOVE_LIMIT",
+                "MISSING",
+                "INVALID",
+                "ANOMALY"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "last_tick": {
+              "minimum": 0,
+              "title": "Last Tick",
+              "type": "integer"
+            },
+            "origin": {
+              "enum": [
+                "PROCESS_LIMIT",
+                "DATA_QUALITY",
+                "ML"
+              ],
+              "title": "Origin",
+              "type": "string"
+            },
+            "resolved_tick": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Resolved Tick"
+            },
+            "run_id": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            },
+            "sensor_id": {
+              "format": "uuid",
+              "title": "Sensor Id",
+              "type": "string"
+            },
+            "state": {
+              "enum": [
+                "OPEN",
+                "RESOLVED"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          "required": [
+            "alert_id",
+            "run_id",
+            "asset_id",
+            "sensor_id",
+            "origin",
+            "kind",
+            "state",
+            "first_tick",
+            "last_tick"
+          ],
+          "title": "LabAlert",
+          "type": "object"
+        },
+        "Observation": {
+          "additionalProperties": false,
+          "properties": {
+            "asset_id": {
+              "format": "uuid",
+              "title": "Asset Id",
+              "type": "string"
+            },
+            "profile_digest": {
+              "title": "Profile Digest",
+              "type": "string"
+            },
+            "quality": {
+              "enum": [
+                "GOOD",
+                "MISSING",
+                "INVALID"
+              ],
+              "title": "Quality",
+              "type": "string"
+            },
+            "run_id": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            },
+            "sensor_id": {
+              "format": "uuid",
+              "title": "Sensor Id",
+              "type": "string"
+            },
+            "source_mode": {
+              "const": "SIMULATION",
+              "default": "SIMULATION",
+              "title": "Source Mode",
+              "type": "string"
+            },
+            "tick": {
+              "minimum": 0,
+              "title": "Tick",
+              "type": "integer"
+            },
+            "unit": {
+              "enum": [
+                "Pa",
+                "kg/s"
+              ],
+              "title": "Unit",
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Value"
+            }
+          },
+          "required": [
+            "run_id",
+            "asset_id",
+            "sensor_id",
+            "tick",
+            "unit",
+            "value",
+            "quality",
+            "profile_digest"
+          ],
+          "title": "Observation",
+          "type": "object"
+        },
+        "PhysicalState": {
+          "additionalProperties": false,
+          "properties": {
+            "flows_kg_s": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "title": "Flows Kg S",
+              "type": "object"
+            },
+            "operating_modes": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "title": "Operating Modes",
+              "type": "object"
+            },
+            "pressures_pa": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "title": "Pressures Pa",
+              "type": "object"
+            },
+            "tick": {
+              "minimum": 0,
+              "title": "Tick",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "tick",
+            "pressures_pa",
+            "flows_kg_s"
+          ],
+          "title": "PhysicalState",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "alerts": {
+          "items": {
+            "$ref": "#/$defs/LabAlert"
+          },
+          "title": "Alerts",
+          "type": "array"
+        },
+        "connection_status": {
+          "default": "CONNECTED",
+          "title": "Connection Status",
+          "type": "string"
+        },
+        "control_revision": {
+          "minimum": 0,
+          "title": "Control Revision",
+          "type": "integer"
+        },
+        "event_sequence": {
+          "minimum": 0,
+          "title": "Event Sequence",
+          "type": "integer"
+        },
+        "observations": {
+          "items": {
+            "$ref": "#/$defs/Observation"
+          },
+          "title": "Observations",
+          "type": "array"
+        },
+        "pending_commands": {
+          "items": {
+            "$ref": "#/$defs/CommandReceipt"
+          },
+          "title": "Pending Commands",
+          "type": "array"
+        },
+        "physical": {
+          "$ref": "#/$defs/PhysicalState"
+        },
+        "run_id": {
+          "format": "uuid",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "tick": {
+          "minimum": 0,
+          "title": "Tick",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "tick",
+        "status",
+        "control_revision",
+        "event_sequence",
+        "physical"
+      ],
+      "title": "RunSnapshot",
+      "type": "object"
+    },
+    "RunSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseline Id"
+        },
+        "lab_id": {
+          "format": "uuid",
+          "title": "Lab Id",
+          "type": "string"
+        },
+        "lab_revision": {
+          "minimum": 1,
+          "title": "Lab Revision",
+          "type": "integer"
+        },
+        "max_ticks": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Ticks"
+        },
+        "seed": {
+          "default": 42,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "speed": {
+          "default": 1,
+          "enum": [
+            1,
+            10,
+            100
+          ],
+          "title": "Speed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "lab_id",
+        "lab_revision"
+      ],
+      "title": "RunSpec",
+      "type": "object"
+    },
+    "SceneBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "anchors": {
+          "additionalProperties": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Anchors",
+          "type": "object"
+        },
+        "asset_digest": {
+          "title": "Asset Digest",
+          "type": "string"
+        },
+        "lod_distances_m": {
+          "default": [
+            12.0,
+            24.0
+          ],
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Lod Distances M",
+          "type": "array"
+        },
+        "revision": {
+          "title": "Revision",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "revision",
+        "asset_digest",
+        "type",
+        "anchors"
+      ],
+      "title": "SceneBinding",
+      "type": "object"
+    },
+    "Sensor": {
+      "$defs": {
+        "PortRef": {
+          "additionalProperties": false,
+          "properties": {
+            "asset_id": {
+              "format": "uuid",
+              "title": "Asset Id",
+              "type": "string"
+            },
+            "port": {
+              "enum": [
+                "A",
+                "B",
+                "OUT",
+                "IN"
+              ],
+              "title": "Port",
+              "type": "string"
+            }
+          },
+          "required": [
+            "asset_id",
+            "port"
+          ],
+          "title": "PortRef",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "alarm_high": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alarm High"
+        },
+        "alarm_low": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alarm Low"
+        },
+        "kind": {
+          "enum": [
+            "PRESSURE",
+            "FLOW"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "noise_std": {
+          "title": "Noise Std",
+          "type": "number"
+        },
+        "sensor_id": {
+          "format": "uuid",
+          "title": "Sensor Id",
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PortRef"
+            },
+            {
+              "format": "uuid",
+              "type": "string"
+            }
+          ],
+          "title": "Target"
+        }
+      },
+      "required": [
+        "sensor_id",
+        "kind",
+        "target",
+        "noise_std"
+      ],
+      "title": "Sensor",
+      "type": "object"
+    },
+    "SimulationRun": {
+      "$defs": {
+        "Asset": {
+          "additionalProperties": false,
+          "properties": {
+            "asset_id": {
+              "format": "uuid",
+              "title": "Asset Id",
+              "type": "string"
+            },
+            "parameters": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "title": "Parameters",
+              "type": "object"
+            },
+            "position_m": {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "title": "Position M",
+              "type": "array"
+            },
+            "rotation_y_rad": {
+              "title": "Rotation Y Rad",
+              "type": "number"
+            },
+            "type": {
+              "enum": [
+                "COMPRESSOR",
+                "TANK",
+                "ISOLATION_VALVE",
+                "CONTROL_VALVE",
+                "DEMAND"
+              ],
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "asset_id",
+            "type",
+            "position_m",
+            "rotation_y_rad"
+          ],
+          "title": "Asset",
+          "type": "object"
+        },
+        "LabDefinition": {
+          "additionalProperties": false,
+          "properties": {
+            "assets": {
+              "items": {
+                "$ref": "#/$defs/Asset"
+              },
+              "title": "Assets",
+              "type": "array"
+            },
+            "lab_id": {
+              "format": "uuid",
+              "title": "Lab Id",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "pipes": {
+              "items": {
+                "$ref": "#/$defs/Pipe"
+              },
+              "title": "Pipes",
+              "type": "array"
+            },
+            "revision": {
+              "minimum": 1,
+              "title": "Revision",
+              "type": "integer"
+            },
+            "scene_revision": {
+              "default": "scene-v1",
+              "title": "Scene Revision",
+              "type": "string"
+            },
+            "schema_version": {
+              "default": "lab-definition-v1",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "sensors": {
+              "items": {
+                "$ref": "#/$defs/Sensor"
+              },
+              "title": "Sensors",
+              "type": "array"
+            }
+          },
+          "required": [
+            "lab_id",
+            "revision",
+            "name"
+          ],
+          "title": "LabDefinition",
+          "type": "object"
+        },
+        "Pipe": {
+          "additionalProperties": false,
+          "properties": {
+            "conductance_kg_s_pa": {
+              "default": 2e-07,
+              "maximum": 1e-06,
+              "minimum": 1e-12,
+              "title": "Conductance Kg S Pa",
+              "type": "number"
+            },
+            "from_port": {
+              "$ref": "#/$defs/PortRef"
+            },
+            "pipe_id": {
+              "format": "uuid",
+              "title": "Pipe Id",
+              "type": "string"
+            },
+            "to_port": {
+              "$ref": "#/$defs/PortRef"
+            },
+            "waypoints_m": {
+              "items": {
+                "maxItems": 3,
+                "minItems": 3,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "title": "Waypoints M",
+              "type": "array"
+            }
+          },
+          "required": [
+            "pipe_id",
+            "from_port",
+            "to_port"
+          ],
+          "title": "Pipe",
+          "type": "object"
+        },
+        "PortRef": {
+          "additionalProperties": false,
+          "properties": {
+            "asset_id": {
+              "format": "uuid",
+              "title": "Asset Id",
+              "type": "string"
+            },
+            "port": {
+              "enum": [
+                "A",
+                "B",
+                "OUT",
+                "IN"
+              ],
+              "title": "Port",
+              "type": "string"
+            }
+          },
+          "required": [
+            "asset_id",
+            "port"
+          ],
+          "title": "PortRef",
+          "type": "object"
+        },
+        "RunSpec": {
+          "additionalProperties": false,
+          "properties": {
+            "baseline_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Baseline Id"
+            },
+            "lab_id": {
+              "format": "uuid",
+              "title": "Lab Id",
+              "type": "string"
+            },
+            "lab_revision": {
+              "minimum": 1,
+              "title": "Lab Revision",
+              "type": "integer"
+            },
+            "max_ticks": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Ticks"
+            },
+            "seed": {
+              "default": 42,
+              "title": "Seed",
+              "type": "integer"
+            },
+            "speed": {
+              "default": 1,
+              "enum": [
+                1,
+                10,
+                100
+              ],
+              "title": "Speed",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "lab_id",
+            "lab_revision"
+          ],
+          "title": "RunSpec",
+          "type": "object"
+        },
+        "Sensor": {
+          "additionalProperties": false,
+          "properties": {
+            "alarm_high": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Alarm High"
+            },
+            "alarm_low": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Alarm Low"
+            },
+            "kind": {
+              "enum": [
+                "PRESSURE",
+                "FLOW"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "noise_std": {
+              "title": "Noise Std",
+              "type": "number"
+            },
+            "sensor_id": {
+              "format": "uuid",
+              "title": "Sensor Id",
+              "type": "string"
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PortRef"
+                },
+                {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              ],
+              "title": "Target"
+            }
+          },
+          "required": [
+            "sensor_id",
+            "kind",
+            "target",
+            "noise_std"
+          ],
+          "title": "Sensor",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "baseline_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseline Id"
+        },
+        "control_revision": {
+          "default": 0,
+          "title": "Control Revision",
+          "type": "integer"
+        },
+        "definition": {
+          "$ref": "#/$defs/LabDefinition"
+        },
+        "definition_digest": {
+          "title": "Definition Digest",
+          "type": "string"
+        },
+        "dt": {
+          "default": 0.05,
+          "title": "Dt",
+          "type": "number"
+        },
+        "epoch": {
+          "default": "2000-01-01T00:00:00Z",
+          "title": "Epoch",
+          "type": "string"
+        },
+        "event_sequence": {
+          "default": 0,
+          "title": "Event Sequence",
+          "type": "integer"
+        },
+        "model_version": {
+          "default": "pneumatic-isothermal-v1",
+          "title": "Model Version",
+          "type": "string"
+        },
+        "profile_digest": {
+          "title": "Profile Digest",
+          "type": "string"
+        },
+        "profile_id": {
+          "default": "lab-sensor-robust-v1",
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "run_id": {
+          "format": "uuid",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sampling_digest": {
+          "title": "Sampling Digest",
+          "type": "string"
+        },
+        "scene_digest": {
+          "title": "Scene Digest",
+          "type": "string"
+        },
+        "spec": {
+          "$ref": "#/$defs/RunSpec"
+        },
+        "status": {
+          "enum": [
+            "CREATED",
+            "RUNNING",
+            "PAUSED",
+            "STOPPED",
+            "COMPLETED",
+            "FAILED"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "tick": {
+          "default": 0,
+          "title": "Tick",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "spec",
+        "status",
+        "definition",
+        "definition_digest",
+        "scene_digest",
+        "profile_digest",
+        "sampling_digest"
+      ],
+      "title": "SimulationRun",
+      "type": "object"
+    }
+  },
+  "fixtures": {
+    "catalog": {
+      "assets": {
+        "COMPRESSOR": {
+          "parameters": {
+            "enabled": true,
+            "initial_pressure_pa": 400000.0,
+            "load": 1.0,
+            "p_max_pa": 900000.0,
+            "q_nom_kg_s": 0.02
+          },
+          "ports": [
+            "OUT"
+          ],
+          "type": "COMPRESSOR"
+        },
+        "CONTROL_VALVE": {
+          "parameters": {
+            "conductance_kg_s_pa": 2e-07,
+            "initial_pressure_pa": 400000.0,
+            "opening": 1.0
+          },
+          "ports": [
+            "A",
+            "B"
+          ],
+          "type": "CONTROL_VALVE"
+        },
+        "DEMAND": {
+          "parameters": {
+            "conductance_kg_s_pa": 1e-08,
+            "initial_pressure_pa": 400000.0,
+            "load_factor": 1.0
+          },
+          "ports": [
+            "IN"
+          ],
+          "type": "DEMAND"
+        },
+        "ISOLATION_VALVE": {
+          "parameters": {
+            "conductance_kg_s_pa": 2e-07,
+            "initial_pressure_pa": 400000.0,
+            "opening": 1.0
+          },
+          "ports": [
+            "A",
+            "B"
+          ],
+          "type": "ISOLATION_VALVE"
+        },
+        "TANK": {
+          "parameters": {
+            "initial_pressure_pa": 400000.0,
+            "volume_m3": 0.5
+          },
+          "ports": [
+            "A",
+            "B"
+          ],
+          "type": "TANK"
+        }
+      },
+      "catalog_version": "lab-catalog-v1",
+      "supported_models": [
+        "pneumatic-isothermal-v1"
+      ]
+    },
+    "reference_lab": {
+      "assets": [
+        {
+          "asset_id": "03efb5aa-a324-5306-ad62-e35b3242397b",
+          "parameters": {
+            "enabled": true,
+            "initial_pressure_pa": 400000.0,
+            "load": 1.0,
+            "p_max_pa": 900000.0,
+            "q_nom_kg_s": 0.02
+          },
+          "position_m": [
+            -8.0,
+            0.0,
+            -4.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "COMPRESSOR"
+        },
+        {
+          "asset_id": "8a7d2406-7b08-5ef9-89ee-f6e887c93520",
+          "parameters": {
+            "initial_pressure_pa": 400000.0,
+            "volume_m3": 0.5
+          },
+          "position_m": [
+            -4.0,
+            0.0,
+            -4.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "TANK"
+        },
+        {
+          "asset_id": "b3531de0-f1a3-5e30-9f50-bb553dfe0859",
+          "parameters": {
+            "conductance_kg_s_pa": 2e-07,
+            "initial_pressure_pa": 400000.0,
+            "opening": 1.0
+          },
+          "position_m": [
+            0.0,
+            0.0,
+            -4.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "ISOLATION_VALVE"
+        },
+        {
+          "asset_id": "546a7c3c-ece1-5598-955f-9c9ae27233dc",
+          "parameters": {
+            "conductance_kg_s_pa": 2e-07,
+            "initial_pressure_pa": 400000.0,
+            "opening": 1.0
+          },
+          "position_m": [
+            3.0,
+            0.0,
+            -4.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "CONTROL_VALVE"
+        },
+        {
+          "asset_id": "6da4c046-730b-5de2-85d7-e2088fc868ca",
+          "parameters": {
+            "conductance_kg_s_pa": 1e-08,
+            "initial_pressure_pa": 400000.0,
+            "load_factor": 1.0
+          },
+          "position_m": [
+            7.0,
+            0.0,
+            -4.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "DEMAND"
+        },
+        {
+          "asset_id": "e3654507-bd63-5ffe-a703-191f657b972e",
+          "parameters": {
+            "enabled": true,
+            "initial_pressure_pa": 400000.0,
+            "load": 1.0,
+            "p_max_pa": 900000.0,
+            "q_nom_kg_s": 0.02
+          },
+          "position_m": [
+            -8.0,
+            0.0,
+            -1.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "COMPRESSOR"
+        },
+        {
+          "asset_id": "615daaa1-72d7-5eaf-8c44-80514d636b7d",
+          "parameters": {
+            "initial_pressure_pa": 400000.0,
+            "volume_m3": 0.5
+          },
+          "position_m": [
+            -4.0,
+            0.0,
+            -1.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "TANK"
+        },
+        {
+          "asset_id": "6f83191f-6071-560e-827c-eba21038aa1a",
+          "parameters": {
+            "conductance_kg_s_pa": 2e-07,
+            "initial_pressure_pa": 400000.0,
+            "opening": 1.0
+          },
+          "position_m": [
+            0.0,
+            0.0,
+            -1.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "ISOLATION_VALVE"
+        },
+        {
+          "asset_id": "0b4304d6-6592-5914-9d1d-eb30d3913eab",
+          "parameters": {
+            "conductance_kg_s_pa": 2e-07,
+            "initial_pressure_pa": 400000.0,
+            "opening": 1.0
+          },
+          "position_m": [
+            3.0,
+            0.0,
+            -1.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "CONTROL_VALVE"
+        },
+        {
+          "asset_id": "93a3636d-234f-53c4-9d52-b1177014d704",
+          "parameters": {
+            "conductance_kg_s_pa": 1e-08,
+            "initial_pressure_pa": 400000.0,
+            "load_factor": 1.0
+          },
+          "position_m": [
+            7.0,
+            0.0,
+            -1.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "DEMAND"
+        },
+        {
+          "asset_id": "024d977a-caf9-5f5d-b25d-97aaa4c3eb88",
+          "parameters": {
+            "enabled": true,
+            "initial_pressure_pa": 400000.0,
+            "load": 1.0,
+            "p_max_pa": 900000.0,
+            "q_nom_kg_s": 0.02
+          },
+          "position_m": [
+            -8.0,
+            0.0,
+            1.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "COMPRESSOR"
+        },
+        {
+          "asset_id": "b7cf1569-ab4b-5758-8074-4beb369c759a",
+          "parameters": {
+            "initial_pressure_pa": 400000.0,
+            "volume_m3": 0.5
+          },
+          "position_m": [
+            -4.0,
+            0.0,
+            1.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "TANK"
+        },
+        {
+          "asset_id": "f9aa05c6-08d1-5402-8f84-b7017dae2928",
+          "parameters": {
+            "conductance_kg_s_pa": 2e-07,
+            "initial_pressure_pa": 400000.0,
+            "opening": 1.0
+          },
+          "position_m": [
+            0.0,
+            0.0,
+            1.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "ISOLATION_VALVE"
+        },
+        {
+          "asset_id": "9d0bea84-5aa2-5216-8240-83d44b6c5a43",
+          "parameters": {
+            "conductance_kg_s_pa": 2e-07,
+            "initial_pressure_pa": 400000.0,
+            "opening": 1.0
+          },
+          "position_m": [
+            3.0,
+            0.0,
+            1.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "CONTROL_VALVE"
+        },
+        {
+          "asset_id": "9c3ca765-0acc-53cf-aff5-50bcf9b8ac75",
+          "parameters": {
+            "conductance_kg_s_pa": 1e-08,
+            "initial_pressure_pa": 400000.0,
+            "load_factor": 1.0
+          },
+          "position_m": [
+            7.0,
+            0.0,
+            1.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "DEMAND"
+        },
+        {
+          "asset_id": "5787ba41-48a0-5983-91f8-d49e576025da",
+          "parameters": {
+            "enabled": true,
+            "initial_pressure_pa": 400000.0,
+            "load": 1.0,
+            "p_max_pa": 900000.0,
+            "q_nom_kg_s": 0.02
+          },
+          "position_m": [
+            -8.0,
+            0.0,
+            4.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "COMPRESSOR"
+        },
+        {
+          "asset_id": "2a7488e0-98f4-59fd-be9d-d0ea5669a123",
+          "parameters": {
+            "initial_pressure_pa": 400000.0,
+            "volume_m3": 0.5
+          },
+          "position_m": [
+            -4.0,
+            0.0,
+            4.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "TANK"
+        },
+        {
+          "asset_id": "ecbd1b7b-5837-553d-9000-3e11b51aa01d",
+          "parameters": {
+            "conductance_kg_s_pa": 2e-07,
+            "initial_pressure_pa": 400000.0,
+            "opening": 1.0
+          },
+          "position_m": [
+            0.0,
+            0.0,
+            4.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "ISOLATION_VALVE"
+        },
+        {
+          "asset_id": "73867929-1f43-5421-96e1-9656718e3a3d",
+          "parameters": {
+            "conductance_kg_s_pa": 2e-07,
+            "initial_pressure_pa": 400000.0,
+            "opening": 1.0
+          },
+          "position_m": [
+            3.0,
+            0.0,
+            4.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "CONTROL_VALVE"
+        },
+        {
+          "asset_id": "f615e56e-f9bc-5a1d-88a4-f5cff663c244",
+          "parameters": {
+            "conductance_kg_s_pa": 1e-08,
+            "initial_pressure_pa": 400000.0,
+            "load_factor": 1.0
+          },
+          "position_m": [
+            7.0,
+            0.0,
+            4.5
+          ],
+          "rotation_y_rad": 0.0,
+          "type": "DEMAND"
+        }
+      ],
+      "lab_id": "61e4c91e-a94d-53bb-bdab-baf4369c8e7b",
+      "name": "Reference Pneumatic Lab",
+      "pipes": [
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "03efb5aa-a324-5306-ad62-e35b3242397b",
+            "port": "OUT"
+          },
+          "pipe_id": "b5f43066-9fd6-5a64-87ce-fcc23e671646",
+          "to_port": {
+            "asset_id": "8a7d2406-7b08-5ef9-89ee-f6e887c93520",
+            "port": "A"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "8a7d2406-7b08-5ef9-89ee-f6e887c93520",
+            "port": "B"
+          },
+          "pipe_id": "e6a3c4c3-891b-55bf-bc4c-9842cf1bd6ac",
+          "to_port": {
+            "asset_id": "b3531de0-f1a3-5e30-9f50-bb553dfe0859",
+            "port": "A"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "b3531de0-f1a3-5e30-9f50-bb553dfe0859",
+            "port": "B"
+          },
+          "pipe_id": "83a01f4c-c701-52c5-a585-9519f92705b8",
+          "to_port": {
+            "asset_id": "546a7c3c-ece1-5598-955f-9c9ae27233dc",
+            "port": "A"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "546a7c3c-ece1-5598-955f-9c9ae27233dc",
+            "port": "B"
+          },
+          "pipe_id": "869473c0-eace-5c49-8a18-f4724da777f5",
+          "to_port": {
+            "asset_id": "6da4c046-730b-5de2-85d7-e2088fc868ca",
+            "port": "IN"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "e3654507-bd63-5ffe-a703-191f657b972e",
+            "port": "OUT"
+          },
+          "pipe_id": "d83defdd-5bef-514b-a9d8-64eee4b9e0bf",
+          "to_port": {
+            "asset_id": "615daaa1-72d7-5eaf-8c44-80514d636b7d",
+            "port": "A"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "615daaa1-72d7-5eaf-8c44-80514d636b7d",
+            "port": "B"
+          },
+          "pipe_id": "b36c2846-fbc4-5a03-87b4-a77179b5fbd1",
+          "to_port": {
+            "asset_id": "6f83191f-6071-560e-827c-eba21038aa1a",
+            "port": "A"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "6f83191f-6071-560e-827c-eba21038aa1a",
+            "port": "B"
+          },
+          "pipe_id": "6d04ffef-5a82-5b83-b994-6d673ed09938",
+          "to_port": {
+            "asset_id": "0b4304d6-6592-5914-9d1d-eb30d3913eab",
+            "port": "A"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "0b4304d6-6592-5914-9d1d-eb30d3913eab",
+            "port": "B"
+          },
+          "pipe_id": "fe7d33ba-4b37-5492-8516-49cbde90c7ae",
+          "to_port": {
+            "asset_id": "93a3636d-234f-53c4-9d52-b1177014d704",
+            "port": "IN"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "024d977a-caf9-5f5d-b25d-97aaa4c3eb88",
+            "port": "OUT"
+          },
+          "pipe_id": "1cf1635c-6406-5b66-9314-1597f8645ef5",
+          "to_port": {
+            "asset_id": "b7cf1569-ab4b-5758-8074-4beb369c759a",
+            "port": "A"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "b7cf1569-ab4b-5758-8074-4beb369c759a",
+            "port": "B"
+          },
+          "pipe_id": "9b97b70e-e508-5f66-9528-cfae5a95a95b",
+          "to_port": {
+            "asset_id": "f9aa05c6-08d1-5402-8f84-b7017dae2928",
+            "port": "A"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "f9aa05c6-08d1-5402-8f84-b7017dae2928",
+            "port": "B"
+          },
+          "pipe_id": "a03bc10b-44f0-505b-9b43-8a808d0b3763",
+          "to_port": {
+            "asset_id": "9d0bea84-5aa2-5216-8240-83d44b6c5a43",
+            "port": "A"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "9d0bea84-5aa2-5216-8240-83d44b6c5a43",
+            "port": "B"
+          },
+          "pipe_id": "768e3e94-fef4-5b4b-b47a-db07b6deda08",
+          "to_port": {
+            "asset_id": "9c3ca765-0acc-53cf-aff5-50bcf9b8ac75",
+            "port": "IN"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "5787ba41-48a0-5983-91f8-d49e576025da",
+            "port": "OUT"
+          },
+          "pipe_id": "edcafb46-1b98-59de-be84-6449f2c6dea3",
+          "to_port": {
+            "asset_id": "2a7488e0-98f4-59fd-be9d-d0ea5669a123",
+            "port": "A"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "2a7488e0-98f4-59fd-be9d-d0ea5669a123",
+            "port": "B"
+          },
+          "pipe_id": "06ab148c-35de-5adc-9029-1444128fdda7",
+          "to_port": {
+            "asset_id": "ecbd1b7b-5837-553d-9000-3e11b51aa01d",
+            "port": "A"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "ecbd1b7b-5837-553d-9000-3e11b51aa01d",
+            "port": "B"
+          },
+          "pipe_id": "6c7e54c9-ddcb-588b-971c-0b1bc3665205",
+          "to_port": {
+            "asset_id": "73867929-1f43-5421-96e1-9656718e3a3d",
+            "port": "A"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "73867929-1f43-5421-96e1-9656718e3a3d",
+            "port": "B"
+          },
+          "pipe_id": "45f3898f-e631-5b06-9bf8-97c6fe3262be",
+          "to_port": {
+            "asset_id": "f615e56e-f9bc-5a1d-88a4-f5cff663c244",
+            "port": "IN"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "8a7d2406-7b08-5ef9-89ee-f6e887c93520",
+            "port": "B"
+          },
+          "pipe_id": "7f32f2c7-6ad2-5dd1-88ee-731144daeb01",
+          "to_port": {
+            "asset_id": "615daaa1-72d7-5eaf-8c44-80514d636b7d",
+            "port": "B"
+          },
+          "waypoints_m": []
+        },
+        {
+          "conductance_kg_s_pa": 2e-07,
+          "from_port": {
+            "asset_id": "b7cf1569-ab4b-5758-8074-4beb369c759a",
+            "port": "B"
+          },
+          "pipe_id": "5543e5c4-1ef6-56b0-a664-a94c69c2bacb",
+          "to_port": {
+            "asset_id": "2a7488e0-98f4-59fd-be9d-d0ea5669a123",
+            "port": "B"
+          },
+          "waypoints_m": []
+        }
+      ],
+      "revision": 1,
+      "scene_revision": "scene-v1",
+      "schema_version": "lab-definition-v1",
+      "sensors": [
+        {
+          "alarm_high": 850000.0,
+          "alarm_low": 250000.0,
+          "kind": "PRESSURE",
+          "noise_std": 100.0,
+          "sensor_id": "db00bcee-48c2-5a47-b5a1-946158f8c96f",
+          "target": {
+            "asset_id": "03efb5aa-a324-5306-ad62-e35b3242397b",
+            "port": "OUT"
+          }
+        },
+        {
+          "alarm_high": 850000.0,
+          "alarm_low": 250000.0,
+          "kind": "PRESSURE",
+          "noise_std": 100.0,
+          "sensor_id": "63686cda-c8bf-5226-935c-b70bf610272f",
+          "target": {
+            "asset_id": "8a7d2406-7b08-5ef9-89ee-f6e887c93520",
+            "port": "B"
+          }
+        },
+        {
+          "alarm_high": 850000.0,
+          "alarm_low": 250000.0,
+          "kind": "PRESSURE",
+          "noise_std": 100.0,
+          "sensor_id": "049f0152-137a-517e-b5ba-0278d6a85739",
+          "target": {
+            "asset_id": "6da4c046-730b-5de2-85d7-e2088fc868ca",
+            "port": "IN"
+          }
+        },
+        {
+          "alarm_high": 0.05,
+          "alarm_low": -0.05,
+          "kind": "FLOW",
+          "noise_std": 1e-05,
+          "sensor_id": "6bc45b34-375d-5d5c-918f-b8e6363bd34e",
+          "target": "b5f43066-9fd6-5a64-87ce-fcc23e671646"
+        },
+        {
+          "alarm_high": 0.05,
+          "alarm_low": -0.05,
+          "kind": "FLOW",
+          "noise_std": 1e-05,
+          "sensor_id": "e0d77d16-334a-5f13-a623-6867725132c1",
+          "target": "869473c0-eace-5c49-8a18-f4724da777f5"
+        },
+        {
+          "alarm_high": 850000.0,
+          "alarm_low": 250000.0,
+          "kind": "PRESSURE",
+          "noise_std": 100.0,
+          "sensor_id": "eeaa4cee-d96a-5be2-bd1f-f4caf6147b47",
+          "target": {
+            "asset_id": "e3654507-bd63-5ffe-a703-191f657b972e",
+            "port": "OUT"
+          }
+        },
+        {
+          "alarm_high": 850000.0,
+          "alarm_low": 250000.0,
+          "kind": "PRESSURE",
+          "noise_std": 100.0,
+          "sensor_id": "e04e05fe-2a57-517b-9cf7-3317fd258f4f",
+          "target": {
+            "asset_id": "615daaa1-72d7-5eaf-8c44-80514d636b7d",
+            "port": "B"
+          }
+        },
+        {
+          "alarm_high": 850000.0,
+          "alarm_low": 250000.0,
+          "kind": "PRESSURE",
+          "noise_std": 100.0,
+          "sensor_id": "bd596253-fa64-5eba-9676-4d0a57a8c7d6",
+          "target": {
+            "asset_id": "93a3636d-234f-53c4-9d52-b1177014d704",
+            "port": "IN"
+          }
+        },
+        {
+          "alarm_high": 0.05,
+          "alarm_low": -0.05,
+          "kind": "FLOW",
+          "noise_std": 1e-05,
+          "sensor_id": "70cf4b2f-29e6-5281-b389-60c2f56f1e28",
+          "target": "d83defdd-5bef-514b-a9d8-64eee4b9e0bf"
+        },
+        {
+          "alarm_high": 0.05,
+          "alarm_low": -0.05,
+          "kind": "FLOW",
+          "noise_std": 1e-05,
+          "sensor_id": "72e606f7-15ae-5b23-9095-80b7fab69523",
+          "target": "fe7d33ba-4b37-5492-8516-49cbde90c7ae"
+        },
+        {
+          "alarm_high": 850000.0,
+          "alarm_low": 250000.0,
+          "kind": "PRESSURE",
+          "noise_std": 100.0,
+          "sensor_id": "ab876b9b-3a1a-55d4-bec3-66386797e879",
+          "target": {
+            "asset_id": "024d977a-caf9-5f5d-b25d-97aaa4c3eb88",
+            "port": "OUT"
+          }
+        },
+        {
+          "alarm_high": 850000.0,
+          "alarm_low": 250000.0,
+          "kind": "PRESSURE",
+          "noise_std": 100.0,
+          "sensor_id": "b069b5c0-dbb0-55de-99b1-a017d3870873",
+          "target": {
+            "asset_id": "b7cf1569-ab4b-5758-8074-4beb369c759a",
+            "port": "B"
+          }
+        },
+        {
+          "alarm_high": 850000.0,
+          "alarm_low": 250000.0,
+          "kind": "PRESSURE",
+          "noise_std": 100.0,
+          "sensor_id": "f842e8b0-d25b-5ec9-8c6b-f7cc1b872d0e",
+          "target": {
+            "asset_id": "9c3ca765-0acc-53cf-aff5-50bcf9b8ac75",
+            "port": "IN"
+          }
+        },
+        {
+          "alarm_high": 0.05,
+          "alarm_low": -0.05,
+          "kind": "FLOW",
+          "noise_std": 1e-05,
+          "sensor_id": "c4e3dcd6-be62-596f-80d3-9d3b21890811",
+          "target": "1cf1635c-6406-5b66-9314-1597f8645ef5"
+        },
+        {
+          "alarm_high": 0.05,
+          "alarm_low": -0.05,
+          "kind": "FLOW",
+          "noise_std": 1e-05,
+          "sensor_id": "529fbade-871e-5898-ab38-e7ca179d93d1",
+          "target": "768e3e94-fef4-5b4b-b47a-db07b6deda08"
+        },
+        {
+          "alarm_high": 850000.0,
+          "alarm_low": 250000.0,
+          "kind": "PRESSURE",
+          "noise_std": 100.0,
+          "sensor_id": "381f36b9-139b-5c1a-a8c6-910ce996b776",
+          "target": {
+            "asset_id": "5787ba41-48a0-5983-91f8-d49e576025da",
+            "port": "OUT"
+          }
+        },
+        {
+          "alarm_high": 850000.0,
+          "alarm_low": 250000.0,
+          "kind": "PRESSURE",
+          "noise_std": 100.0,
+          "sensor_id": "225e2bd3-58e4-5a2f-bf0a-2c1c9bd5f351",
+          "target": {
+            "asset_id": "2a7488e0-98f4-59fd-be9d-d0ea5669a123",
+            "port": "B"
+          }
+        },
+        {
+          "alarm_high": 850000.0,
+          "alarm_low": 250000.0,
+          "kind": "PRESSURE",
+          "noise_std": 100.0,
+          "sensor_id": "c8bf0e36-82d7-5572-9e23-27fdde33f68f",
+          "target": {
+            "asset_id": "f615e56e-f9bc-5a1d-88a4-f5cff663c244",
+            "port": "IN"
+          }
+        },
+        {
+          "alarm_high": 0.05,
+          "alarm_low": -0.05,
+          "kind": "FLOW",
+          "noise_std": 1e-05,
+          "sensor_id": "082ac6c8-8bb6-581b-8752-a455d2b204f4",
+          "target": "edcafb46-1b98-59de-be84-6449f2c6dea3"
+        },
+        {
+          "alarm_high": 0.05,
+          "alarm_low": -0.05,
+          "kind": "FLOW",
+          "noise_std": 1e-05,
+          "sensor_id": "20bc46b6-c2f4-5386-9a55-725fe27463ca",
+          "target": "45f3898f-e631-5b06-9bf8-97c6fe3262be"
+        }
+      ]
+    }
+  },
+  "title": "Industrial Reliability Virtual Lab Schema Bundle",
+  "version": "lab-contracts-v1"
+}
